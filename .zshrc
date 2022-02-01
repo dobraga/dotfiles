@@ -104,6 +104,7 @@ source $ZSH/oh-my-zsh.sh
 # alias ohmyzsh="mate ~/.oh-my-zsh"
 
 export PATH="$HOME/.pyenv/bin:/$HOME/.poetry/bin:$PATH"
+export STARSHIP_CONFIG="$HOME/dotfiles/starship.toml"
 eval "$(pyenv init -)"
 eval "$(pyenv init --path)"
 eval "$(pyenv virtualenv-init -)"
