@@ -109,3 +109,6 @@ eval "$(pyenv init -)"
 eval "$(pyenv init --path)"
 eval "$(pyenv virtualenv-init -)"
 eval "$(starship init zsh)"
+cd
+
+export PATH="$HOME/.poetry/bin:$PATH"
