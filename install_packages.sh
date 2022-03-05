@@ -21,6 +21,5 @@ cargo install bat exa ytop
 sh -c "$(curl -fsSL https://pyenv.run)"
 sh -c "$(curl -fsSL https://starship.rs/install.sh)"
 curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python3 -
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/lunarvim/lunarvim/master/utils/installer/install.sh)"
+bash <(curl -s https://raw.githubusercontent.com/lunarvim/lunarvim/master/utils/installer/install.sh)
 sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
-
