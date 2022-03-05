@@ -4,10 +4,11 @@ sudo add-apt-repository "deb https://cloud.r-project.org/bin/linux/ubuntu $(lsb_
 sudo add-apt-repository ppa:neovim-ppa/unstable
 sudo add-apt-repository ppa:gnome-terminator
 curl -fsSL https://deb.nodesource.com/setup_17.x | sudo -E bash -
+curl -fsSL https://dl.yarnpkg.com/debian/pubkey.gpg | sudo apt-key add -
 
 sudo apt-get update
 
-sudo apt install -y zsh locales-all r-base libcurl4-openssl-dev libsodium-dev cargo ripgrep neovim fzf nodejs terminator
+sudo apt install -y zsh locales-all r-base libcurl4-openssl-dev libsodium-dev cargo ripgrep neovim fzf nodejs terminator yarn
 
 # Instala fontes
 wget https://github.com/ryanoasis/nerd-fonts/releases/download/v2.1.0/DroidSansMono.zip
