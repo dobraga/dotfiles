@@ -4,6 +4,9 @@ lvim.colorscheme = "onedarker"
 
 lvim.leader = "space"
 lvim.keys.normal_mode = {
+  -- Abrir terminal
+  ["<C-t>"] = ":ToggleTerm<cr>",
+
   -- Mover linhas
   ["<A-Up>"] = ":m -2<cr>",
   ["<A-Down>"] = ":m +1<cr>",
