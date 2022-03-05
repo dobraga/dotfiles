@@ -2,11 +2,12 @@
 wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | sudo tee -a /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc
 sudo add-apt-repository "deb https://cloud.r-project.org/bin/linux/ubuntu $(lsb_release -cs)-cran40/"
 sudo add-apt-repository ppa:neovim-ppa/unstable
+sudo add-apt-repository ppa:gnome-terminator
 curl -fsSL https://deb.nodesource.com/setup_17.x | sudo -E bash -
 
 sudo apt-get update
 
-sudo apt install -y zsh locales-all r-base libcurl4-openssl-dev libsodium-dev cargo ripgrep neovim fzf nodejs
+sudo apt install -y zsh locales-all r-base libcurl4-openssl-dev libsodium-dev cargo ripgrep neovim fzf nodejs terminator
 
 # Instala fontes
 wget https://github.com/ryanoasis/nerd-fonts/releases/download/v2.1.0/DroidSansMono.zip
