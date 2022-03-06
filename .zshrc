@@ -2,7 +2,8 @@ export ZSH=$HOME/.oh-my-zsh
 export PATH="$HOME/.pyenv/bin:/$HOME/.poetry/bin:$HOME/.local/bin/lvim:$HOME/.cargo/bin::$PATH"
 export STARSHIP_CONFIG="$HOME/dotfiles/starship.toml"
 
-plugins=( 
+plugins=(
+    git
     zsh-autosuggestions
 )
 
@@ -20,7 +21,6 @@ alias ll="exa --icons --git -l -h --time-style=long-iso"
 alias ls="exa --icons --git -l -h --time-style=long-iso"
 alias cat="bat --style=auto"
 alias diff="fd"
-alias g="git"
 alias p="poetry"
 alias pshell="poetry shell"
 alias padd="poetry add"
