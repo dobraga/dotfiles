@@ -2,11 +2,11 @@ export ZSH=$HOME/.oh-my-zsh
 export PATH="$HOME/.pyenv/bin:/$HOME/.poetry/bin:$HOME/.local/bin/lvim:$HOME/.cargo/bin::$PATH"
 export STARSHIP_CONFIG="$HOME/dotfiles/starship.toml"
 
-source $ZSH/oh-my-zsh.sh
-
 plugins=( 
     zsh-autosuggestions
 )
+
+source $ZSH/oh-my-zsh.sh
 
 eval "$(pyenv init -)"
 eval "$(pyenv init --path)"
