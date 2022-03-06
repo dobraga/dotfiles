@@ -13,5 +13,18 @@ rm -rf ~/.config/terminator
 mkdir ~/.config/terminator
 ln -s ~/dotfiles/config.terminator ~/.config/terminator/config
 
+rm -rf ~/.config/lvim/lsp-settings
+mkdir ~/.config/lvim/lsp-settings
+
 poetry config virtualenvs.in-project true
+
+echo "
+Para configuração do linter do python, execute:
+
+:NlspConfig pyright
+
+{
+  'python.analysis.typeCheckingMode': 'off'
+}
+"
 
