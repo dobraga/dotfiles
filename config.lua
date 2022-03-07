@@ -1,5 +1,6 @@
 lvim.log.level = "warn"
 lvim.format_on_save = true
+lvim.lint_on_save = true
 lvim.colorscheme = "onedarker"
 
 lvim.leader = "space"
@@ -16,7 +17,9 @@ lvim.keys.normal_mode = {
   ["<C-q>"] = ":q<cr>",
   ["q"] = ":bdelete<cr>",
 
+  -- Open Telescope
   ["f"] = "<cmd> Telescope find_files<cr>",
+  ["<C-f>"] = "<cmd>Telescope live_grep<cr>",
 
   -- Centered cursor
   ["<Down>"] = "jzz",
