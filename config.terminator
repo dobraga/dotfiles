@@ -49,6 +49,7 @@
   layout_launcher = None
 [profiles]
   [[default]]
+    cursor_shape = ibeam
     cursor_color = "#aaaaaa"
     font = DroidSansMono Nerd Font 11
     show_titlebar = False
