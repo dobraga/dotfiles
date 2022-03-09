@@ -52,3 +52,7 @@ fd() {
   git diff $@ --name-only | fzf -m --ansi --preview $preview
 }
 
+jl() {
+  poetry run jupyter-lab
+}
+
