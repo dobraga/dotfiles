@@ -2,6 +2,7 @@ lvim.log.level = "warn"
 lvim.format_on_save = true
 lvim.lint_on_save = true
 lvim.colorscheme = "onedarker"
+vim.lsp.automatic_servers_installation = true
 
 lvim.leader = "space"
 lvim.keys.normal_mode = {
@@ -106,5 +107,32 @@ local linters = require "lvim.lsp.null-ls.linters"
 linters.setup {
   { command = "flake8", filetypes = { "python" } , args = {"--max-line-length", 88}},
   -- { command = "mypy", filetypes = { "python" } },
+}
+
+lvim.plugins = {
+    { "folke/tokyonight.nvim" },
+    {
+      "npxbr/glow.nvim",
+      ft = { "markdown" }
+    },
+    {
+      "karb94/neoscroll.nvim",
+      event = "WinScrolled",
+      config = function()
+          require('neoscroll').setup({
+            -- All these keys will be mapped to their corresponding default scrolling animation
+            mappings = { 'zt', 'zz', 'zb' },
+            hide_cursor = true, -- Hide cursor while scrolling
+            stop_eof = true, -- Stop at <EOF> when scrolling downwards
+            use_local_scrolloff = false, -- Use the local scope of scrolloff instead of the global scope
+            respect_scrolloff = false, -- Stop scrolling when the cursor reaches the scrolloff margin of the file
+            cursor_scrolls_alone = true, -- The cursor will keep on scrolling even if the window cannot scroll further
+            easing_function = nil, -- Default easing function
+            pre_hook = nil, -- Function to run before the scrolling animation starts
+            post_hook = nil, -- Function to run after the scrolling animation ends
+          })
+      end
+    },
+    { "lervag/vimtex" },
 }
 

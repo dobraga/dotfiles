@@ -16,6 +16,8 @@ eval "$(starship init zsh)"
 
 alias v="pshell_vim"
 alias vi="pshell_vim"
+alias v.="pshell_vim ."
+alias vi.="pshell_vim ."
 alias top=ytop
 alias ll="exa --icons --git -l -h --time-style=long-iso"
 alias ls="exa --icons --git -l -h --time-style=long-iso"
@@ -27,6 +29,8 @@ alias padd="poetry add"
 alias pinstall="poetry install"
 alias penv="poetry env"
 alias m=make
+alias d=docker
+alias dc=docker-compose
 
 alias cls="clear"
 alias ..="cd .."
