@@ -1,6 +1,4 @@
-# Adiciona repository do R e neovim
-wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | sudo tee -a /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc
-sudo add-apt-repository "deb https://cloud.r-project.org/bin/linux/ubuntu $(lsb_release -cs)-cran40/"
+# Adiciona repository do neovim, terminator, node e yarn
 sudo add-apt-repository ppa:neovim-ppa/unstable
 sudo add-apt-repository ppa:gnome-terminator
 curl -fsSL https://deb.nodesource.com/setup_17.x | sudo -E bash -
@@ -12,7 +10,10 @@ sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable
 
 sudo apt-get update
 
-sudo apt install -y zsh locales-all r-base libcurl4-openssl-dev libsodium-dev cargo ripgrep neovim fzf nodejs terminator yarn google-chrome-stable
+sudo apt install -y zsh locales-all cargo ripgrep neovim fzf nodejs terminator yarn google-chrome-stable
+
+# ZSH default
+chsh -s $(which zsh)
 
 # Instala fontes
 wget https://github.com/ryanoasis/nerd-fonts/releases/download/v2.1.0/DroidSansMono.zip
