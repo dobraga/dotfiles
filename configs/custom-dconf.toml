@@ -1,0 +1,97 @@
+[org/gnome/desktop/interface]
+cursor-theme='Yaru'
+gtk-im-module='gtk-im-context-simple'
+gtk-theme='Ant-Dracula'
+icon-theme='Tela-dark'
+toolkit-accessibility=false
+
+[org/gnome/desktop/wm/keybindings]
+activate-window-menu=@as []
+begin-move=@as []
+begin-resize=@as []
+close=['<Super>q']
+cycle-group=@as []
+cycle-group-backward=@as []
+cycle-panels=@as []
+cycle-panels-backward=@as []
+cycle-windows=@as []
+cycle-windows-backward=@as []
+minimize=['<Super>m']
+move-to-workspace-1=@as []
+move-to-workspace-down=['<Shift><Super>s']
+move-to-workspace-last=@as []
+move-to-workspace-up=['<Shift><Super>w']
+panel-run-dialog=['<Alt>2']
+show-desktop=['<Super>d']
+switch-applications=@as []
+switch-applications-backward=@as []
+switch-group=@as []
+switch-group-backward=@as []
+switch-panels=@as []
+switch-panels-backward=@as []
+switch-to-workspace-1=@as []
+switch-to-workspace-down=['<Super>s']
+switch-to-workspace-last=@as []
+switch-to-workspace-up=['<Super>w']
+switch-windows=['<Alt>Tab']
+switch-windows-backward=['<Shift><Alt>Tab']
+toggle-maximized=['<Super>Up']
+
+[org/gnome/gedit/preferences/editor]
+scheme='solarized-dark'
+wrap-last-split-mode='word'
+
+[org/gnome/mutter]
+center-new-windows=true
+edge-tiling=false
+workspaces-only-on-primary=true
+
+[org/gnome/mutter/keybindings]
+toggle-tiled-left=['<Super>Left']
+toggle-tiled-right=['<Super>Right']
+
+[org/gnome/nautilus/list-view]
+default-column-order=['name', 'size', 'type', 'owner', 'group', 'permissions', 'where', 'date_modified', 'date_modified_with_time', 'date_accessed', 'recency', 'starred', 'detailed_type']
+default-visible-columns=['name', 'size', 'date_modified', 'starred']
+
+[org/gnome/nautilus/preferences]
+default-folder-viewer='list-view'
+search-filter-time-type='last_modified'
+search-view='list-view'
+
+[org/gnome/shell]
+app-picker-view=uint32 1
+disabled-extensions=['ubuntu-dock@ubuntu.com']
+enabled-extensions=['dash-to-dock@micxgx.gmail.com', 'user-theme@gnome-shell-extensions.gcampax.github.com', 'caffeine@patapon.info', 'soft-brightness@fifi.org', 'windowoverlay-icons@sustmidown.centrum.cz', 'dynamic-panel-transparency@rockon999.github.io']
+favorite-apps=['google-chrome.desktop', 'org.gnome.Nautilus.desktop', 'code_code.desktop', 'terminator.desktop']
+had-bluetooth-devices-setup=true
+
+[org/gnome/shell/app-switcher]
+current-workspace-only=true
+
+[org/gnome/shell/extensions/dash-to-dock]
+animate-show-apps=true
+apply-custom-theme=false
+custom-background-color=false
+custom-theme-shrink=true
+customize-alphas=true
+dash-max-icon-size=32
+dock-position='LEFT'
+force-straight-corner=true
+height-fraction=0.90000000000000002
+icon-size-fixed=true
+isolate-monitors=false
+isolate-workspaces=true
+max-alpha=0.80000000000000004
+running-indicator-style='DOTS'
+show-apps-at-top=false
+show-trash=false
+transparency-mode='DYNAMIC'
+
+[org/gnome/shell/extensions/desktop-icons]
+show-home=false
+show-mount=false
+show-trash=false
+
+[org/gnome/shell/extensions/user-theme]
+name='dracula'
