@@ -1,6 +1,6 @@
 export ZSH=$HOME/.oh-my-zsh
 export PATH="$HOME/.pyenv/bin:/$HOME/.poetry/bin:$HOME/.local/bin/lvim:$HOME/.cargo/bin::$PATH"
-export STARSHIP_CONFIG="$HOME/dotfiles/configs/starship.toml"
+export STARSHIP_CONFIG="$HOME/dotfiles/starship.toml"
 
 plugins=(
     git
@@ -14,10 +14,6 @@ eval "$(pyenv init --path)"
 eval "$(pyenv virtualenv-init -)"
 eval "$(starship init zsh)"
 
-alias v="pshell_vim"
-alias vi="pshell_vim"
-alias v.="pshell_vim ."
-alias vi.="pshell_vim ."
 alias top=ytop
 alias ll="exa --icons --git -l -h --time-style=long-iso"
 alias ls="exa --icons --git -l -h --time-style=long-iso"
@@ -37,16 +33,6 @@ alias ..="cd .."
 alias ...="cd ../.."
 alias cd..="cd .."
 
-function pshell_vim() {
-  if [ -f pyproject.toml ]
-  then
-    echo "Loading poetry env"
-    poetry run lvim $@
-  else
-    lvim $@
-  fi
-}
-
 fd() {
   preview="git diff $@ --color=always -- {-1}"
   git diff $@ --name-only | fzf -m --ansi --preview $preview
@@ -55,4 +41,3 @@ fd() {
 jl() {
   poetry run jupyter-lab
 }
-
