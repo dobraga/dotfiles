@@ -1,4 +1,3 @@
-export ZSH=$HOME/.oh-my-zsh
 export DENO_INSTALL="$HOME/.deno"
 export PATH="$HOME/.local/bin:$DENO_INSTALL/bin:$PATH"
 export STARSHIP_CONFIG="$HOME/dotfiles/starship.toml"
@@ -7,8 +6,6 @@ plugins=(
     git
     zsh-autosuggestions
 )
-
-source $ZSH/oh-my-zsh.sh
 
 eval "$(starship init zsh)"
 

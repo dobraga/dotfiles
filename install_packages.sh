@@ -5,10 +5,8 @@ sudo add-apt-repository universe -y
 sudo add-apt-repository ppa:neovim-ppa/unstable
 
 # Instala
-sudo apt update && sudo apt install -y git zsh locales-all ripgrep neovim fzf
-
-# ZSH default
-chsh -s $(which zsh)
+sudo apt update && \
+sudo apt install -y build-essential git zsh locales-all ripgrep neovim fzf zlib1g-dev libssl-dev libbz2-dev libffi-dev libreadline-dev libsqlite3-dev lzma liblzma-dev 
 
 # Docker sem sudo
 sudo usermod -aG docker ${USER}
@@ -47,5 +45,8 @@ sudo apt autoclean -y
 sh -c "$(curl -fsSL https://get.docker.com)"
 sh -c "$(curl -fsSL https://starship.rs/install.sh)"
 
-python3 -m pip install --user -U pipx
+python -m pip install --user -U pipx
 pipx install poetry
+
+# ZSH default
+chsh -s $(which zsh)
