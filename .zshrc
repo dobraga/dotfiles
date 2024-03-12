@@ -1,16 +1,27 @@
-export DENO_INSTALL="$HOME/.deno"
-export PATH="$HOME/.local/bin:$DENO_INSTALL/bin:$PATH"
+export ZSH="$HOME/.oh-my-zsh"
+export PATH="$HOME/.local/bin:$PATH:/opt/nvim-linux64/bin"
 export STARSHIP_CONFIG="$HOME/dotfiles/starship.toml"
 
+HISTSIZE=1000
+SAVEHIST=1000
+HISTFILE=~/.zsh_history
+
 plugins=(
-    git
-    zsh-autosuggestions
+  git
+  docker
+  zsh-autosuggestions
+  zsh-syntax-highlighting
 )
 
+source $ZSH/oh-my-zsh.sh
+source $HOME/.asdf/asdf.sh
 eval "$(starship init zsh)"
 
-. "$HOME/.asdf/asdf.sh"
-
+alias py="clear && python"
+alias g="git"
+alias gp="git push"
+alias gc="git commit -m"
+alias gst="git status"
 alias p="poetry"
 alias pshell="poetry shell"
 alias padd="poetry add"
@@ -35,14 +46,11 @@ jl() {
   poetry run jupyter-lab
 }
 
-# The next line updates PATH for the Google Cloud SDK.
-if [ -f '~/google-cloud-sdk/path.zsh.inc' ]; then . '~/google-cloud-sdk/path.zsh.inc'; fi
+# # The next line updates PATH for the Google Cloud SDK.
+# if [ -f '~/google-cloud-sdk/path.zsh.inc' ]; then . '~/google-cloud-sdk/path.zsh.inc'; fi
 
-# The next line enables shell command completion for gcloud.
-if [ -f '~/google-cloud-sdk/completion.zsh.inc' ]; then . '~/google-cloud-sdk/completion.zsh.inc'; fi
+# # The next line enables shell command completion for gcloud.
+# if [ -f '~/google-cloud-sdk/completion.zsh.inc' ]; then . '~/google-cloud-sdk/completion.zsh.inc'; fi
 
-export NVM_DIR="/home/dobraga/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"  # This loads nvm
-
-# autoload -Uz compinit && compinit
-asdf reshim
+# # autoload -Uz compinit && compinit
+# asdf reshim
