@@ -27,6 +27,7 @@ alias pshell="poetry shell"
 alias padd="poetry add"
 alias prm="poetry remove"
 alias prun="poetry run"
+alias plock="poetry lock"
 alias pinstall="poetry install"
 alias penv="poetry env"
 alias m=make
