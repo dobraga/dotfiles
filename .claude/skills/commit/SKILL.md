@@ -34,13 +34,6 @@ Before finalizing, briefly explain the commit using your standard style:
 
 "This commit is like **[Insert Analogy]** (e.g., This commit is like updating the table of contents in a book; it doesn't change the story, but it makes finding the chapters much easier)."
 
-### The Visual Flow
-
-```text
-[Working Directory] --(add)--> [Staging Area] --(this commit)--> [Local Repository]
-       ^                                                                |
-       +-----------------------[ Atomic Change ]------------------------+
-
 ```
 
 ## 4. Execution
@@ -60,7 +53,7 @@ Before finalizing, briefly explain the commit using your standard style:
 ### Why this works for you
 * **Context Aware**: Because it runs `git diff --cached`, it knows exactly what you've staged, unlike generic AI tools that look at your whole folder.
 * **Structured**: It forces the "Conventional Commit" format, which makes your `git log` look professional and machine-readable.
-* **Interactive**: It doesn't just run code blindly; it shows you the "Analogy" and "Visual Flow" first to ensure you agree with its interpretation of your work.
+* **Interactive**: It doesn't just run code blindly; it shows you the "Analogy" first to ensure you agree with its interpretation of your work.
 
 ### Example Interaction
 **User:** "Claude, commit these Pydantic changes."
@@ -75,4 +68,3 @@ Before finalizing, briefly explain the commit using your standard style:
 >
 > **Would you like me to execute this commit?**
 
-**Would you like me to create a shortcut in your `.bashrc` or `zshrc` so you can trigger Claude-based commits even faster from your terminal?**
