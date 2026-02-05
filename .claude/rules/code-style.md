@@ -10,7 +10,30 @@ This project follows modern Python 3.10+ standards. Prioritize readability, type
 * **Explicit is better than implicit:** Use type hints and clear variable names.
 * **Modern Syntax:** Use the latest Python features (e.g., f-strings, `|` for unions, structural pattern matching).
 
-## 2. Logging & Output (Crucial)
+## 2. Documentation & Typing (Mandatory)
+* **Self-Documenting Code:** Minimize inline comments. If code needs an explanation, refactor it into smaller, well-named functions.
+* **Docstrings:** Use Google-style docstrings for all public modules, classes, and functions.
+* **Type Hinting:** Every function must have a full signature (arguments and return type).
+
+```python
+# AVOID
+def get_u(i): # gets user by id
+    return db.fetch(i)
+
+# DO
+def get_user_by_id(user_id: int) -> User | None:
+    """Fetches a user from the database.
+
+    Args:
+        user_id: The unique identifier for the user.
+
+    Returns:
+        The User model if found, otherwise None.
+    """
+    return db.fetch(user_id)
+```
+
+## 3. Logging & Output (Crucial)
 **Never use `print()` for application flow or error reporting.**
 
 * **Use `logging`:** use standard library `logging`.
@@ -32,12 +55,12 @@ logger.info("Fetched %d records from the database", len(records))
 print(f"Fetched {len(records)} records") 
 ```
 
-## 3. Formatting & Structure
+## 4. Formatting & Structure
 
 * **Formatting:** Use `ruff` for linting and formatting.
 * **Imports:** Group imports by: Standard library, Third-party, then Local.
 
-## 4. Type Hinting (Modern Approach)
+## 5. Type Hinting (Modern Approach)
 
 Use Python 3.10+ syntax. Avoid `typing.Union` or `typing.List`.
 
@@ -47,12 +70,12 @@ def process(data: list[int | str], name: str | None = None) -> None:
     ...
 ```
 
-## 5. Modern Patterns
+## 6. Modern Patterns
 
 * **F-Strings:** Always use f-strings for string interpolation.
 * **Pathlib:** Use `pathlib` instead of `os.path`.
 
-## 6. Data Modeling (Pydantic v2)
+## 7. Data Modeling (Pydantic v2)
 Prefer **Pydantic models** over raw dictionaries or standard dataclasses for any data crossing system boundaries (APIs, DBs, Configs).
 
 * **Use Pydantic v2 syntax:** Use `BaseModel` for data structures.
@@ -70,7 +93,7 @@ class User(BaseModel):
     is_active: bool = True
 ```
 
-## 7. Error Handling
+## 8. Error Handling
 
 * **Be specific:** Never use a bare `except:`.
 * **Context Managers:** Always use `with` for I/O.
