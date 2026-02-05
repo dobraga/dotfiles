@@ -34,21 +34,16 @@ Before finalizing, briefly explain the commit using your standard style:
 
 "This commit is like **[Insert Analogy]** (e.g., This commit is like updating the table of contents in a book; it doesn't change the story, but it makes finding the chapters much easier)."
 
-```
 
 ## 4. Execution
 
 1. **Present** the generated message to the user.
-2. **Ask**: "Would you like me to execute this commit?"
-3. If confirmed, **Run** `git commit -m "[message]"` (or `-m "[subject]" -m "[body]"` for multi-line).
+2. **Run** `git commit -m "[message]"` (or `-m "[subject]" -m "[body]"` for multi-line).
 
 ## 5. The Gotcha
 
 **Warning**: Remind the user if they are committing too many unrelated changes at once (non-atomic commits). If the diff is too large, suggest splitting it into two separate commits.
 
-```
-
----
 
 ### Why this works for you
 * **Context Aware**: Because it runs `git diff --cached`, it knows exactly what you've staged, unlike generic AI tools that look at your whole folder.
@@ -66,5 +61,4 @@ Before finalizing, briefly explain the commit using your standard style:
 > 
 > `Updated UserRecord to inherit from BaseModel and added EmailStr validation for the email field. This prevents malformed data from reaching the service layer.`
 >
-> **Would you like me to execute this commit?**
 
