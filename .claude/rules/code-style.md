@@ -93,7 +93,31 @@ class User(BaseModel):
     is_active: bool = True
 ```
 
-## 8. Error Handling
+## 8. File Organization
+
+* **Functions first:** Place main functions, classes, and core logic at the top of files.
+* **Utilities last:** Place helper functions, utilities, and private functions at the bottom.
+* **Rationale:** This makes scanning easier—readers see the public API first, implementation details last.
+
+```python
+# DO - Functions on top, utils at bottom
+def main() -> None:
+    """Public entry point."""
+    data = fetch_data()
+    process(data)
+
+
+def fetch_data() -> list[dict]:
+    """Fetch from API."""
+    return api.get("/data")
+
+
+def _clean_response(resp: dict) -> dict:
+    """Private utility at bottom."""
+    return {k: v for k, v in resp.items() if v is not None}
+```
+
+## 9. Error Handling
 
 * **Be specific:** Never use a bare `except:`.
 * **Context Managers:** Always use `with` for I/O.
