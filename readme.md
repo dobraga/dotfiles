@@ -42,8 +42,10 @@ ln -s ~/src/dotfiles/.zshrc ~/.zshrc
 rm -f ~/.gitconfig
 ln -s ~/src/dotfiles/.gitconfig ~/.gitconfig
 
-ln -s ~/src/dotfiles/.claude/rules/ ~/.claude/rules
 ln -s ~/src/dotfiles/.claude/skills/ ~/.claude/skills
+ln -s ~/src/dotfiles/.claude/CLAUDE.md ~/.claude/
+ln -s ~/src/dotfiles/.claude/settings.json ~/.claude/
+ln -s ~/src/dotfiles/.claude/statusline.py ~/.claude/
 ```
 
 ## Configuration
