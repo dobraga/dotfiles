@@ -13,6 +13,7 @@ plugins=(
   zsh-syntax-highlighting
 )
 
+source $HOME/.cargo/env
 source $ZSH/oh-my-zsh.sh
 eval "$(starship init zsh)"
 
@@ -33,12 +34,3 @@ alias cls="clear"
 alias ..="cd .."
 alias ...="cd ../.."
 alias cd..="cd .."
-
-# # The next line updates PATH for the Google Cloud SDK.
-# if [ -f '~/google-cloud-sdk/path.zsh.inc' ]; then . '~/google-cloud-sdk/path.zsh.inc'; fi
-
-# # The next line enables shell command completion for gcloud.
-# if [ -f '~/google-cloud-sdk/completion.zsh.inc' ]; then . '~/google-cloud-sdk/completion.zsh.inc'; fi
-
-# # autoload -Uz compinit && compinit
-# asdf reshim
