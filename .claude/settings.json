@@ -8,10 +8,10 @@
       "Bash(uv run:*)"
     ]
   },
+  "model": "sonnet",
   "statusLine": {
     "type": "command",
     "command": "~/.claude/statusline.py"
   },
-  "effortLevel": "low",
-  "model": "sonnet"
+  "effortLevel": "low"
 }
