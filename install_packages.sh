@@ -58,3 +58,6 @@ sudo apt autoclean -y
 # ZSH default
 chsh -s $(which zsh)
 uv python install --default --preview-features python-install-default
+
+# uses F keys
+echo 2 | sudo tee /sys/module/hid_apple/parameters/fnmode
