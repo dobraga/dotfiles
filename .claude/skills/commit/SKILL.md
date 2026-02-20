@@ -26,21 +26,12 @@ Follow the **Conventional Commits** specification:
 
 don't add Co-Authored-By on message
 
-## 3. The Commit Flow (The Analogy)
-
-Before finalizing, briefly explain the commit using your standard style:
-
-### The Analogy
-
-"This commit is like **[Insert Analogy]** (e.g., This commit is like updating the table of contents in a book; it doesn't change the story, but it makes finding the chapters much easier)."
-
-
-## 4. Execution
+## 3. Execution
 
 1. **Present** the generated message to the user.
 2. **Run** `git commit -m "[message]"` (or `-m "[subject]" -m "[body]"` for multi-line).
 
-## 5. The Gotcha
+## 4. The Gotcha
 
 **Warning**: Remind the user if they are committing too many unrelated changes at once (non-atomic commits). If the diff is too large, suggest splitting it into two separate commits.
 
@@ -48,14 +39,11 @@ Before finalizing, briefly explain the commit using your standard style:
 ### Why this works for you
 * **Context Aware**: Because it runs `git diff --cached`, it knows exactly what you've staged, unlike generic AI tools that look at your whole folder.
 * **Structured**: It forces the "Conventional Commit" format, which makes your `git log` look professional and machine-readable.
-* **Interactive**: It doesn't just run code blindly; it shows you the "Analogy" first to ensure you agree with its interpretation of your work.
 
 ### Example Interaction
 **User:** "Claude, commit these Pydantic changes."
 
 **Claude:**
-> **The Analogy**: This commit is like swapping a "trust-based" handshake for a legal contract. We're no longer just *hoping* the data is right; we're validating it at the door.
-> 
 > **Proposed Message**:
 > `feat(models): implement Pydantic v2 validation for User schema`
 > 
