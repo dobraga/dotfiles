@@ -26,7 +26,7 @@ try:
     branch = subprocess.check_output(
         ["git", "branch", "--show-current"], text=True, stderr=subprocess.DEVNULL
     ).strip()
-    branch = f"| 🌿 {branch} |" if branch else ""
+    branch = f"| {branch} |" if branch else ""
 except:
     branch = ""
 
