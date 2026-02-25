@@ -6,6 +6,9 @@
   "permissions": {
     "allow": [
       "Bash(uv run:*)"
+    ],
+    "deny": [
+      "Read(./**/.env)"
     ]
   },
   "model": "sonnet",
