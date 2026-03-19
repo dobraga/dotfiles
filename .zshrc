@@ -34,3 +34,24 @@ alias cls="clear"
 alias ..="cd .."
 alias ...="cd ../.."
 alias cd..="cd .."
+
+export $(grep -v '^#' .env | xargs)
+
+openrouter() {
+  if [[ -z "$OPENROUTER_API_KEY" ]]; then
+    echo "Error: OPENROUTER_API_KEY is not set." >&2
+    echo "Please export it or add it to your .env file." >&2
+    return 1
+  fi
+
+  local -x ANTHROPIC_BASE_URL="https://openrouter.ai/api"
+  local -x ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY"
+  local -x ANTHROPIC_API_KEY="" 
+
+  local -x ANTHROPIC_DEFAULT_OPUS_MODEL="google/gemini-3.1-pro-preview"
+  local -x ANTHROPIC_DEFAULT_SONNET_MODEL="minimax/minimax-m2.7"
+  local -x ANTHROPIC_DEFAULT_HAIKU_MODEL="z-ai/glm-4.7-flash"
+  local -x CLAUDE_CODE_SUBAGENT_MODEL="google/gemini-3.1-pro-preview"
+  
+  claude "$@"
+}
