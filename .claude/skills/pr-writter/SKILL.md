@@ -23,18 +23,8 @@ Draft a PR description that includes:
 ## 3. The "Explain-Code" Breakdown
 Using the `explain-code` template, provide a breakdown of the PR for the reviewers:
 
-### 1. The Analogy
-Compare this set of changes to an everyday scenario (e.g., "This PR is like upgrading the plumbing in a house—you won't see the pipes, but the water flows faster now").
-
-### 2. The Visual Flow
-Draw an ASCII diagram showing how data moves or how classes relate after this PR.
-Example:
-[Branch: Feature] --(Commit A)--> [Logic Change] --(Commit B)--> [New Schema]
-       |                                                            ^
-       +----------------------[ Validation ]------------------------+
-
-### 3. Step-by-Step Walkthrough
+## 3. Step-by-Step Walkthrough
 Walk through the logical flow of the new code changes.
 
-### 4. The Gotcha
+## 4. The Gotcha
 Highlight a potential side effect or a common mistake a future developer might make when touching this specific area of the code.
