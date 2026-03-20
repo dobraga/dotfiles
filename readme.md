@@ -38,6 +38,7 @@ This will install:
 ```sh
 rm -f ~/.zshrc
 ln -s ~/src/dotfiles/.zshrc ~/.zshrc
+ln -s ~/src/dotfiles/.env ~/.env
 
 rm -f ~/.gitconfig
 ln -s ~/src/dotfiles/.gitconfig ~/.gitconfig
