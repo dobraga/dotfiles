@@ -35,7 +35,7 @@ alias ..="cd .."
 alias ...="cd ../.."
 alias cd..="cd .."
 
-export $(grep -v '^#' .env | xargs)
+export $(grep -v '^#' ~/.env | xargs)
 
 openrouter() {
   if [[ -z "$OPENROUTER_API_KEY" ]]; then
