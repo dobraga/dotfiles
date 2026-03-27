@@ -59,5 +59,8 @@ sudo apt autoclean -y
 chsh -s $(which zsh)
 uv python install --default --preview-features python-install-default
 
+# Install rtk
+curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
+
 # uses F keys
 echo 2 | sudo tee /sys/module/hid_apple/parameters/fnmode
