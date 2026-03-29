@@ -3,50 +3,104 @@ name: commit
 description: Analyzes staged changes and generates a high-quality, conventional commit message, then executes the commit.
 ---
 
-# Smart Commit Skill
+## Step 1 — Pre-flight checks
 
-When I say "commit this" or "generate a commit message," follow this workflow:
+Run these in parallel:
+- `git diff --staged --stat` — overview of staged files
+- `git diff --stat` — overview of unstaged changes
+- `git status --short` — untracked files
 
-## 1. Intelligence Gathering
-* **Run** `git diff --cached` to see exactly what is being committed.
-* **Identify Change Type**: Determine if it is a `feat`, `fix`, `docs`, `style`, `refactor`, `test`, or `chore`.
-* **Analyze Scope**: Identify the specific module or component affected (e.g., `api`, `models`, `ui`).
+**Gate: nothing staged?** → Abort and tell the user. Suggest `git add -p` for granular staging.
 
-## 2. Generate the Message
-Follow the **Conventional Commits** specification:
+**Gate: unstaged changes on the same files?** → Warn: "You have unstaged changes on files already staged. Consider `git add -p` to include relevant hunks or stage intentionally."
 
-```text
-<type>(<scope>): <short summary in imperative mood>
+## Step 2 — Read the full diff
 
-[optional body: explain the WHY, not just the WHAT]
+Run `git diff --staged` for the complete diff.
 
-[optional footer: relate to Issue IDs, e.g., Closes #123]
+## Step 3 — Atomicity audit
 
+Before writing anything, assess: **do all staged changes serve a single, coherent intent?**
+
+Signs of a non-atomic commit:
+- Changes span multiple unrelated modules or domains
+- Mix of feat + fix + refactor with no shared purpose
+- Large diff (>400 lines changed across >6 files) without a clear unifying reason
+
+If non-atomic → **Stop**. Tell the user which logical groups you see and suggest splitting:
+```
+Suggested split:
+  commit 1 — fix(auth): ...  (files: auth.py, middleware.py)
+  commit 2 — feat(api): ...  (files: routes.py, schemas.py)
+```
+Do not proceed until the user confirms or adjusts staging.
+
+## Step 4 — Classify the change
+
+Choose the **single most accurate type**:
+
+| Type       | When to use |
+|------------|-------------|
+| `feat`     | New capability visible to users or consumers |
+| `fix`      | Corrects a bug or unintended behavior |
+| `refactor` | Restructures code without changing behavior |
+| `perf`     | Measurable performance improvement |
+| `test`     | Adds or corrects tests only |
+| `docs`     | Documentation only |
+| `style`    | Formatting, whitespace — zero logic change |
+| `build`    | Build system, dependencies, packaging |
+| `ci`       | CI/CD pipeline changes |
+| `chore`    | Maintenance that fits none of the above |
+
+**Breaking change?** Append `!` after type/scope → `feat(api)!:` and add a `BREAKING CHANGE:` footer.
+
+## Step 5 — Determine scope
+
+Scope = the primary module, package, or domain affected (e.g., `auth`, `api`, `models`, `cli`, `db`).
+
+**Omit scope** when:
+- Changes are truly cross-cutting (multiple unrelated domains)
+- The repo is a single-concern tool with no meaningful sub-modules
+
+## Step 6 — Compose the commit message
+
+**Subject line** (mandatory):
+```
+<type>(<scope>): <imperative-mood description>
+```
+- Imperative mood: "add", "fix", "remove" — not "added", "fixes", "removing"
+- Max 72 characters
+- No period at the end
+- No Co-Authored-By
+
+**Body** (include when the diff is non-trivial or the *why* is not obvious):
+```
+<blank line>
+<explanation of motivation / what changed / trade-offs>
+```
+- Wrap at 72 characters
+- Focus on *why*, not *what* (the diff shows the what)
+
+**Footer** (when applicable):
+```
+<blank line>
+BREAKING CHANGE: <description of what breaks and migration path>
+Closes #<issue-number>
 ```
 
-don't add Co-Authored-By on message
+## Step 7 — Present for approval
 
-## 3. Execution
+Show the full message in a code block, then ask:
+> "Proceed with this commit, edit the message, or abort?"
 
-1. **Present** the generated message to the user.
-2. **Run** `git commit -m "[message]"` (or `-m "[subject]" -m "[body]"` for multi-line).
+Wait for explicit confirmation.
 
-## 4. The Gotcha
+## Step 8 — Execute
 
-**Warning**: Remind the user if they are committing too many unrelated changes at once (non-atomic commits). If the diff is too large, suggest splitting it into two separate commits.
+On approval run:
+```
+git commit -m "<subject>" -m "<body>" -m "<footer>"
+```
+Use multiple `-m` flags to preserve paragraph separation. For single-line messages use a single `-m`.
 
-
-### Why this works for you
-* **Context Aware**: Because it runs `git diff --cached`, it knows exactly what you've staged, unlike generic AI tools that look at your whole folder.
-* **Structured**: It forces the "Conventional Commit" format, which makes your `git log` look professional and machine-readable.
-
-### Example Interaction
-**User:** "Claude, commit these Pydantic changes."
-
-**Claude:**
-> **Proposed Message**:
-> `feat(models): implement Pydantic v2 validation for User schema`
-> 
-> `Updated UserRecord to inherit from BaseModel and added EmailStr validation for the email field. This prevents malformed data from reaching the service layer.`
->
-
+After the commit, show the output of `git log --oneline -1` to confirm.
