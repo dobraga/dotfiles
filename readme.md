@@ -47,7 +47,7 @@ ln -s ~/src/dotfiles/.claude/skills/ ~/.claude/skills
 ln -s ~/src/dotfiles/.claude/CLAUDE.md ~/.claude/
 ln -s ~/src/dotfiles/.claude/settings.json ~/.claude/
 ln -s ~/src/dotfiles/.claude/statusline.py ~/.claude/
-ln -s ~/src/dotfiles/.claude/hooks/rtk-rewrite.sh ~/.claude/hooks/rtk-rewrite.sh
+ln -s ~/src/dotfiles/.claude/hooks/ ~/.claude/hooks
 ```
 
 ## Configuration
