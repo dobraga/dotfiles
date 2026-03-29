@@ -23,6 +23,8 @@ cd ~/src/dotfiles
 
 ```sh
 bash install_packages.sh
+bash install_nvdia.sh
+bash install_claude_code.sh
 ```
 
 This will install:

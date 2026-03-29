@@ -6,7 +6,9 @@
   },
   "permissions": {
     "allow": [
-      "Bash(uv run:*)"
+      "Bash(uv run:*)",
+      "Bash(git -C * log *)",
+      "Bash(git -C * show *)"
     ],
     "deny": [
       "Read(./**/.env)"
@@ -70,6 +72,18 @@
   "statusLine": {
     "type": "command",
     "command": "~/.claude/statusline.py"
+  },
+  "enabledPlugins": {
+    "claude-mem@thedotmack": true,
+    "code-review@claude-plugins-official": true
+  },
+  "extraKnownMarketplaces": {
+    "thedotmack": {
+      "source": {
+        "source": "github",
+        "repo": "thedotmack/claude-mem"
+      }
+    }
   },
   "effortLevel": "low"
 }

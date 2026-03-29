@@ -47,7 +47,6 @@ git clone https://github.com/zsh-users/zsh-syntax-highlighting ${ZSH_CUSTOM:-~/.
 
 # Install uv, starship, docker
 sh -c "$(curl -fsSL https://astral.sh/uv/install.sh)"
-curl -fsSL https://claude.ai/install.sh | bash
 
 # Update and clean packages
 sudo apt upgrade -y
@@ -59,8 +58,5 @@ sudo apt autoclean -y
 chsh -s $(which zsh)
 uv python install --default --preview-features python-install-default
 
-# Install rtk
-curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
-
 # uses F keys
-echo 2 | sudo tee /sys/module/hid_apple/parameters/fnmode
+echo "options hid_apple fnmode=2" | sudo tee /etc/modprobe.d/hid_apple.conf
