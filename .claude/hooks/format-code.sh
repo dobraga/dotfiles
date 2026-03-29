@@ -14,7 +14,8 @@ case "$FILE" in
   *.py)
     if command -v uv &> /dev/null; then
       echo "Formatting Python file: $FILE"
-      uvx run ruff format "$FILE"
+      uvx ruff format "$FILE"
+      uvx ruff check "$FILE" --fix-only
     fi
     ;;
 esac
