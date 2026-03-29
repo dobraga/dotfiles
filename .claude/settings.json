@@ -7,8 +7,9 @@
   "permissions": {
     "allow": [
       "Bash(uv run:*)",
-      "Bash(git -C * log *)",
-      "Bash(git -C * show *)"
+      "Bash(git log *)",
+      "Bash(git diff *)",
+      "Bash(git show *)"
     ],
     "deny": [
       "Read(./**/.env)"
