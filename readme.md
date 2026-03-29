@@ -50,6 +50,9 @@ ln -s ~/src/dotfiles/.claude/CLAUDE.md ~/.claude/
 ln -s ~/src/dotfiles/.claude/settings.json ~/.claude/
 ln -s ~/src/dotfiles/.claude/statusline.py ~/.claude/
 ln -s ~/src/dotfiles/.claude/hooks/ ~/.claude/hooks
+ln -s ~/src/dotfiles/.claude/agents/ ~/.claude/agents
+ln -s ~/src/dotfiles/.claude/rules/ ~/.claude/rules
+
 chmod a+x ~/.claude/hooks/*
 ```
 
