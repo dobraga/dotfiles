@@ -48,6 +48,7 @@ ln -s ~/src/dotfiles/.claude/CLAUDE.md ~/.claude/
 ln -s ~/src/dotfiles/.claude/settings.json ~/.claude/
 ln -s ~/src/dotfiles/.claude/statusline.py ~/.claude/
 ln -s ~/src/dotfiles/.claude/hooks/ ~/.claude/hooks
+chmod a+x ~/.claude/hooks/*
 ```
 
 ## Configuration

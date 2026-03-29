@@ -23,9 +23,11 @@
             "command": "~/.claude/hooks/rtk-rewrite.sh"
           }
         ]
-      },
+      }
+    ],
+    "PostToolUse": [
       {
-        "matcher": "Write",
+        "matcher": "Edit|MultiEdit|Write",
         "hooks": [
           {
             "type": "command",
