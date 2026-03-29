@@ -14,7 +14,7 @@ class ClaudeNotify:
     def setup_logging(self):
         """Simple daily rotating log to track event flow."""
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        log_path = os.path.join(script_dir, "ccnotify.log")
+        log_path = os.path.join(script_dir, "notify.log")
 
         handler = TimedRotatingFileHandler(
             log_path, when="midnight", interval=1, backupCount=1, encoding="utf-8"
@@ -22,8 +22,8 @@ class ClaudeNotify:
         formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
         handler.setFormatter(formatter)
 
-        self.logger = logging.getLogger("CCNotify")
-        self.logger.setLevel(logging.INFO)
+        self.logger = logging.getLogger("Notify")
+        self.logger.setLevel(logging.WARNING)
         self.logger.addHandler(handler)
 
     def send_notification(self, title, message):
