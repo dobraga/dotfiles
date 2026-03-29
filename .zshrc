@@ -17,7 +17,6 @@ source $HOME/.cargo/env
 source $ZSH/oh-my-zsh.sh
 eval "$(starship init zsh)"
 
-alias py="clear && python"
 alias g="git"
 alias gp="git push"
 alias gc="git commit -m"
