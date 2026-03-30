@@ -60,7 +60,7 @@ Follow `.claude/rules/python.md`. For Polars, follow `.claude/agents/reference/p
 - **Notebooks go in `notebooks/`**: All exploratory notebooks must be created under the `notebooks/` directory. Name them descriptively (e.g., `notebooks/01_eda_user_retention.ipynb`).
 - **Notebook-first for analysis:** all EDA, cohort analysis, funnel analysis, and A/B test interpretation must live in notebooks. Scripts are only for reusable data transformation logic.
 - **Always execute notebooks** after creating or modifying them: `jupyter nbconvert --to notebook --execute --inplace <notebook>.ipynb`
-- **Plots** use `matplotlib`; always set `figsize`, title, and axis labels. Save every plot to `reports/figures/<descriptive_name>.png` with `dpi=150, bbox_inches="tight"`. Create the directory if it doesn't exist.
+- **Plots** use `matplotlib`; always set `figsize`, title, and axis labels. Save every plot to `reports/figures/<descriptive_name>.png` with `dpi=150, bbox_inches="tight"`. Create the directory if it doesn't exist. Never use pie charts — use bar charts for part-to-whole comparisons.
 
 ## Storytelling Principles
 - Lead with the conclusion, not the methodology
