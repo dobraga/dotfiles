@@ -25,13 +25,14 @@ Choose the right artifact for the task:
 | Baseline model exploration | Notebook (`notebooks/02_baseline.ipynb`) | ds-ml |
 | Model iteration, hyperparameter search, comparison | Notebook (`notebooks/03_model_iteration.ipynb`) | ds-ml |
 | Evaluation deep-dive (confusion matrix, calibration, SHAP) | Notebook (`notebooks/04_evaluation.ipynb`) | ds-ml |
-| Reproducible training pipeline | Script (`src/.../train.py`) | ds-ml |
-| Feature engineering logic | Script (`src/.../features.py`) | ds-ml |
+| Final preprocessing + model (proven in notebook) | Script (`src/.../train.py`, `src/.../features.py`) | ds-ml |
 | One-off analysis or report | Notebook | data-analyst |
 
 **Default rule:** all data exploration before modeling is owned by the `data-analyst` agent. Only begin modeling once the data-analyst has confirmed data quality.
 
-**Notebook-first for analysis:** baseline experiments, hyperparameter search, and final model evaluation must always live in notebooks — not just scripts. Scripts are for stable, reusable logic (training loop, feature transforms). The final model analysis (metrics, plots, SHAP, calibration) must be in a notebook.
+**Notebook-first for ALL experiments:** every experiment — baseline, iteration, hyperparameter search, evaluation — must live in a notebook first. Scripts are only written **after** the approach is proven in a notebook. A script is a clean extraction of stable, final logic; it is never the place to iterate or experiment.
+
+**Scripts are for final logic only:** `train.py` and `features.py` contain only the winner's preprocessing and training code. Do not put experiment loops, model comparisons, or exploratory code in scripts.
 
 **Always execute notebooks** after creating or modifying them:
 ```bash
@@ -117,8 +118,8 @@ Follow `.claude/rules/python.md`. For Polars, follow `.claude/agents/reference/p
 - Log all trials; save best params to a config file
 
 **Class imbalance:**
-- First try `class_weight="balanced"` or model-native `scale_pos_weight`
-- SMOTE/oversampling only inside cross-validation folds, never on the full training set
+- **Always use weights first:** set `class_weight="balanced"` (sklearn) or `scale_pos_weight` (XGBoost/LightGBM) — this is the default approach
+- Never use SMOTE or oversampling unless weights demonstrably fail and there is a strong justification
 - Evaluate with PR-AUC or F1 alongside ROC-AUC when classes are imbalanced
 
 **Regularization:**
@@ -132,6 +133,7 @@ Follow `.claude/rules/python.md`. For Polars, follow `.claude/agents/reference/p
 - Document ensemble composition and each member's individual performance
 
 ## Methodology
+- **Notebook → Script flow**: All experimentation happens in notebooks. Scripts are only created to extract the final, proven approach. Never create a script to run an experiment.
 - **Baseline first**: Always establish a simple baseline before complex models. A mean predictor or logistic regression is the starting point.
 - **Leakage vigilance**: Scrutinize every feature for temporal leakage, target leakage, and data contamination. If in doubt, exclude.
 - **Proper evaluation**: Use stratified splits for classification, time-based splits for temporal data. Never shuffle time series.
