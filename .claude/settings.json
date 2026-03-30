@@ -8,9 +8,12 @@
   "permissions": {
     "allow": [
       "Read(~/.claude/**)",
-      "Bash(uv run:*)",
-      "Bash(uv init:*)",
-      "Bash(uv add:*)",
+      "Bash(mkdir:*)",
+      "Bash(uv:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(cp:*)",
+      "Bash(touch:*)",
       "Bash(git log *)",
       "Bash(git diff *)",
       "Bash(git show *)"
