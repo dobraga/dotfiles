@@ -16,7 +16,10 @@
       "Bash(touch:*)",
       "Bash(git log *)",
       "Bash(git diff *)",
-      "Bash(git show *)"
+      "Bash(git show *)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(gh api:*)"
     ],
     "deny": [
       "Read(./**/.env)"
@@ -37,7 +40,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Edit|MultiEdit|Write",
+        "matcher": "Edit|Write",
         "hooks": [
           {
             "type": "command",

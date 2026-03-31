@@ -20,7 +20,7 @@ if [ -z "$file_path" ] || [ ! -f "$file_path" ]; then
 fi
 
 case "$file_path" in
-  *.py)
+  *.py|*.ipynb)
     if ! command -v uv &> /dev/null; then
       exit 0
     fi
