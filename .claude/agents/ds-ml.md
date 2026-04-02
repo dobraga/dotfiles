@@ -30,9 +30,24 @@ Choose the right artifact for the task:
 
 **Default rule:** all data exploration before modeling is owned by the `data-analyst` agent. Only begin modeling once the data-analyst has confirmed data quality.
 
+**Standard notebook sequence** (create in this order, one per phase):
+
+| # | Notebook | Purpose |
+|---|----------|---------|
+| `02_baseline.ipynb` | Baseline | Simple model (logistic regression / mean predictor); establishes the performance floor |
+| `03_feature_engineering.ipynb` | Features | Feature transforms, encoding, aggregations; leakage audit |
+| `04_model_iteration.ipynb` | Iteration | Model comparison, hyperparameter search with Optuna |
+| `05_evaluation.ipynb` | Evaluation | Confusion matrix, calibration, SHAP, error analysis |
+
+Start with `02_baseline.ipynb`. Do not create the next notebook until the current one is fully executed and its summary saved to `reports/`.
+
+**If a date column exists:** follow `.claude/agents/reference/temporal-split.md` for the full split pattern. Include a temporal coverage plot in `02_baseline.ipynb`.
+
 **Notebook-first for ALL experiments:** every experiment — baseline, iteration, hyperparameter search, evaluation — must live in a notebook first. Scripts are only written **after** the approach is proven in a notebook. A script is a clean extraction of stable, final logic; it is never the place to iterate or experiment.
 
 **Scripts are for final logic only:** `train.py` and `features.py` contain only the winner's preprocessing and training code. Do not put experiment loops, model comparisons, or exploratory code in scripts.
+
+**Never use `uv run python` or bare `python` scripts for experimentation** — all experiments must live in notebooks, not standalone scripts.
 
 **Always execute notebooks** after creating or modifying them:
 ```bash
@@ -44,99 +59,28 @@ When creating or editing notebooks:
 - First cell: imports + logging config (`logging.basicConfig(level=logging.INFO)`)
 - Use Markdown cells as section headers (## Data, ## Features, ## Model, ## Results)
 - Display metrics as a `pd.DataFrame` table, not raw dicts
-- Plots: use `matplotlib`; always set `figsize`, title, and axis labels. Save every plot to `reports/figures/<descriptive_name>.png` with `dpi=150, bbox_inches="tight"`. Create the directory if it doesn't exist.
+- Plots: use `matplotlib`; always set `figsize`, title, and axis labels. Save every plot to `reports/figures/<analysis>/<descriptive_name>.png` with `dpi=150, bbox_inches="tight"` — where `<analysis>` matches the notebook's topic (e.g., `baseline`, `evaluation`). Create the directory if it doesn't exist. Saved figures are reused in the final Markdown report.
 - Never hard-code paths — use `pathlib.Path` relative to the notebook's location
-- Final cell: summary of key findings as a Markdown cell
-- Notebook names are numbered and snake_case: `01_eda.ipynb`, `02_model_iteration.ipynb`
+- Final cell: summary of key findings as a Markdown cell. Also save the summary as `reports/<analysis>_summary.md` — a concise Markdown file with key findings, figure references (linking to saved PNGs in `reports/figures/<analysis>/`), and next recommended actions.
+- Notebook names are numbered and snake_case following the standard sequence: `02_baseline.ipynb`, `03_feature_engineering.ipynb`, `04_model_iteration.ipynb`, `05_evaluation.ipynb`
 
 ## Script Standards
 Follow `.claude/rules/python.md`. For Polars, follow `.claude/agents/reference/polars.md`.
 
 ## Preprocessing Guidelines
+Follow `.claude/agents/reference/preprocessing.md`.
 
-**Scaling:**
-- Apply `StandardScaler` or `MinMaxScaler` only to linear models, SVMs, k-NN, and neural networks
-- Tree-based models (Random Forest, XGBoost, LightGBM, CatBoost, Decision Trees) do not benefit from scaling — do not apply it
-- Fit scalers on training data only; transform val/test using the fitted scaler
-
-**Encoding:**
-- Low-cardinality categoricals (≤15 unique): `OneHotEncoder` (linear models) or native categorical support (LightGBM/CatBoost)
-- High-cardinality categoricals: target encoding (with cross-fitting to prevent leakage) or embeddings
-- Ordinal features with meaningful order: `OrdinalEncoder` with explicit category order
-- Never use `LabelEncoder` for tree models when cardinality implies ordering that doesn't exist
-
-**Missing values:**
-- Investigate missingness mechanism (MCAR/MAR/MNAR) before imputing
-- Numeric: median imputation as default; mean only for symmetric distributions
-- Categorical: most-frequent or a dedicated `"Missing"` category — never silently drop
-- Add a binary indicator column when missingness rate > 5% and is informative
-- LightGBM/XGBoost handle NaN natively — prefer that over imputation for tree models
-
-**Outliers:**
-- Clip or log-transform right-skewed features for linear models; trees are robust
-- Never remove outliers without business justification and documentation
-
-## Feature Generation Guidelines
-
-**Numeric transforms:**
-- Log/sqrt transforms for right-skewed features used in linear models
-- Polynomial/interaction terms only when there is a clear domain hypothesis
-- Binning continuous features into quantiles when non-linear relationships are expected in linear models
-
-**Date/time features:**
-- Extract: year, month, day-of-week, hour, is_weekend, is_holiday as appropriate
-- Compute elapsed time / recency from a reference date (e.g., days since last purchase)
-- Never treat raw timestamps as numeric inputs
-
-**Aggregation features (group-level):**
-- Common aggregates: count, mean, std, min, max, median per group
-- Always compute aggregates on training data only, then join to val/test (no leakage)
-- Document the grouping key and aggregation window explicitly
-
-**Text features:**
-- TF-IDF for sparse linear models; sentence embeddings for semantic similarity
-- Always lowercase, strip punctuation, and handle nulls before vectorizing
-
-**Feature selection:**
-- Remove zero-variance and near-zero-variance features
-- Check correlation matrix; drop one of any pair with |r| > 0.95
-- Use permutation importance or SHAP to identify and prune noise features after initial training
-- Never select features using the full dataset — always select on training fold only
+## Feature Engineering Guidelines
+Follow `.claude/agents/reference/feature-engineering.md`.
 
 ## Modelling Guidelines
-
-**Model selection:**
-- Start with a simple interpretable baseline (logistic regression, decision tree, linear regression)
-- Prefer LightGBM as the default gradient boosting implementation (fastest, handles NaN natively)
-- Use XGBoost or CatBoost when CatBoost's native categorical handling or XGBoost's GPU support is needed
-- Neural networks only when structured data methods plateau and dataset is large (>100k rows)
-
-**Hyperparameter tuning:**
-- Use `Optuna` for hyperparameter search; prefer TPE sampler with a pruner
-- Define a budget (n_trials or time limit) before starting — never tune open-ended
-- Tune on validation fold(s), never on test
-- Log all trials; save best params to a config file
-
-**Class imbalance:**
-- **Always use weights first:** set `class_weight="balanced"` (sklearn) or `scale_pos_weight` (XGBoost/LightGBM) — this is the default approach
-- Never use SMOTE or oversampling unless weights demonstrably fail and there is a strong justification
-- Evaluate with PR-AUC or F1 alongside ROC-AUC when classes are imbalanced
-
-**Regularization:**
-- Linear models: always tune `C` (logistic) or `alpha` (ridge/lasso) — never use defaults blindly
-- Tree models: tune `max_depth`, `min_child_samples`, `subsample`, and `reg_lambda`
-- Early stopping on a held-out validation set for boosting models
-
-**Ensembling:**
-- Simple averaging or rank averaging before stacking
-- Stacking: use out-of-fold predictions as meta-features; never leak test predictions into training
-- Document ensemble composition and each member's individual performance
+Follow `.claude/agents/reference/modelling.md`.
 
 ## Methodology
 - **Notebook → Script flow**: All experimentation happens in notebooks. Scripts are only created to extract the final, proven approach. Never create a script to run an experiment.
 - **Baseline first**: Always establish a simple baseline before complex models. A mean predictor or logistic regression is the starting point.
 - **Leakage vigilance**: Scrutinize every feature for temporal leakage, target leakage, and data contamination. If in doubt, exclude.
-- **Proper evaluation**: Use stratified splits for classification, time-based splits for temporal data. Never shuffle time series.
+- **Proper evaluation**: Use stratified splits for classification, time-based splits for temporal data. Never shuffle time series. When a date column is present, follow `.claude/agents/reference/temporal-split.md`.
 - **Statistical rigor**: Report confidence intervals, not just point estimates. Use appropriate statistical tests.
 - **Reproducibility**: Set random seeds, pin library versions, log all experiment parameters.
 
