@@ -88,19 +88,10 @@ BREAKING CHANGE: <description of what breaks and migration path>
 Closes #<issue-number>
 ```
 
-## Step 7 — Present for approval
-
-Show the full message in a code block, then ask:
-> "Proceed with this commit, edit the message, or abort?"
-
-Wait for explicit confirmation.
-
-## Step 8 — Execute
+## Step 7 — Execute
 
 On approval run:
 ```
 git commit -m "<subject>" -m "<body>" -m "<footer>"
 ```
 Use multiple `-m` flags to preserve paragraph separation. For single-line messages use a single `-m`.
-
-After the commit, show the output of `git log --oneline -1` to confirm.
