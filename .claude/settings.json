@@ -19,7 +19,9 @@
       "Bash(git show *)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:github.com)",
-      "Bash(gh api:*)"
+      "Bash(gh api:*)",
+      "mcp__atlassian__lookupJiraAccountId",
+      "mcp__plugin_claude-mem_mcp-search__search"
     ],
     "deny": [
       "Read(./**/.env)"
