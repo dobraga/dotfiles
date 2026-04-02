@@ -47,6 +47,7 @@ git clone https://github.com/zsh-users/zsh-syntax-highlighting ${ZSH_CUSTOM:-~/.
 
 # Install uv, starship, docker
 sh -c "$(curl -fsSL https://astral.sh/uv/install.sh)"
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
 
 # Update and clean packages
 sudo apt upgrade -y

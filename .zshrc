@@ -55,5 +55,10 @@ openrouter() {
   claude "$@"
 }
 
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
+# [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+
+
 alias claude-mem='~/.bun/bin/bun ~/.claude/plugins/cache/thedotmack/claude-mem/10.6.2/scripts/worker-service.cjs'
 pgrep -f "worker-service.cjs" > /dev/null 2>&1 || claude-mem
