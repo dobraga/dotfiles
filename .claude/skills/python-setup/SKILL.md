@@ -25,8 +25,9 @@ uv init myproject             # internal/app (no build)
 ### Step 2: Add Dependencies
 
 ```bash
-uv add requests 
-uv add --group dev pytest ruff ty pip-audit pytest-cov
+uv add requests
+uv add --group dev ruff ty pip-audit taskipy
+uv add --group test pytest pytest-cov hypothesis
 ```
 
 Never edit `pyproject.toml` manually for deps. Never use `uv pip install`.
@@ -41,16 +42,24 @@ Use the template in `../templates/pyproject.toml`. If the project needs git hook
 uv sync --all-groups
 ```
 
-### Step 5: Add Makefile
+### Step 5: Configure tests and task runner
+
+Invoke the `/python-tests` skill to set up pytest, Hypothesis, and taskipy — it owns all test configuration including:
+- `[tool.pytest.ini_options]` and `[tool.coverage.*]` in `pyproject.toml`
+- `[tool.taskipy.tasks]` with `lint`, `format`, `test` (with `pre_test` / `post_test`)
+- `tests/conftest.py` with Hypothesis profile wired to `PROFILE` env var
+- Docker Compose + LocalStack if AWS services are needed
+
+### Step 6: Add Makefile
 
 Use the template in `../templates/Makefile`. Key targets:
 
 | Target | Command |
 |--------|---------|
 | `make dev` | `uv sync --all-groups` and `uv run prek install` |
-| `make lint` | ruff format check + ruff check + ty |
-| `make format` | `uv run ruff format .` |
-| `make test` | `uv run pytest` |
+| `make lint` | `uv run task lint` |
+| `make format` | `uv run task format` |
+| `make test` | `uv run task test` |
 | `make build` | `uv build` |
 | `make hooks` | `uv run prek run --all-files` |
 | `make audit` | `uv run pip-audit` |
@@ -78,6 +87,7 @@ Use the template in `../templates/Makefile`. Key targets:
 - [ ] `src/` layout used
 - [ ] `requires-python = ">=3.11"`
 - [ ] `ruff` + `ty` configured
+- [ ] `taskipy` tasks configured (`lint`, `format`, `test`) — delegate to `/python-tests`
 - [ ] Coverage minimum set (80%+)
 - [ ] `uv.lock` committed
 - [ ] `prek install` run (git hooks active)
