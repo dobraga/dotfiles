@@ -34,8 +34,8 @@ Choose the right artifact for the task:
 
 | # | Notebook | Purpose |
 |---|----------|---------|
-| `02_baseline.ipynb` | Baseline | Simple model (logistic regression / mean predictor); establishes the performance floor |
-| `03_feature_engineering.ipynb` | Features | Feature transforms, encoding, aggregations; leakage audit |
+| `02_baseline.ipynb` | Baseline | Simple model (logistic regression / mean predictor) on **raw features** with minimal preprocessing; establishes the performance floor |
+| `03_feature_engineering.ipynb` | Features | Add feature complexity one layer at a time; record metric at each step; keep only layers that improve the score; leakage audit |
 | `04_model_iteration.ipynb` | Iteration | Model comparison, hyperparameter search with Optuna |
 | `05_evaluation.ipynb` | Evaluation | Confusion matrix, calibration, SHAP, error analysis |
 
@@ -58,8 +58,9 @@ jupyter nbconvert --to notebook --execute --inplace <notebook>.ipynb
 When creating or editing notebooks:
 - First cell: imports + logging config (`logging.basicConfig(level=logging.INFO)`)
 - Use Markdown cells as section headers (## Data, ## Features, ## Model, ## Results)
-- Display metrics as a `pd.DataFrame` table, not raw dicts
-- Plots: use `matplotlib`; always set `figsize`, title, and axis labels. Save every plot to `reports/figures/<analysis>/<descriptive_name>.png` with `dpi=150, bbox_inches="tight"` — where `<analysis>` matches the notebook's topic (e.g., `baseline`, `evaluation`). Create the directory if it doesn't exist. Saved figures are reused in the final Markdown report.
+- Display metrics as a `pd.DataFrame` table via `display()`, not raw dicts
+- **No unnecessary output**: never use `print()` unless logging a progress message that has analytical meaning. Use `display()` to render DataFrames and tables — never `print(df)`. Scalar results (counts, rates) are shown via `display(pd.DataFrame(...))` or a Markdown cell, not `print()`.
+- Plots: follow `.claude/agents/reference/plotting.md` for chart selection, code patterns, and saving conventions.
 - Never hard-code paths — use `pathlib.Path` relative to the notebook's location
 - Final cell: summary of key findings as a Markdown cell. Also save the summary as `reports/<analysis>_summary.md` — a concise Markdown file with key findings, figure references (linking to saved PNGs in `reports/figures/<analysis>/`), and next recommended actions.
 - Notebook names are numbered and snake_case following the standard sequence: `02_baseline.ipynb`, `03_feature_engineering.ipynb`, `04_model_iteration.ipynb`, `05_evaluation.ipynb`
@@ -73,12 +74,24 @@ Follow `.claude/agents/reference/preprocessing.md`.
 ## Feature Engineering Guidelines
 Follow `.claude/agents/reference/feature-engineering.md`.
 
+**Incremental complexity rule:** Always start with raw data and minimal preprocessing. Add feature engineering one layer at a time, measuring metric improvement at each step before continuing. Never add complexity that isn't justified by a measured gain.
+
+**Complexity ladder (follow in order, stop when gains plateau):**
+1. Raw features only — minimal imputation, basic encoding (ordinal or one-hot), no transforms
+2. Outlier capping + numerical transforms (Yeo-Johnson) for linear/distance models
+3. Discretisation or interaction features with a clear domain hypothesis
+4. Aggregation or datetime-derived features
+5. Advanced encoders (MeanEncoder, WoEEncoder) or tree-generated features
+
+**Hard rule:** Never write ad-hoc Python code for encoding, scaling, imputation, binning, or feature creation. Always use `sklearn` Pipeline + `feature-engine` transformers. See `.claude/agents/reference/feature-engine.md` for the full transformer catalogue, pipeline skeleton, and composition rules.
+
 ## Modelling Guidelines
 Follow `.claude/agents/reference/modelling.md`.
 
 ## Methodology
 - **Notebook → Script flow**: All experimentation happens in notebooks. Scripts are only created to extract the final, proven approach. Never create a script to run an experiment.
-- **Baseline first**: Always establish a simple baseline before complex models. A mean predictor or logistic regression is the starting point.
+- **Baseline first**: Always establish a simple baseline before complex models. A mean predictor or logistic regression is the starting point. The baseline uses raw features with only the minimum preprocessing required to make the model run.
+- **Incremental feature engineering**: Add feature complexity one step at a time. Each step must produce a measurable improvement before proceeding to the next. If a layer adds no gain, drop it and document why.
 - **Leakage vigilance**: Scrutinize every feature for temporal leakage, target leakage, and data contamination. If in doubt, exclude.
 - **Proper evaluation**: Use stratified splits for classification, time-based splits for temporal data. Never shuffle time series. When a date column is present, follow `.claude/agents/reference/temporal-split.md`.
 - **Statistical rigor**: Report confidence intervals, not just point estimates. Use appropriate statistical tests.

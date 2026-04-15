@@ -1,13 +1,26 @@
 # Feature Engineering Guidelines
 
+**All feature engineering must be implemented via `sklearn` Pipeline + `feature-engine` transformers.**
+Never write ad-hoc Python functions for encoding, scaling, imputation, or feature creation.
+See `.claude/agents/reference/feature-engine.md` for the full transformer catalogue and pipeline skeleton.
+
 ## Numeric Transforms
-- Log/sqrt transforms for right-skewed features used in linear models
-- Polynomial/interaction terms only when there is a clear domain hypothesis
-- Binning continuous features into quantiles when non-linear relationships are expected in linear models
+- Use `YeoJohnsonTransformer` for skewed features (handles negatives); `LogTransformer` only when all values > 0
+- Apply `Winsorizer` (IQR method) before any transformation to avoid log-of-negative / infinity
+- Polynomial/interaction terms only with a clear domain hypothesis — use `MathFeatures` or `RelativeFeatures`
+- Quantile binning with `EqualFrequencyDiscretiser`; supervised binning with `DecisionTreeDiscretiser`
+
+## Categorical Encoding
+- Always precede encoders with `RareLabelEncoder` to handle unseen categories
+- Low-cardinality nominals → `OneHotEncoder(top_categories=N)`
+- High-cardinality → `MeanEncoder` (supervised) or `CountFrequencyEncoder` (unsupervised)
+- Ordinal/tree models → `OrdinalEncoder`
+- Binary classification → `WoEEncoder`
 
 ## Date/Time Features
-- Extract: year, month, day-of-week, hour, is_weekend, is_holiday as appropriate
-- Compute elapsed time / recency from a reference date (e.g., days since last purchase)
+- Use `DatetimeFeatures` to extract month, day-of-week, hour, is_weekend, etc.
+- Use `DatetimeSubtraction` for elapsed-time / recency features
+- Use `CyclicalFeatures` (sine/cosine) for cyclic numerics like hour or day-of-week
 - Never treat raw timestamps as numeric inputs
 
 ## Aggregation Features (group-level)
@@ -16,7 +29,8 @@
 - Document the grouping key and aggregation window explicitly
 
 ## Text Features
-- TF-IDF for sparse linear models; sentence embeddings for semantic similarity
+- Use `TextFeatures` for metadata (char count, word count, lexical diversity)
+- TF-IDF for sparse linear models via `TfidfVectorizer` in a `ColumnTransformer`
 - Always lowercase, strip punctuation, and handle nulls before vectorizing
 
 ## Feature Selection

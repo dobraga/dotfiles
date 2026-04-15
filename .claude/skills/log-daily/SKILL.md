@@ -3,10 +3,24 @@ name: log-daily
 description: Log conversation activity to today's daily note on demand. Use when wrapping up work, capturing decisions, or documenting session outcomes.
 ---
 
-<daily_note_location>
-**Default Path:** "~/Documents/obsidian_vault/vault/publish/7 - Daily Notes/{YYYY}/{MM}/{DD}.md"
-If not exists create a note for today
-</daily_note_location>
+<dependencies>
+Uses the **obsidian-cli** skill to interact with the vault. All note writes go through `obsidian daily:append`.
+</dependencies>
+
+<how_to_append>
+Build the full log block as a single string (see `log_format`), then append it with:
+
+```bash
+obsidian daily:append content="<log block here>"
+```
+
+If today's daily note does not exist, open it first so the CLI creates it:
+
+```bash
+obsidian daily
+obsidian daily:append content="<log block here>"
+```
+</how_to_append>
 
 
 <objective>

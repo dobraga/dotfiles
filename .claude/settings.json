@@ -21,6 +21,7 @@
       "WebFetch(domain:github.com)",
       "Bash(gh api:*)",
       "mcp__atlassian__lookupJiraAccountId",
+      "mcp__atlassian__getVisibleJiraProjects",
       "mcp__plugin_claude-mem_mcp-search__search"
     ],
     "deny": [

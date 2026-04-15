@@ -45,6 +45,27 @@ When exploring data before handing off to a modeler, always run these checks in 
 
 Only proceed to deeper analysis (distributions, correlations, feature engineering) after these pass.
 
+## Iterative Analysis Loop
+
+After each analysis step, **evaluate the result before moving on**. If a finding raises a clear follow-up question, answer it immediately in the same notebook rather than deferring it.
+
+**When to drill deeper (use judgment — not every finding warrants a follow-up):**
+
+- **Null rate identical across multiple columns**: This is a strong signal of a JOIN miss, not a source data gap. Verify by checking if the nulls fall on the same rows, then break null rate by year to find the temporal boundary of the miss. Only do the temporal breakdown if the identical-null pattern is confirmed first.
+- **Record count anomaly in a specific year**: If a year has dramatically fewer records than neighbors, check whether it is a pipeline gap, reporting lag, or fiscal-year misalignment — a temporal breakdown is warranted here.
+- **Target variable has unexpected zero/null concentration**: Segment by year before concluding — it may be a reporting cutoff, not a real pattern.
+- **Outlier at p99+ is an order of magnitude above p95**: Inspect those specific rows; determine if they are data errors, a single entity, or a real heavy-tail segment.
+- **A categorical column has an unexpected dominant value**: Check if it is a default/placeholder vs. a real signal.
+
+For other findings (e.g., a column that is simply sparse by design, a metric that is flat in aggregate), move on without forced drilling.
+
+**Loop protocol:**
+
+1. Run the check and read the output.
+2. If a trigger above clearly fires, run the follow-up in the next cell immediately.
+3. Add a Markdown cell: what you found, what it means, what you did about it.
+4. Repeat until no new triggers fire, then write the summary and move to the next section.
+
 ## Code Standards
 Follow `.claude/rules/python.md`. For Polars, follow `.claude/agents/reference/polars.md`.
 
@@ -53,7 +74,8 @@ Follow `.claude/rules/python.md`. For Polars, follow `.claude/agents/reference/p
 - **Always execute notebooks** after creating or modifying them: `jupyter nbconvert --to notebook --execute --inplace <notebook>.ipynb`
 - **Never use `uv run python` or bare `python` scripts for data analysis** — all analysis must live in notebooks, not standalone scripts.
 - **Final cell of every notebook**: write a summary of key findings as a Markdown cell and save it as `reports/<analysis>_summary.md` — a concise Markdown file with key findings, figure references (linking to saved PNGs in `reports/figures/<analysis>/`), and next recommended actions.
-- **Plots** use `matplotlib`; always set `figsize`, title, and axis labels. Save every plot to `reports/figures/<analysis>/<descriptive_name>.png` with `dpi=150, bbox_inches="tight"` — where `<analysis>` matches the notebook's topic (e.g., `eda`, `retention`). Create the directory if it doesn't exist. Saved figures are reused in the final Markdown report. Never use pie charts — use bar charts for part-to-whole comparisons.
+- **Plots**: follow `.claude/agents/reference/plotting.md` for chart selection, code patterns, and saving conventions.
+- **No unnecessary output**: never use `print()` unless logging a progress message that has analytical meaning. Use `display()` to render DataFrames and tables — never `print(df)`. Scalar results (counts, rates) are shown via `display(pd.DataFrame(...))` or a Markdown cell, not `print()`.
 
 ## Storytelling Principles
 Follow `.claude/agents/reference/business-metrics.md`.
