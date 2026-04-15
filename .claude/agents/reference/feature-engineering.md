@@ -4,6 +4,11 @@
 Never write ad-hoc Python functions for encoding, scaling, imputation, or feature creation.
 See `.claude/agents/reference/feature-engine.md` for the full transformer catalogue and pipeline skeleton.
 
+## Imputation
+- For **tree models**: impute missing numerics with `ArbitraryNumberImputer` using a value below the observed minimum (e.g. `arbitrary_number = df[col].min() - 1`). This lets the tree isolate missingness as its own branch. Never use mean/median imputation for tree models.
+- For **linear/distance models**: use `MeanMedianImputer` or `ArbitraryNumberImputer` with a domain-appropriate constant.
+- For categoricals: use `CategoricalImputer(imputation_method='missing')` to add an explicit `"Missing"` category.
+
 ## Numeric Transforms
 - Use `YeoJohnsonTransformer` for skewed features (handles negatives); `LogTransformer` only when all values > 0
 - Apply `Winsorizer` (IQR method) before any transformation to avoid log-of-negative / infinity
