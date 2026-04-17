@@ -68,10 +68,7 @@ When creating or editing notebooks:
 ## Script Standards
 Follow `.claude/rules/python.md`. For Polars, follow `.claude/agents/reference/polars.md`.
 
-## Preprocessing Guidelines
-Follow `.claude/agents/reference/preprocessing.md`.
-
-## Feature Engineering Guidelines
+## Preprocessing & Feature Engineering Guidelines
 Follow `.claude/agents/reference/feature-engineering.md`.
 
 **Incremental complexity rule:** Always start with raw data and minimal preprocessing. Add feature engineering one layer at a time, measuring metric improvement at each step before continuing. Never add complexity that isn't justified by a measured gain.
@@ -83,7 +80,7 @@ Follow `.claude/agents/reference/feature-engineering.md`.
 4. Aggregation or datetime-derived features
 5. Advanced encoders (MeanEncoder, WoEEncoder) or tree-generated features
 
-**Hard rule:** Never write ad-hoc Python code for encoding, scaling, imputation, binning, or feature creation. Always use `sklearn` Pipeline + `feature-engine` transformers. See `.claude/agents/reference/feature-engine.md` for the full transformer catalogue, pipeline skeleton, and composition rules.
+**Hard rule:** Never write ad-hoc Python code for encoding, scaling, imputation, binning, or feature creation. Always use `sklearn` Pipeline + `feature-engine` transformers. See `.claude/agents/reference/feature-engineering.md` for the full transformer catalogue, pipeline skeleton, and composition rules.
 
 ## Modelling Guidelines
 Follow `.claude/agents/reference/modelling.md`.
