@@ -85,6 +85,8 @@ Follow `.claude/agents/reference/feature-engineering.md`.
 ## Modelling Guidelines
 Follow `.claude/agents/reference/modelling.md`.
 
+**Handling `eval_set` in Pipelines:** When using models that support early stopping (XGBoost, LightGBM, CatBoost) inside an `sklearn` Pipeline, the `eval_set` must be preprocessed by the same transformers. Use the `EvalPreprocessedClassifier` wrapper located in `.claude/agents/reference/snippet/eval_preprocessed_classifier.py` to ensure `eval_set` is transformed before reaching the classifier.
+
 ## Methodology
 - **Notebook → Script flow**: All experimentation happens in notebooks. Scripts are only created to extract the final, proven approach. Never create a script to run an experiment.
 - **Baseline first**: Always establish a simple baseline before complex models. A mean predictor or logistic regression is the starting point. The baseline uses raw features with only the minimum preprocessing required to make the model run.
