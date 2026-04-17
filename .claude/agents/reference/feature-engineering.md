@@ -8,31 +8,41 @@
 
 ## Pipeline Skeleton
 
+Each column group gets its own sequential recipe; `ColumnTransformer` maps recipes to columns; a final `Pipeline` wires preprocessing to the model.
+
 ```python
+from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from feature_engine.encoding import MeanEncoder, RareLabelEncoder
+from feature_engine.encoding import OneHotEncoder, RareLabelEncoder, MeanEncoder
 from feature_engine.imputation import MeanMedianImputer, CategoricalImputer
-from feature_engine.discretisation import EqualFrequencyDiscretiser
-from feature_engine.transformation import LogTransformer, YeoJohnsonTransformer
-from feature_engine.creation import MathFeatures, CyclicalFeatures, DatetimeFeatures
+from feature_engine.transformation import YeoJohnsonTransformer
 from feature_engine.outliers import Winsorizer
 
-pipe = Pipeline([
-    # 1. Imputation
-    ("num_imputer", MeanMedianImputer(imputation_method="median", variables=NUM_VARS)),
-    ("cat_imputer", CategoricalImputer(imputation_method="frequent", variables=CAT_VARS)),
-    # 2. Outlier capping (before transforms)
-    ("winsorizer", Winsorizer(capping_method="iqr", tail="both", fold=1.5, variables=NUM_VARS)),
-    # 3. Rare label grouping (before encoding)
-    ("rare_labels", RareLabelEncoder(tol=0.01, n_categories=10, variables=CAT_VARS)),
-    # 4. Encoding
-    ("encoder", MeanEncoder(variables=CAT_VARS)),
-    # 5. Numerical transformation
-    ("yeo", YeoJohnsonTransformer(variables=SKEWED_VARS)),
-    # 6. Scaling (linear/distance-based models only)
-    ("scaler", StandardScaler()),
-    # 7. Model
+# 1. Numeric recipe: Impute → Outliers → Transform → Scale
+numeric_pipe = Pipeline([
+    ("imputer", MeanMedianImputer(imputation_method="median")),
+    ("outliers", Winsorizer(capping_method="iqr", tail="both", fold=1.5)),
+    ("transform", YeoJohnsonTransformer()),   # omit for tree models
+    ("scaler", StandardScaler()),             # omit for tree models
+])
+
+# 2. Categorical recipe: Impute → Rare grouping → Encode
+categorical_pipe = Pipeline([
+    ("imputer", CategoricalImputer(imputation_method="missing")),
+    ("rare", RareLabelEncoder(tol=0.05)),
+    ("encoder", OneHotEncoder(drop_last=True)),  # swap for MeanEncoder on high-cardinality
+])
+
+# 3. ColumnTransformer maps each recipe to its columns
+preprocessor = ColumnTransformer(transformers=[
+    ("num", numeric_pipe, NUM_VARS),
+    ("cat", categorical_pipe, CAT_VARS),
+], remainder="passthrough")  # passthrough binary/ordinal columns already encoded
+
+# 4. Full pipeline: preprocessor → model
+full_pipeline = Pipeline([
+    ("preprocessor", preprocessor),
     ("model", ...),
 ])
 ```
@@ -205,3 +215,13 @@ Never treat raw timestamps as numeric inputs.
 5. **Scale only for linear/distance models** — tree models do not benefit from scaling
 6. **One pipeline per model family** — don't share a single pipeline between a tree and a linear model
 7. **Never remove outliers without business justification and documentation**
+8. **Never split the pipeline to pass a manual `eval_set`** — slicing `pipe[:-1]` to pre-transform data and calling the model step directly breaks the pipeline abstraction and is error-prone. Use a callback or a wrapper instead:
+   ```python
+   # WRONG — never do this
+   X_train_t = pipe[:-1].fit_transform(X_train)
+   X_val_t   = pipe[:-1].transform(X_val)
+   pipe.named_steps["model"].fit(X_train_t, y_train, eval_set=(X_val_t, y_val))
+
+   # RIGHT — keep the full pipeline intact; pass raw val data
+   pipe.fit(X_train, y_train)   # preprocessing + model trained end-to-end
+   ```
