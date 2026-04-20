@@ -1,7 +1,7 @@
 ---
 name: commit
 description: Analyzes staged changes and generates a high-quality, conventional commit message, then executes the commit.
-model: haiku
+model: claude-haiku-4-5
 ---
 
 ## Step 1 — Pre-flight checks
