@@ -73,7 +73,7 @@ Follow `.claude/rules/python.md`. For Polars, follow `.claude/agents/reference/p
 - **Notebook-first for analysis:** all EDA, cohort analysis, funnel analysis, and A/B test interpretation must live in notebooks. Scripts are only for reusable data transformation logic.
 - **Always execute notebooks** after creating or modifying them: `jupyter nbconvert --to notebook --execute --inplace <notebook>.ipynb`
 - **Never use `uv run python` or bare `python` scripts for data analysis** — all analysis must live in notebooks, not standalone scripts.
-- **Final cell of every notebook**: write a summary of key findings as a Markdown cell and save it as `reports/<analysis>_summary.md` — a concise Markdown file with key findings, figure references (linking to saved PNGs in `reports/figures/<analysis>/`), and next recommended actions.
+- **Final cell of every notebook**: write a summary of key findings as a Markdown cell and save it as `reports/<analysis>_summary.md` — a concise Markdown file with key findings, figures embedded as base64 (using `fig_to_base64` from `.claude/agents/reference/plotting.md`), and next recommended actions.
 - **Plots**: follow `.claude/agents/reference/plotting.md` for chart selection, code patterns, and saving conventions.
 - **No unnecessary output**: never use `print()` unless logging a progress message that has analytical meaning. Use `display()` to render DataFrames and tables — never `print(df)`. Scalar results (counts, rates) are shown via `display(pd.DataFrame(...))` or a Markdown cell, not `print()`.
 

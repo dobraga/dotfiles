@@ -10,8 +10,7 @@ All plots use `matplotlib`. Never use any other plotting library (seaborn, plotl
 | **Never use bar charts for time series** | Bars imply discrete categories. Use line charts for continuous temporal data. |
 | **Never use 3D charts** | Depth distorts perception and adds no information. |
 | **Always set `figsize`, title, and axis labels** | Unlabelled plots are not reproducible or shareable. |
-| **Always save figures** to `reports/figures/<analysis>/<descriptive_name>.png` with `dpi=150, bbox_inches="tight"` | Consistent output for reports. |
-| **Create output directory** before saving | `Path(...).mkdir(parents=True, exist_ok=True)` |
+| **Never save figures to disk** — encode as base64 and embed directly in the markdown report | Self-contained report, no file path dependencies. |
 
 ---
 
@@ -141,23 +140,46 @@ plt.tight_layout()
 | Bar chart with a date on the x-axis | Switch to `ax.plot()` (line chart) |
 | Pie chart for category shares | Switch to `ax.barh()` (horizontal bar) |
 | Missing title or axis labels | Always set `ax.set_title()`, `ax.set_xlabel()`, `ax.set_ylabel()` |
-| Figure not saved | Always call `fig.savefig(path, dpi=150, bbox_inches="tight")` |
+| Figure not encoded | Always call `fig_to_base64(fig)` and embed inline in the report |
+| All figures dumped at the end | Interleave prose and figures — add each figure immediately after its analysis text |
 | Spaghetti plot with 10+ lines | Use small multiples |
 | Raw date strings on x-axis | Use `mdates.DateFormatter` + `fig.autofmt_xdate()` |
 | Overlapping x-axis tick labels | Rotate with `ax.tick_params(axis="x", rotation=45)` or use `fig.autofmt_xdate()` |
 
 ---
 
-## Saving Figures (canonical snippet)
+## Encoding Figures as Base64 (canonical snippet)
+
+Never save figures to disk. Instead, encode each figure to base64 immediately after creating it and store the result for embedding in the final markdown report.
 
 ```python
-from pathlib import Path
+import base64
+import io
+import matplotlib.pyplot as plt
 
-FIG_DIR = Path("reports/figures/<analysis>")
-FIG_DIR.mkdir(parents=True, exist_ok=True)
-
-fig.savefig(FIG_DIR / "<descriptive_name>.png", dpi=150, bbox_inches="tight")
-plt.close(fig)   # free memory in long notebooks
+def fig_to_base64(fig: plt.Figure) -> str:
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return base64.b64encode(buf.getvalue()).decode()
 ```
 
-Replace `<analysis>` with the notebook topic (e.g., `eda`, `baseline`, `retention`) and `<descriptive_name>` with a slug that matches what the figure shows (e.g., `monthly_active_users`, `revenue_by_channel`).
+Build the report incrementally — interleave text and figures as you go, then write once at the end:
+
+```python
+# At the top of the notebook:
+report = []  # list of markdown strings, built incrementally
+
+# After each section — add prose then the figure:
+report.append("## Monthly Active Users\n\nGrowth accelerated in Q3, driven by the mobile cohort.\n")
+report.append(f"![monthly_active_users](data:image/png;base64,{fig_to_base64(fig)})\n")
+
+report.append("## Retention by Cohort\n\nDay-7 retention dropped 4pp for the Jan cohort.\n")
+report.append(f"![retention](data:image/png;base64,{fig_to_base64(fig2)})\n")
+
+# Final cell — write the assembled report:
+from pathlib import Path
+Path("reports/<analysis>_summary.md").write_text("\n".join(["# Analysis Report\n"] + report))
+```
+
+Replace `<analysis>` with the notebook topic (e.g., `eda`, `baseline`, `retention`). Text and figures must alternate naturally — never dump all figures at the end.

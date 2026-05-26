@@ -62,7 +62,7 @@ When creating or editing notebooks:
 - **No unnecessary output**: never use `print()` unless logging a progress message that has analytical meaning. Use `display()` to render DataFrames and tables — never `print(df)`. Scalar results (counts, rates) are shown via `display(pd.DataFrame(...))` or a Markdown cell, not `print()`.
 - Plots: follow `.claude/agents/reference/plotting.md` for chart selection, code patterns, and saving conventions.
 - Never hard-code paths — use `pathlib.Path` relative to the notebook's location
-- Final cell: summary of key findings as a Markdown cell. Also save the summary as `reports/<analysis>_summary.md` — a concise Markdown file with key findings, figure references (linking to saved PNGs in `reports/figures/<analysis>/`), and next recommended actions.
+- Final cell: summary of key findings as a Markdown cell. Also save the summary as `reports/<analysis>_summary.md` — a concise Markdown file with key findings, figures embedded as base64 (using `fig_to_base64` from `.claude/agents/reference/plotting.md`), and next recommended actions.
 - Notebook names are numbered and snake_case following the standard sequence: `02_baseline.ipynb`, `03_feature_engineering.ipynb`, `04_model_iteration.ipynb`, `05_evaluation.ipynb`
 
 ## Script Standards
