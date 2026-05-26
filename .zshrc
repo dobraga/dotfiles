@@ -47,10 +47,31 @@ openrouter() {
   local -x ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY"
   local -x ANTHROPIC_API_KEY="" 
 
-  local -x ANTHROPIC_DEFAULT_OPUS_MODEL="google/gemini-3.1-pro-preview"
-  local -x ANTHROPIC_DEFAULT_SONNET_MODEL="minimax/minimax-m2.7"
+  local -x CLAUDE_CODE_SUBAGENT_MODEL="minimax/minimax-m2.7"
+  local -x ANTHROPIC_DEFAULT_OPUS_MODEL="minimax/minimax-m2.7"
+  # local -x ANTHROPIC_DEFAULT_SONNET_MODEL="minimax/minimax-m2.7"
+  local -x ANTHROPIC_DEFAULT_SONNET_MODEL="z-ai/glm-4.7-flash"
   local -x ANTHROPIC_DEFAULT_HAIKU_MODEL="z-ai/glm-4.7-flash"
-  local -x CLAUDE_CODE_SUBAGENT_MODEL="google/gemini-3.1-pro-preview"
+  
+  claude "$@"
+}
+
+minimax() {
+  if [[ -z "$MINIMAX_API_KEY" ]]; then
+    echo "Error: MINIMAX_API_KEY is not set." >&2
+    echo "Please export it or add it to your .env file." >&2
+    return 1
+  fi
+
+  local -x ANTHROPIC_BASE_URL="https://api.minimax.io/anthropic"
+  local -x ANTHROPIC_AUTH_TOKEN="$MINIMAX_API_KEY"
+  local -x ANTHROPIC_API_KEY=""
+  local -x API_TIMEOUT_MS="3000000",
+  local -x CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1",
+  local -x ANTHROPIC_MODEL="MiniMax-M2.7",
+  local -x ANTHROPIC_DEFAULT_SONNET_MODEL="MiniMax-M2.7",
+  local -x ANTHROPIC_DEFAULT_OPUS_MODEL="MiniMax-M2.7",
+  local -x ANTHROPIC_DEFAULT_HAIKU_MODEL="MiniMax-M2.7"
   
   claude "$@"
 }

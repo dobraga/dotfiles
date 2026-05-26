@@ -14,10 +14,22 @@
 
 ## Part II: Architecture & Code Design
 
-Python standards (typing, logging, pathlib, Pydantic, file structure) are enforced via `.claude/rules/python.md` and the `/python-setup` skill.
+Python standards (typing, logging, pathlib, Pydantic, file structure) are enforced via `.claude/rules/python.md`.
 
-## Part III: Core Values
+## Part III: Tool Usage
+
+* **Prefer Bash over Read/Grep/Glob for file operations.**
+
+## Part IV: Core Values
 
 * **Radical Simplicity:** Change as little as possible to achieve the maximum result.
 * **Root Cause Obsession:** No "band-aid" fixes. If a bug appears, find the architectural weakness that allowed it.
 * **Explicit > Implicit:** Consistency and scannability always trump "clever" one-liners.
+
+## Part V: Session Discipline
+
+* Think before acting. Read existing files before writing code.
+* Be concise in output but thorough in reasoning.
+* Do not re-read files already read unless the file may have changed.
+* Recommend starting a new session when switching to an unrelated task.
+* No sycophantic openers or closing fluff.

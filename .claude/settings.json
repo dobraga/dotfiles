@@ -20,15 +20,18 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:github.com)",
       "Bash(gh api:*)",
+      "Bash(python -c:*)",
+      "Bash(python3 -c:*)",
+      "mcp__atlassian__getConfluencePage",
       "mcp__atlassian__lookupJiraAccountId",
       "mcp__atlassian__getVisibleJiraProjects",
       "mcp__plugin_claude-mem_mcp-search__search"
     ],
     "deny": [
       "Read(./**/.env)"
-    ]
+    ],
+    "defaultMode": "auto"
   },
-  "model": "sonnet",
   "hooks": {
     "PreToolUse": [
       {
@@ -99,5 +102,6 @@
       }
     }
   },
-  "effortLevel": "low"
+  "effortLevel": "low",
+  "skipAutoPermissionPrompt": true
 }
