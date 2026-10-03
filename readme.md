@@ -24,7 +24,7 @@ cd ~/src/dotfiles
 ```sh
 bash install_packages.sh
 bash install_nvdia.sh
-bash install_claude_code.sh
+bash install_agents.sh
 ```
 
 This will install:
@@ -34,6 +34,8 @@ This will install:
 - uv (Python package installer)
 - Starship prompt
 - Oh My Zsh with plugins
+- Claude Code CLI, RTK, Graphify, and user MCP servers
+- Shared AI Agents, Skills, Rules, and statusline symlinks for Claude Code & Antigravity
 
 ### 3. Symlink configuration files
 
@@ -45,15 +47,8 @@ ln -s ~/src/dotfiles/.env ~/.env
 rm -f ~/.gitconfig
 ln -s ~/src/dotfiles/.gitconfig ~/.gitconfig
 
-ln -s ~/src/dotfiles/.claude/skills/ ~/.claude/skills
-ln -s ~/src/dotfiles/.claude/CLAUDE.md ~/.claude/
-ln -s ~/src/dotfiles/.claude/settings.json ~/.claude/
-ln -s ~/src/dotfiles/.claude/statusline.py ~/.claude/
-ln -s ~/src/dotfiles/.claude/hooks/ ~/.claude/hooks
-ln -s ~/src/dotfiles/.claude/agents/ ~/.claude/agents
-ln -s ~/src/dotfiles/.claude/rules/ ~/.claude/rules
-
-chmod a+x ~/.claude/hooks/*
+# Claude Code & Antigravity Setup
+bash install_agents.sh
 ```
 
 ## Configuration
@@ -83,13 +78,14 @@ Minimal configuration with package module enabled. Custom error symbol (`x`) for
 
 Default branch set to `main`.
 
-## Claude Code Integration
+## Claude Code & Antigravity Integration
 
-Includes custom skills and rules for Claude Code:
-- `modern-python`: Configures Python projects with uv, ruff, and type hints
-- `pr-writter`: Generates pull request summaries
-- `readme`: Creates comprehensive READMEs for Python projects
-- `code-style`: Enforces modern Python 3.10+ standards
+Shared configuration (`agents/`, `skills/`, `rules/`, and universal `AGENTS.md`) across Claude Code and Antigravity CLI:
+- `agents/`: Shared subagent personas (e.g. data-analyst, ds-ml, mlops, qa-roaster)
+- `skills/`: Shared workflows and runbooks (e.g. graphify, grill-me, impeccable, python-setup)
+- `rules/`: Shared coding guidelines (e.g. python.md)
+- `AGENTS.md`: Universal agent instructions natively supported by both Claude Code and Antigravity
+- Statuslines: Dedicated statusline scripts tailored for Claude Code (`.claude/statusline.py`) and Antigravity (`.gemini/statusline.py`)
 
 ## Requirements
 

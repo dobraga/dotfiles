@@ -47,11 +47,29 @@ openrouter() {
   local -x ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY"
   local -x ANTHROPIC_API_KEY="" 
 
-  local -x CLAUDE_CODE_SUBAGENT_MODEL="minimax/minimax-m2.7"
-  local -x ANTHROPIC_DEFAULT_OPUS_MODEL="minimax/minimax-m2.7"
-  # local -x ANTHROPIC_DEFAULT_SONNET_MODEL="minimax/minimax-m2.7"
-  local -x ANTHROPIC_DEFAULT_SONNET_MODEL="z-ai/glm-4.7-flash"
-  local -x ANTHROPIC_DEFAULT_HAIKU_MODEL="z-ai/glm-4.7-flash"
+  local -x CLAUDE_CODE_SUBAGENT_MODEL="z-ai/glm-5.2"
+  local -x ANTHROPIC_DEFAULT_OPUS_MODEL="z-ai/glm-5.2"
+  local -x ANTHROPIC_DEFAULT_SONNET_MODEL="minimax/minimax-m3"
+  local -x ANTHROPIC_DEFAULT_HAIKU_MODEL="minimax/minimax-m3"
+  
+  claude "$@"
+}
+
+glm() {
+  if [[ -z "$MINIMAX_API_KEY" ]]; then
+    echo "Error: MINIMAX_API_KEY is not set." >&2
+    echo "Please export it or add it to your .env file." >&2
+    return 1
+  fi
+
+  local -x ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
+  local -x ANTHROPIC_AUTH_TOKEN="$GLM_API_KEY"
+  local -x ANTHROPIC_API_KEY=""
+  local -x API_TIMEOUT_MS="3000000",
+  local -x ANTHROPIC_MODEL="glm-5.2",
+  local -x ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.2"
+  local -x ANTHROPIC_DEFAULT_SONNET_MODEL="glm-4.7"
+  local -x ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.7"
   
   claude "$@"
 }
@@ -67,10 +85,9 @@ minimax() {
   local -x ANTHROPIC_AUTH_TOKEN="$MINIMAX_API_KEY"
   local -x ANTHROPIC_API_KEY=""
   local -x API_TIMEOUT_MS="3000000",
-  local -x CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1",
   local -x ANTHROPIC_MODEL="MiniMax-M2.7",
-  local -x ANTHROPIC_DEFAULT_SONNET_MODEL="MiniMax-M2.7",
   local -x ANTHROPIC_DEFAULT_OPUS_MODEL="MiniMax-M2.7",
+  local -x ANTHROPIC_DEFAULT_SONNET_MODEL="MiniMax-M2.7",
   local -x ANTHROPIC_DEFAULT_HAIKU_MODEL="MiniMax-M2.7"
   
   claude "$@"
@@ -80,6 +97,8 @@ export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
 # [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
 
+# Added by Antigravity CLI installer & user tools
+export PATH="${HOME}/.local/bin:${HOME}/.bun/bin:${HOME}/bin:$PATH"
 
-alias claude-mem='~/.bun/bin/bun ~/.claude/plugins/cache/thedotmack/claude-mem/10.6.2/scripts/worker-service.cjs'
-pgrep -f "worker-service.cjs" > /dev/null 2>&1 || claude-mem
+# claude-mem background daemon
+pgrep -f "worker-service.cjs" > /dev/null 2>&1 || (claude-mem >/dev/null 2>&1 &)

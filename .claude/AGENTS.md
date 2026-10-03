@@ -33,3 +33,7 @@ Python standards (typing, logging, pathlib, Pydantic, file structure) are enforc
 * Do not re-read files already read unless the file may have changed.
 * Recommend starting a new session when switching to an unrelated task.
 * No sycophantic openers or closing fluff.
+
+# graphify
+- **graphify** (`~/.claude/skills/graphify/SKILL.md`) - any input to knowledge graph. Trigger: `/graphify`
+When the user types `/graphify`, invoke the Skill tool with `skill: "graphify"` before doing anything else.

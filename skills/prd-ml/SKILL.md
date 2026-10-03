@@ -14,8 +14,8 @@ Create detailed Product Requirements Documents for data science, machine learnin
 1. Receive a feature/project description from the user
 2. Identify whether this is primarily a **DS experiment**, **ML model**, **data pipeline**, or **MLOps infrastructure** task
 3. Ask 4-6 essential clarifying questions (with lettered options)
-4. Generate a structured PRD based on answers
-5. Save to `docs/tasks/prd-[feature-name].md`
+4. Generate a structured PRD based on answers `docs/prd/[feature-name]/prd.md`
+5. Save to `docs/prd/[feature-name]/tasks.md`
 
 **Important:** Do NOT start implementing. Just create the PRD.
 
@@ -307,14 +307,6 @@ The PRD reader may be a junior data scientist, ML engineer, or AI agent. Therefo
 
 ---
 
-## Output
-
-- **Format:** Markdown (`.md`)
-- **Location:** `docs/tasks/`
-- **Filename:** `prd-[feature-name].md` (kebab-case)
-
----
-
 ## Example PRD (Excerpt)
 
 ```markdown
@@ -403,4 +395,5 @@ Before saving the PRD:
 - [ ] Reproducibility requirements are explicit
 - [ ] Risks table populated
 - [ ] Non-goals section defines clear boundaries
-- [ ] Saved to `docs/tasks/prd-[feature-name].md`
+- [ ] Saved to `docs/prd/[feature-name]/prd.md`
+- [ ] Saved to `docs/prd/[feature-name]/tasks.md`

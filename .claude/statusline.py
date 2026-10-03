@@ -18,9 +18,26 @@ CYAN, GREEN, YELLOW, RED, RESET = (
     "\033[0m",
 )
 
-bar_color = RED if pct >= 90 else YELLOW if pct >= 60 else GREEN
-filled = pct // 10
-bar = "█" * filled + "░" * (10 - filled)
+
+def color_for(p):
+    return RED if p >= 90 else YELLOW if p >= 60 else GREEN
+
+
+def make_bar(p, width=5):
+    filled = p * width // 100
+    return "█" * filled + "░" * (width - filled)
+
+
+bar_color = color_for(pct)
+bar = make_bar(pct)
+
+# Quota (subscription only; absent for API-key users or before first response)
+quota = ""
+for key, label in (("five_hour", "5h"), ("seven_day", "7d")):
+    used = (data.get("rate_limits", {}).get(key) or {}).get("used_percentage")
+    if used is not None:
+        used = int(used)
+        quota += f" | {label} {color_for(used)}{make_bar(used, 5)} {used}%{RESET}"
 
 try:
     branch = subprocess.check_output(
@@ -31,5 +48,5 @@ except:
     branch = ""
 
 print(
-    f"{CYAN}[{model}]{RESET} {branch} {bar_color}{bar}{RESET} {pct}% | {YELLOW}${cost:.2f}{RESET}"
+    f"{CYAN}[{model}]{RESET} {branch} {bar_color}{bar}{RESET} {pct}%{quota} | {YELLOW}${cost:.2f}{RESET}"
 )
