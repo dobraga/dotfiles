@@ -26,15 +26,19 @@ class ClaudeNotify:
         self.logger.setLevel(logging.WARNING)
         self.logger.addHandler(handler)
 
-    def send_notification(self, title, message):
-        """Sends a desktop notification via notify-send."""
+    def send_notification(self, title: str, message: str) -> None:
+        """Sends a desktop notification: osascript on macOS, notify-send on Linux."""
+        if sys.platform == "darwin":
+            script = f"display notification {json.dumps(message, ensure_ascii=False)} with title {json.dumps(title, ensure_ascii=False)}"
+            command = ["osascript", "-e", script]
+        else:
+            command = ["notify-send", "--app-name", "Claude", title, message]
+
         try:
-            subprocess.run(
-                ["notify-send", "--app-name", "Claude", title, message], check=False
-            )
+            subprocess.run(command, check=False)
             self.logger.info(f"Notified: {title} -> {message}")
         except FileNotFoundError:
-            self.logger.warning("notify-send not found. Is libnotify installed?")
+            self.logger.warning(f"{command[0]} not found.")
 
     def handle_event(self, event_type, data):
         """Routes the event to a notification action."""
