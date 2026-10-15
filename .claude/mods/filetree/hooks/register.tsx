@@ -1,4 +1,5 @@
 import { atom, read, type BuiltinToolResults, type EngineInterface, type Register, type RenderNode, type Timer, update } from 'claude-code'
+import { deltaDiff, ensureDelta, parseAnsi, sliceSpans, stripAnsi } from './delta'
 import { openCommand } from './open'
 
 import type { Activity, FileNode, FileTree, RepoRow, Theme, ViewMode } from '../types'
@@ -121,6 +122,13 @@ function osName($: EngineInterface): Promise<'linux' | 'darwin' | 'win32'> {
 
 async function cwdOf($: EngineInterface): Promise<string> {
   return posix(await $.session.cwd())
+}
+
+// Where Claude was launched: the pinned tree root, so a `cd` in a Bash call never moves the repos block
+async function launchRoot($: EngineInterface): Promise<string> {
+  const root = pinRoot ? (await get($)).root : ''
+
+  return root || (await cwdOf($))
 }
 
 function clean(segs: Seg[]): Seg[] {
@@ -812,6 +820,11 @@ async function listAll($: EngineInterface, t: FileTree): Promise<string[] | null
     if (t.top && run.exitCode !== 0) return null
     const paths = run.stdout.split('\0').filter(Boolean)
     if (run.isStdoutTruncated) paths.pop()
+    // `ls-files --exclude-standard` leaves out gitignored files, which the tree still shows: add them, minus the pruned dirs
+    if (t.top) {
+      const ignored = await git($, t.root, ['ls-files', '-oi', '--exclude-standard', '-z'], 10_000)
+      if (ignored.exitCode === 0) paths.push(...ignored.stdout.split('\0').filter(p => p && !p.split('/').some(seg => PRUNE.includes(seg))))
+    }
     return paths.map(p => (isAbsolute(p) ? p : join(t.root, p)))
   } catch {
     return null
@@ -946,8 +959,6 @@ function shortPath(path: string): string {
 
 // ---- file viewer, repo branches, pull/push (merged from the file-viewer mod) ----
 const VIEWER_PANE = 'file-viewer'
-// Fixed tab: the repos with changes, opened with the session (the viewer's own Repos view shows the same list)
-const REPOS_PANE = 'repos'
 const TITLE = 'File viewer'
 const MAX_CHARS = 90000
 const RENDER_TIMEOUT_MS = 10000
@@ -984,14 +995,12 @@ const SPACER_ROWS = 12
 // Repos directly under the working directory, with their branch (shown in the viewer's Repos view)
 const REFRESH_MS = 30000
 // Branches repos normally sit on; anything else (a feature branch) is highlighted
+let deltaBin: string | null = null
 const BASE_BRANCHES = new Set(['main', 'master', 'develop', 'dev', 'staging', 'production'])
 const repos = atom({ plugin: 'filetree', key: 'repos' } as const, [] as RepoRow[])
 // Repos view: the repo whose changed files are listed ('' = the repo list), and whether clean repos are listed too
 const repoPick = atom({ plugin: 'filetree', key: 'repoPick' } as const, '')
 const allRepos = atom({ plugin: 'filetree', key: 'allRepos' } as const, false)
-// Repos tab: the changed file whose diff is drawn inside the tab itself ('' = the file list)
-const repoFile = atom({ plugin: 'filetree', key: 'repoFile' } as const, '')
-const MAX_DIFF_LINES = 600
 
 type ChangedFile = { path: string; letter: string; add: number; del: number }
 
@@ -1013,13 +1022,14 @@ const inspectRepo = async ($: EngineInterface, name: string, path = name): Promi
 }
 
 const refreshRepos = async ($: EngineInterface): Promise<void> => {
+  const root = await launchRoot($)
   const names: string[] = []
-  for (const entry of await $.fs.list('.')) {
-    if (entry.kind === 'dir' && !entry.name.startsWith('.') && (await $.fs.exists(`${entry.name}/.git`))) names.push(entry.name)
+  for (const entry of await $.fs.list(root)) {
+    if (entry.kind === 'dir' && !entry.name.startsWith('.') && (await $.fs.exists(`${root}/${entry.name}/.git`))) names.push(entry.name)
   }
-  const rows = await Promise.all(names.sort().map(name => inspectRepo($, name)))
+  const rows = await Promise.all(names.sort().map(name => inspectRepo($, name, `${root}/${name}`)))
   // The folder itself, when it is a repo, is the main one and stays pinned first
-  if (await $.fs.exists('.git')) rows.unshift(await inspectRepo($, (await cwdOf($)).split('/').pop() || '.', '.'))
+  if (await $.fs.exists(`${root}/.git`)) rows.unshift(await inspectRepo($, root.split('/').pop() || root, root))
   await update($, repos, () => rows)
 }
 
@@ -1040,8 +1050,7 @@ const gitAction = async ($: EngineInterface, repo: RepoRow, verb: 'pull' | 'push
 
 // Files changed in one repo (staged, unstaged and untracked), with their +N -N against HEAD
 const changedFiles = async ($: EngineInterface, repo: RepoRow): Promise<ChangedFile[]> => {
-  const cwd = await cwdOf($)
-  const abs = repo.path === '.' ? cwd : `${cwd}/${repo.path}`
+  const abs = repo.path
   const [status, numstat] = await Promise.all([
     $.process.run(['git', '--no-optional-locks', '-C', abs, 'status', '--porcelain=v1', '-z', '--untracked-files=all'], { timeoutMs: 10000 }),
     $.process.run(['git', '--no-optional-locks', '-C', abs, 'diff', 'HEAD', '--numstat', '-z'], { timeoutMs: 10000 }),
@@ -1082,38 +1091,10 @@ const reposView = async ($: EngineInterface, e: Parameters<EngineInterface['ui']
   )
 
   if (picked) {
-    const cwd = await cwdOf($)
-    const base = picked.path === '.' ? cwd : `${cwd}/${picked.path}`
-    const pickedFile = inViewer ? '' : await read($, repoFile)
-
-    // The Repos tab draws the diff itself, so nothing has to open or focus another pane
-    if (pickedFile) {
-      const run = await $.process.run(['git', '--no-optional-locks', '-C', parentDir(pickedFile), 'diff', 'HEAD', '--no-color', '--', pickedFile], { timeoutMs: 10000 })
-      const isDiff = run.exitCode === 0 && run.stdout.trim() !== ''
-      const text = isDiff ? run.stdout : await $.fs.read(pickedFile).catch(() => '')
-      const all = text.split('\n')
-      const lines = all.slice(0, MAX_DIFF_LINES)
-
-      return (
-        <Box flexDirection="column">
-          {header}
-          <Box>
-            <Button label="← Files" hotkey="b" onPress={() => void update($, repoFile, () => '')} />
-            <Text dimColor> {pickedFile.slice(base.length + 1)} · {isDiff ? 'diff vs HEAD' : 'untracked: full file'}{all.length > lines.length ? ` · first ${lines.length} of ${all.length} lines` : ''}</Text>
-          </Box>
-          {lines.map(line => (
-            <Text wrap="truncate-end" color={line.startsWith('@@') ? 'cyan' : isDiff && line.startsWith('+') ? 'green' : isDiff && line.startsWith('-') ? 'red' : undefined}>
-              {line === '' ? ' ' : line}
-            </Text>
-          ))}
-        </Box>
-      )
-    }
-
+    const base = picked.path
     const files = await changedFiles($, picked)
     const open = (file: ChangedFile) =>
       void (async () => {
-        if (!inViewer) return void (await update($, repoFile, () => file.path))
         await update($, target, () => file.path)
         await update($, col, () => 0)
         await update($, row, () => 0)
@@ -1304,13 +1285,27 @@ const imageFile = async ($: EngineInterface, path: string): Promise<{ file: stri
     file = `${MEDIA_CACHE}/${cacheName(path)}.png`
     await $.process.run(['mkdir', '-p', MEDIA_CACHE])
     if (!(await $.fs.exists(file))) {
-      const made = await $.process.run(['sips', '-s', 'format', 'png', path, '--out', file], { timeoutMs: 30000 })
+      let made = await $.process.run(['sips', '-s', 'format', 'png', path, '--out', file], { timeoutMs: 30000 }).catch(() => ({ exitCode: 1 }))
+      // sips is macOS only; ffmpeg converts elsewhere
+      if (made.exitCode !== 0) made = await $.process.run(['ffmpeg', '-y', '-v', 'error', '-i', path, '-frames:v', '1', file], { timeoutMs: 30000 })
       if (made.exitCode !== 0) return undefined
     }
   }
-  const info = await $.process.run(['sips', '-g', 'pixelWidth', '-g', 'pixelHeight', file], { timeoutMs: 15000 })
-  const width = Number(/pixelWidth:\s*(\d+)/.exec(info.stdout)?.[1])
-  const height = Number(/pixelHeight:\s*(\d+)/.exec(info.stdout)?.[1])
+  // ffprobe first (Linux and macOS with ffmpeg); sips is the macOS fallback and its absence must not abort the preview
+  const size = async (cmd: string[]): Promise<[number, number]> => {
+    try {
+      const run = await $.process.run(cmd, { timeoutMs: 15000 })
+      const text = run.stdout.trim()
+      if (cmd[0] === 'sips') return [Number(/pixelWidth:\s*(\d+)/.exec(text)?.[1]), Number(/pixelHeight:\s*(\d+)/.exec(text)?.[1])]
+      const [w, h] = text.split(',').map(Number)
+
+      return [w, h]
+    } catch {
+      return [0, 0]
+    }
+  }
+  let [width, height] = await size(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', file])
+  if (!(width > 0 && height > 0)) [width, height] = await size(['sips', '-g', 'pixelWidth', '-g', 'pixelHeight', file])
 
   return width > 0 && height > 0 ? { file, width, height } : undefined
 }
@@ -1324,6 +1319,27 @@ const videoFrame = async ($: EngineInterface, path: string, at: number): Promise
   }
 
   return file
+}
+
+// A PNG of a rendered HTML page, from the first headless browser found (the default one is often Brave or Chrome); re-made when the file is newer
+const HTML_SHOT = [
+  'out=$1; f=$2',
+  '[ "$out" -nt "$f" ] && exit 0',
+  'for b in brave-browser chromium chromium-browser google-chrome-stable google-chrome "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; do',
+  '  if command -v "$b" >/dev/null 2>&1 || [ -x "$b" ]; then',
+  '    exec "$b" --headless --disable-gpu --hide-scrollbars --screenshot="$out" --window-size=1200,900 "file://$f"',
+  '  fi',
+  'done',
+  'command -v firefox >/dev/null 2>&1 && exec firefox --headless --screenshot "$out" --window-size=1200,900 "file://$f"',
+  'exit 127',
+].join('\n')
+
+const htmlFrame = async ($: EngineInterface, path: string): Promise<string | undefined> => {
+  const file = `${MEDIA_CACHE}/${cacheName(path)}_html.png`
+  await $.process.run(['mkdir', '-p', MEDIA_CACHE])
+  const run = await $.process.run(['sh', '-c', HTML_SHOT, 'sh', file, path], { timeoutMs: 40000 }).catch(() => ({ exitCode: 1 }))
+
+  return run.exitCode === 0 && (await $.fs.exists(file)) ? file : undefined
 }
 
 const stopAudio = async ($: EngineInterface): Promise<void> => {
@@ -1374,6 +1390,7 @@ const pictureCells = async ($: EngineInterface, file: string, columns: number, r
   const tall = rows * 4
   const raw = `${MEDIA_CACHE}/${cacheName(file)}_${wide}x${tall}.rgb`
   if (!(await $.fs.exists(raw))) {
+    await $.process.run(['mkdir', '-p', MEDIA_CACHE])
     const run = await $.process.run(
       ['ffmpeg', '-y', '-v', 'error', '-i', file, '-vf', `scale=${wide}:${tall}:flags=lanczos`, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', raw],
       { timeoutMs: 30000 },
@@ -1430,9 +1447,9 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'repos' }, async $ => {
     await refreshRepos($)
-    const placed = await $.ui.open({ id: REPOS_PANE, title: 'Repos', focus: true })
+    const placed = await $.ui.open({ id: PANE, focus: true })
 
-    return { text: placed.isPlaced ? 'Repos tab opened.' : `Repos tab not shown: ${placed.reason}` }
+    return { text: placed.isPlaced ? 'Repos are listed under the file tree.' : `Files tab not shown: ${placed.reason}` }
   })
 
   on('state.set', { plugin: 'filetree', key: 'tree' }, async ($, e, next) => {
@@ -1516,38 +1533,62 @@ export const register: Register = (on, options) => {
   // The repos' branches under filetree's own tree ("Files: <folder>"). filetree sizes its rows from scroll.bodyRows, so give it
   // that much less room, then draw our block under what it returns.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
-    const rows = await read($, repos)
-    if (e.surface !== 'terminal' || rows.length < 2) return next(e)
+    const rows = (await read($, repos)).filter(r => r.dirty > 0 || r.ahead > 0 || r.behind > 0)
+    if (e.surface !== 'terminal' || rows.length < 1) return next(e)
 
-    const taken = rows.length + 1
+    const pickedPath = await read($, repoPick)
+    const picked = rows.find(r => r.path === pickedPath)
+    const files = picked ? await changedFiles($, picked) : []
+    const budget = Math.max(3, Math.floor(e.props.scroll.bodyRows / 2))
+    const shown = files.slice(0, Math.max(0, budget - rows.length))
+    const taken = rows.length + shown.length + (files.length > shown.length ? 1 : 0) + 1
     const inner = await next({ ...e, props: { ...e.props, scroll: { ...e.props.scroll, bodyRows: Math.max(5, e.props.scroll.bodyRows - taken) } } })
     const { Box, Text, Button } = $.ui.resolve(e)
     const nameWidth = rows.reduce((n, r) => Math.max(n, r.name.length), 0)
+    const base = picked?.path ?? ''
+    const open = (file: ChangedFile) =>
+      void (async () => {
+        await update($, target, () => file.path)
+        await update($, col, () => 0)
+        await update($, row, () => 0)
+        await update($, mode, () => 'diff')
+        await show($)
+      })()
 
     return (
       <Box flexDirection="column">
         {inner}
         <Text dimColor>{'─'.repeat(Math.max(8, e.props.bodyColumns))}</Text>
         {rows.map(r => (
-          <Box>
-            <Text wrap="truncate-end">{r.name.padEnd(nameWidth)} </Text>
-            <Text wrap="truncate-end" color={BASE_BRANCHES.has(r.branch) ? undefined : 'yellow'} dimColor={BASE_BRANCHES.has(r.branch)}>
-              {r.branch}
-            </Text>
-            {r.dirty > 0 && <Text color="red"> ●{r.dirty}</Text>}
-            {r.ahead > 0 && <Text color="green"> ↑{r.ahead}</Text>}
-            {r.behind > 0 && <Text color="cyan"> ↓{r.behind}</Text>}
-            {r.behind > 0 && <Text> </Text>}
-            {r.behind > 0 && <Button key={`pull-${r.name}`} plain label="pull" onPress={() => void gitAction($, r, 'pull')} />}
-            {r.ahead > 0 && <Text> </Text>}
-            {r.ahead > 0 && <Button key={`push-${r.name}`} plain label="push" onPress={() => void gitAction($, r, 'push')} />}
+          <Box flexDirection="column">
+            <Box>
+              <Button key={`repo-${r.path}`} plain label={`${r === picked ? '▾' : '▸'} ${r.name.padEnd(nameWidth)}`} onPress={() => void update($, repoPick, cur => (cur === r.path ? '' : r.path))} />
+              <Text> </Text>
+              <Text wrap="truncate-end" color={BASE_BRANCHES.has(r.branch) ? undefined : 'yellow'} dimColor={BASE_BRANCHES.has(r.branch)}>
+                {r.branch}
+              </Text>
+              {r.dirty > 0 && <Text color="red"> ●{r.dirty}</Text>}
+              {r.ahead > 0 && <Text color="green"> ↑{r.ahead}</Text>}
+              {r.behind > 0 && <Text color="cyan"> ↓{r.behind}</Text>}
+              {r.behind > 0 && <Text> </Text>}
+              {r.behind > 0 && <Button key={`pull-${r.name}`} plain label="pull" onPress={() => void gitAction($, r, 'pull')} />}
+              {r.ahead > 0 && <Text> </Text>}
+              {r.ahead > 0 && <Button key={`push-${r.name}`} plain label="push" onPress={() => void gitAction($, r, 'push')} />}
+            </Box>
+            {r === picked && shown.map(f => (
+              <Box>
+                <Text color={GIT_COLOR[f.letter === 'A' ? '?' : f.letter]}>  {f.letter} </Text>
+                <Button key={`file-${f.path}`} plain label={f.path.slice(base.length + 1)} onPress={() => open(f)} />
+                {f.add > 0 && <Text color="green"> +{f.add}</Text>}
+                {f.del > 0 && <Text color="red"> -{f.del}</Text>}
+              </Box>
+            ))}
+            {r === picked && files.length > shown.length && <Text dimColor>  … {files.length - shown.length} more</Text>}
           </Box>
         ))}
       </Box>
     )
   })
-
-  on('ui.render', { component: 'Pane', requestId: REPOS_PANE }, async ($, e) => reposView($, e, '', false))
 
   on('ui.render', { component: 'Pane', requestId: VIEWER_PANE }, async ($, e) => {
     const { Box, Text, Button, Code, Markdown, Raster, Image } = $.ui.resolve(e)
@@ -1555,18 +1596,21 @@ export const register: Register = (on, options) => {
     const chosen = await read($, mode)
     const path = (await read($, target)) || (t?.selected ?? '')
     const isMermaid = /\.(mmd|mermaid)$/i.test(path)
-    const isRenderable = isMermaid || /\.(md|markdown|mdx)$/i.test(path)
+    const isRenderable = isMermaid || /\.(md|markdown|mdx|html?)$/i.test(path)
     const view = chosen === 'rendered' && !isRenderable ? 'file' : chosen
+    const isHtml = /\.html?$/i.test(path)
+    const htmlPreview = isHtml && view === 'rendered'
 
     if (chosen === 'repos' || !path) return reposView($, e, path, true)
 
-    const mediaKind = IMAGE_EXT.test(path) ? 'image' : AUDIO_EXT.test(path) ? 'audio' : VIDEO_EXT.test(path) ? 'video' : undefined
+    const mediaKind = htmlPreview ? 'html' : IMAGE_EXT.test(path) ? 'image' : AUDIO_EXT.test(path) ? 'audio' : VIDEO_EXT.test(path) ? 'video' : undefined
     if (mediaKind) {
       const name = t && path.startsWith(t.root) ? path.slice(t.root.length).replace(/^\//, '') : path
       const pid = await read($, playPid)
       const started = await read($, playStart)
       await read($, tick)
-      const duration = mediaKind === 'image' ? 0 : await mediaDuration($, path)
+      const still = mediaKind === 'image' || mediaKind === 'html'
+      const duration = still ? 0 : await mediaDuration($, path)
       const at = Math.max(0, Math.min(await read($, videoPos), Math.max(0, duration - 1)))
       const isPlaying = pid > 0
       const elapsed = isPlaying ? Math.min(duration || Infinity, (Date.now() - started) / 1000) : 0
@@ -1576,12 +1620,16 @@ export const register: Register = (on, options) => {
 
       let picture: RenderNode = <Text dimColor> </Text>
       if (mediaKind !== 'audio') {
-        const source = mediaKind === 'image' ? await imageFile($, path) : await (async () => {
+        const source = mediaKind === 'image' ? await imageFile($, path) : mediaKind === 'html' ? await (async () => {
+          const shot = await htmlFrame($, path)
+
+          return shot ? imageFile($, shot) : undefined
+        })() : await (async () => {
           const frame = await videoFrame($, path, at)
 
           return frame ? imageFile($, frame) : undefined
         })()
-        if (!source) picture = <Text dimColor>Cannot draw this {mediaKind} (needs sips/ffmpeg).</Text>
+        if (!source) picture = <Text dimColor>{mediaKind === 'html' ? 'Cannot render this page (needs brave, chromium, chrome or firefox).' : `Cannot draw this ${mediaKind} (needs sips or ffmpeg).`}</Text>
         else {
           // half-block cells make a cell column 1 pixel wide and 2 tall: fit the picture in the room, keeping its proportions
           let cols = Math.min(columns, 512)
@@ -1608,16 +1656,20 @@ export const register: Register = (on, options) => {
       return (
         <Box flexDirection="column">
           <Box>
-            {mediaKind !== 'image' && !isPlaying && <Button label="▶ Play" hotkey="p" onPress={() => void startAudio($, path, duration)} />}
-            {mediaKind !== 'image' && isPlaying && <Button label="■ Stop" hotkey="x" onPress={() => void stopAudio($)} />}
-            {mediaKind !== 'image' && <Text> </Text>}
+            {!still && !isPlaying && <Button label="▶ Play" hotkey="p" onPress={() => void startAudio($, path, duration)} />}
+            {!still && isPlaying && <Button label="■ Stop" hotkey="x" onPress={() => void stopAudio($)} />}
+            {!still && <Text> </Text>}
             {mediaKind === 'video' && <Button label="◀ 5s" hotkey="h" onPress={() => seek(at - VIDEO_STEP)} />}
             {mediaKind === 'video' && <Text> </Text>}
             {mediaKind === 'video' && <Button label="5s ▶" hotkey="l" onPress={() => seek(at + VIDEO_STEP)} />}
             {mediaKind === 'video' && <Text> </Text>}
-            <Button label="Open" hotkey="o" onPress={() => void $.process.run(['open', path])} />
-            {mediaKind !== 'audio' && <Text> </Text>}
-            {mediaKind !== 'audio' && (
+            {mediaKind === 'html' && <Button label="Diff" hotkey="d" onPress={() => void update($, mode, () => 'diff')} />}
+            {mediaKind === 'html' && <Text> </Text>}
+            {mediaKind === 'html' && <Button label="File" hotkey="f" onPress={() => void update($, mode, () => 'file')} />}
+            {mediaKind === 'html' && <Text> </Text>}
+            <Button label="Open" hotkey="o" onPress={() => void openFile($, path)} />
+            {mediaKind !== 'audio' && mediaKind !== 'html' && <Text> </Text>}
+            {mediaKind !== 'audio' && mediaKind !== 'html' && (
               <Button label="Quick Look" hotkey="q" onPress={() => void $.process.run(['sh', '-c', 'qlmanage -p "$1" >/dev/null 2>&1 &', 'sh', path])} />
             )}
             <Text> </Text>
@@ -1639,10 +1691,17 @@ export const register: Register = (on, options) => {
 
     let body = ''
     let isDiff = false
+    let isDelta = false
     try {
       if (view === 'diff') {
         const dir = parentDir(path)
-        const run = await $.process.run(['git', '-C', dir, 'diff', 'HEAD', '--no-color', '--', path])
+        const colored = await deltaDiff($, deltaBin, dir, path, Math.max(20, (e.props.bodyColumns ?? 80) - GUTTER))
+        if (colored) {
+          body = colored
+          isDiff = true
+          isDelta = true
+        }
+        const run = isDelta ? { exitCode: 1, stdout: '' } : await $.process.run(['git', '-C', dir, 'diff', 'HEAD', '--no-color', '--', path])
         if (run.exitCode === 0 && run.stdout.trim()) {
           body = run.stdout
           isDiff = true
@@ -1670,7 +1729,7 @@ export const register: Register = (on, options) => {
     const lines = source.split('\n')
 
     // Widest line that scrolls sideways (prose wraps instead)
-    const wide = view === 'rendered' ? drawn.filter((_, i) => segments[i]?.kind !== 'markdown').flatMap(d => d.split('\n')) : lines
+    const wide = view === 'rendered' ? drawn.filter((_, i) => segments[i]?.kind !== 'markdown').flatMap(d => d.split('\n')) : isDelta ? lines.map(stripAnsi) : lines
     const maxOffset = Math.max(0, wide.reduce((n, l) => Math.max(n, l.length), 0) - room)
     const offset = Math.min(await read($, col), maxOffset)
     const slice = (line: string): string => (isDiff ? (line.startsWith('@@') || line.length === 0 ? line : line[0] + line.slice(1 + offset)) : line.slice(offset))
@@ -1703,7 +1762,22 @@ export const register: Register = (on, options) => {
     const top = Math.min(await read($, row), maxRow)
 
     let content = <Code source={lines.slice(top, top + budget).map(slice).join('\n')} path={path} startLine={top + 1} wrap="truncate-end" />
-    if (isDiff) {
+    if (isDelta) {
+      content = (
+        <Box flexDirection="column">
+          {lines.slice(top, top + budget).map(line => (
+            <Box>
+              {sliceSpans(parseAnsi(line), offset).map(sp => (
+                <Text wrap="truncate-end" color={sp.c} backgroundColor={sp.bg} bold={sp.b} italic={sp.i} strikethrough={sp.s}>
+                  {sp.t}
+                </Text>
+              ))}
+              {line === '' && <Text> </Text>}
+            </Box>
+          ))}
+        </Box>
+      )
+    } else if (isDiff) {
       content = (
         <Box flexDirection="column">
           {lines.slice(top, top + budget).map(line => (
@@ -1734,6 +1808,8 @@ export const register: Register = (on, options) => {
           <Button label="File" hotkey="f" onPress={() => void update($, mode, () => 'file')} />
           {isRenderable && <Text> </Text>}
           {isRenderable && <Button label="Preview" hotkey="p" onPress={() => void update($, mode, () => 'rendered')} />}
+          {isHtml && <Text> </Text>}
+          {isHtml && <Button label="Open" hotkey="o" onPress={() => void openFile($, path)} />}
           <Text> </Text>
           <Button label="Repos" hotkey="r" onPress={() => void update($, mode, () => 'repos')} />
           <Text> </Text>
@@ -1775,7 +1851,7 @@ export const register: Register = (on, options) => {
       name: 'view',
       description: 'Open the file viewer; "/view <path>" shows a file, "/view auto" toggles opening it when a file is selected in filetree, "/view single" keeps one tab open',
     })
-    await $.command.register({ name: 'repos', description: 'Open the Repos tab: every repo in this folder with its branch and changes' })
+    await $.command.register({ name: 'repos', description: 'Focus the Files tab, where every repo in this folder is listed under the tree with its branch and changes' })
     await refreshRepos($)
     $.clock.every(REFRESH_MS, () => void refreshRepos($))
     await $.command.register({ name: 'filetree', description: 'Show the file tree; args: [path] (no path = cwd)' })
@@ -1791,6 +1867,7 @@ export const register: Register = (on, options) => {
       } catch {
         noNerd = true
       }
+      void ensureDelta($, home).then(bin => (deltaBin = bin))
       await loadTheme($)
       themePoll?.cancel()
       themePoll = themeMtime ? $.clock.every(THEME_POLL_MS, () => void loadTheme($)) : null
@@ -1798,9 +1875,8 @@ export const register: Register = (on, options) => {
       if (t.flashOn) await patch($, () => ({ flash: [], flashDim: [], flashOn: false, flashTones: {} }))
       await setActivities($, cur => cur.map(a => (a.state === 'running' ? { ...a, state: 'failed', label: `${a.kind} interrupted` } : a)))
       const cwd = await cwdOf($)
-      if (!t.root || t.nodes.length === 0 || (follow && t.root !== cwd)) await reset($, cwd)
+      if (!t.root || t.nodes.length === 0 || (follow && !pinRoot && t.root !== cwd)) await reset($, cwd)
       else if (!noDock) await $.ui.open({ id: PANE, title: `Files: ${t.root.split('/').pop() || t.root}` })
-      if (!noDock) await $.ui.open({ id: REPOS_PANE, title: 'Repos' })
     })()
     return next(e)
   })

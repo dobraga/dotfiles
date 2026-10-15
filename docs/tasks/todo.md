@@ -57,3 +57,18 @@ Claude Code and Antigravity (Agy) now both support universal standards (`AGENTS.
 - [x] Global symlinks in `~/.claude` and `~/.gemini` verified and resolving.
 - [x] `claude-mem` launcher tested and operational.
 - [x] All-in-one installer script tested cleanly.
+
+### 4. Kitty Terminal
+- [x] Image preview in filetree: already supported (kitty detected, ffmpeg fallback for non-PNG).
+- [x] Add `kitty/kitty.conf` (FiraCode Nerd Font Mono, shell integration, scrollback, copy_on_select).
+- [x] Link `~/.config/kitty` to `kitty/` in `install_agents.sh` (backs up an existing real dir).
+- [x] Validate with `kitty --debug-config`.
+- [x] Adopt monoira/kitty-tabs (Catppuccin theme, Firefox-style tabs) in `kitty/{theme,tabs}.conf`; new tabs/windows start in `~` (`launch --cwd=~`, `startup.session`). Verified by launching kitty with `--cwd=~`.
+
+### 7. HTML "Open" button in filetree viewer
+Decision: reuse what exists (no w3m/chromium); add an "Open" button (`o`) for `.html/.htm` that calls the mod's `openFile()` (detached launcher + error toast) in the default browser.
+- [x] `isHtml` + Open button in the text viewer (`register.tsx`).
+- [x] Lesson: raw `$.process.run(['xdg-open', …])` hangs/fails for GUI browsers; use `openFile()` (setsid launcher in `open.ts`).
+- [x] HTML preview: `.html/.htm` now has Preview (`p`) → `htmlFrame()` renders via headless brave/chromium/chrome/firefox into the existing `Image` path; Diff/File/Open buttons in that view. Gotcha: `--user-data-dir=<fresh>` makes headless Brave hang; omit it.
+- [x] Media Open button now uses `openFile()` too.
+- [x] Search bug: index used `git ls-files -co --exclude-standard`, which skips gitignored files the tree still shows (e.g. `*.html` ignored in ml-research). Index now adds `ls-files -oi` (minus PRUNE dirs).
