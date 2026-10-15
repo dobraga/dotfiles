@@ -74,9 +74,11 @@ if command -v claude &>/dev/null; then
   claude plugin marketplace add thedotmack/claude-mem 2>/dev/null || true
   claude plugin install claude-mem@thedotmack 2>/dev/null || true
 
-  # filetree mod (local marketplace versioned in this repo)
+  # filetree mod (local marketplace versioned in this repo), registered through ~/.claude/mods so no machine path is stored
   echo "  - Registering and installing filetree mod..."
-  claude plugin marketplace add "${CLAUDE_DIR}/mods" 2>/dev/null || true
+  mkdir -p "${CLAUDE_HOME}"
+  ln -sfn "${CLAUDE_DIR}/mods" "${CLAUDE_HOME}/mods"
+  claude plugin marketplace add "${CLAUDE_HOME}/mods" 2>/dev/null || true
   claude plugin install filetree@claude-mods --scope user 2>/dev/null || true
 fi
 

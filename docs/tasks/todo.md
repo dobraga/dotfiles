@@ -75,3 +75,4 @@ Decision: reuse what exists (no w3m/chromium); add an "Open" button (`o`) for `.
 - [x] Repos tab empty inside a repo subfolder: `refreshRepos` only checked `<root>/.git`; now pins `git rev-parse --show-toplevel` of the root.
 - [x] Renamed `install_agents.sh` -> `install_dotfiles.sh` (it links agents and the kitty config); `kitty` package install lives in `install_packages.sh`. Older entries above keep the old name.
 - [x] Theme switched from Catppuccin to Alucard (dexpota/kitty-themes) in `kitty/alucard.conf`; `theme.conf` removed. Tab/border colors are our own additions.
+- [x] filetree marketplace no longer hard-codes the dotfiles path: installer links `~/.claude/mods` and registers it from there; dropped `claude-mods` from settings.json `extraKnownMarketplaces`.
