@@ -45,6 +45,13 @@ else
   echo "  [✓] graphify CLI is installed"
 fi
 
+# browser-harness (browser control via CDP)
+if command -v uv &>/dev/null; then
+  echo "  - Installing browser-harness via uv..."
+  uv tool install --python 3.12 --upgrade --force browser-harness || true
+  browser-harness skill > "${SKILLS_DIR}/browser-harness/SKILL.md" 2>/dev/null || true
+fi
+
 # Bun runtime (required by claude-mem worker daemon)
 if ! command -v bun &>/dev/null && [ ! -f "${HOME}/.bun/bin/bun" ]; then
   echo "  - Installing Bun..."
@@ -61,7 +68,6 @@ fi
 if command -v claude &>/dev/null; then
   echo "[+] Ensuring Claude Code user MCP servers and plugins are configured..."
   claude mcp add --transport http atlassian https://mcp.atlassian.com/v1/mcp --scope user 2>/dev/null || true
-  claude mcp add chrome-devtools --scope user -- npx -y chrome-devtools-mcp 2>/dev/null || true
 
   # claude-mem plugin
   echo "  - Registering and installing claude-mem plugin..."
