@@ -24,7 +24,7 @@ cd ~/src/dotfiles
 ```sh
 bash install_packages.sh
 bash install_nvdia.sh
-bash install_agents.sh
+bash install_dotfiles.sh
 ```
 
 This will install:
@@ -49,7 +49,7 @@ rm -f ~/.gitconfig
 ln -s ~/src/dotfiles/.gitconfig ~/.gitconfig
 
 # Claude Code & Antigravity Setup
-bash install_agents.sh
+bash install_dotfiles.sh
 ```
 
 ## Configuration

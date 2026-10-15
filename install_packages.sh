@@ -4,6 +4,9 @@ unzip FiraCode.zip -d ~/.fonts
 rm FiraCode.zip
 fc-cache -f -v
 
+# Install kitty terminal (config is linked by install_dotfiles.sh)
+sudo apt install -y kitty
+
 # Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source $HOME/.cargo/env

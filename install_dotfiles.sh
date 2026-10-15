@@ -147,6 +147,15 @@ ln -sf "${GEMINI_DIR}/statusline.py" "${GEMINI_HOME}/statusline.py"
 ln -sf "${GEMINI_DIR}/statusline.py" "${HOME}/.local/bin/agy-statusline.py"
 echo "  - Configured separate statusline scripts for Claude Code and Antigravity"
 
+# Kitty terminal config (back up an existing real directory first)
+rmdir "${HOME}/.config/kitty" 2>/dev/null || true
+if [ -d "${HOME}/.config/kitty" ] && [ ! -L "${HOME}/.config/kitty" ]; then
+  mv "${HOME}/.config/kitty" "${HOME}/.config/kitty.bak"
+fi
+mkdir -p "${HOME}/.config"
+ln -sfn "${DOTFILES_DIR}/kitty" "${HOME}/.config/kitty"
+echo "  - Linked kitty config"
+
 # 6. Clean up any redundant project-level symlinks in dotfiles
 rm -f "${DOTFILES_DIR}/.claude/skills" "${DOTFILES_DIR}/.claude/agents" "${DOTFILES_DIR}/.claude/rules"
 rm -f "${DOTFILES_DIR}/.gemini/skills" "${DOTFILES_DIR}/.gemini/agents" "${DOTFILES_DIR}/.gemini/rules"
