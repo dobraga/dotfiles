@@ -1,0 +1,13 @@
+{
+  "name": "claude-mods",
+  "owner": {
+    "name": "dobraga"
+  },
+  "plugins": [
+    {
+      "name": "filetree",
+      "source": "./filetree",
+      "description": "Fork of claude-code-filetree with built-in file viewer, Repos tab and repo branches (pull/push)"
+    }
+  ]
+}

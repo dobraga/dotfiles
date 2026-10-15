@@ -73,6 +73,11 @@ if command -v claude &>/dev/null; then
   echo "  - Registering and installing claude-mem plugin..."
   claude plugin marketplace add thedotmack/claude-mem 2>/dev/null || true
   claude plugin install claude-mem@thedotmack 2>/dev/null || true
+
+  # filetree mod (local marketplace versioned in this repo)
+  echo "  - Registering and installing filetree mod..."
+  claude plugin marketplace add "${CLAUDE_DIR}/mods" 2>/dev/null || true
+  claude plugin install filetree@claude-mods --scope user 2>/dev/null || true
 fi
 
 # Create dynamic launcher for claude-mem background worker
