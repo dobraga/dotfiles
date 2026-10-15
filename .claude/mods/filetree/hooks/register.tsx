@@ -1028,8 +1028,9 @@ const refreshRepos = async ($: EngineInterface): Promise<void> => {
     if (entry.kind === 'dir' && !entry.name.startsWith('.') && (await $.fs.exists(`${root}/${entry.name}/.git`))) names.push(entry.name)
   }
   const rows = await Promise.all(names.sort().map(name => inspectRepo($, name, `${root}/${name}`)))
-  // The folder itself, when it is a repo, is the main one and stays pinned first
-  if (await $.fs.exists(`${root}/.git`)) rows.unshift(await inspectRepo($, root.split('/').pop() || root, root))
+  // The repo that holds the folder (the folder itself, or a parent when working in a subfolder) is the main one and stays pinned first
+  const top = (await git($, root, ['rev-parse', '--show-toplevel'], 5_000).catch(() => undefined))?.stdout.trim()
+  if (top) rows.unshift(await inspectRepo($, top.split('/').pop() || top, top))
   await update($, repos, () => rows)
 }
 
