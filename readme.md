@@ -35,6 +35,7 @@ This will install:
 - Starship prompt
 - Oh My Zsh with plugins
 - Claude Code CLI, RTK, Graphify, and user MCP servers
+- The `filetree` mod (fork with a file viewer and Repos tab) from `.claude/mods/`, installed as a local marketplace
 - Shared AI Agents, Skills, Rules, and statusline symlinks for Claude Code & Antigravity
 
 ### 3. Symlink configuration files
