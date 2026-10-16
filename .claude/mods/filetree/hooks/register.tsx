@@ -3,6 +3,7 @@ import { deltaDiff, ensureDelta, parseAnsi, sliceSpans, stripAnsi } from './delt
 import { openCommand } from './open'
 import { isCompact, parseOptions, type ViewerLayout } from './config'
 import { formatTable, splitBlocks, type Segment } from './md'
+import { cacheName, clean, clock, failAll, faint, openDirs, type Outcome, type Pending, proven, rootOfDisk, shortenHome } from './pure'
 
 type PaneEvent = Parameters<EngineInterface['ui']['resolve']>[0]
 
@@ -191,17 +192,6 @@ async function launchRoot($: EngineInterface): Promise<string> {
   const root = pinRoot ? (await get($)).root : ''
 
   return root || (await cwdOf($))
-}
-
-function clean(segs: Seg[]): Seg[] {
-  for (const seg of segs) for (const k of Object.keys(seg) as (keyof Seg)[]) if (seg[k] === undefined) delete seg[k]
-  return segs
-}
-
-function faint(hex: string): string {
-  const v = parseInt(hex.slice(1), 16)
-  const ch = (shift: number) => Math.round(0x26 + (((v >> shift) & 255) - 0x26) * 0.3)
-  return `#${[16, 8, 0].map(x => ch(x).toString(16).padStart(2, '0')).join('')}`
 }
 
 async function get($: EngineInterface): Promise<FileTree> {
@@ -395,10 +385,6 @@ function broad(root: string): boolean {
   return root === home || root === '/' || /^[A-Za-z]:\/$/.test(root)
 }
 
-function rootOfDisk(root: string): boolean {
-  return root === '/' || /^[A-Za-z]:\/$/.test(root)
-}
-
 async function changedSince($: EngineInterface, root: string, since: Since, depth: number, ignored: string[] = []): Promise<string[]> {
   if (rootOfDisk(root)) return []
   const test = since.mark ? ['-newer', since.mark] : ['-newermt', `@${(since.ms / 1000).toFixed(3)}`]
@@ -507,11 +493,6 @@ async function staleSizes($: EngineInterface, paths?: string[]): Promise<void> {
   })
 }
 
-function openDirs(t: FileTree): string[] {
-  const open = new Set(t.expanded)
-  return t.nodes.filter(n => n.kind === 'dir' && n.loaded && open.has(n.id)).map(n => n.id)
-}
-
 function keepTop(cur: FileTree, expanded: string[]): Partial<FileTree> {
   const top = visibleRows(cur)[cur.scroll ?? view.from]?.node.id
   const at = top ? visibleRows({ ...cur, expanded }).findIndex(r => r.node.id === top) : -1
@@ -528,11 +509,9 @@ async function followCwd($: EngineInterface): Promise<boolean> {
   return true
 }
 
-type Pending = { actions: GitAction[]; ids: number[]; command: string; head: string }
 type Job = { actions: GitAction[]; since: Since; initRepo: boolean; readOnly: boolean }
 type Background = { p: Pending | null; job: Job; reads: string[] }
 type GitOperation = NonNullable<BuiltinToolResults['Bash']['gitOperation']>
-type Outcome = { state: 'done' | 'failed'; label: string; detail: string }
 
 const PROOF: Record<string, (op: GitOperation) => boolean> = {
   push: op => Boolean(op.push),
@@ -596,14 +575,6 @@ async function finishGit($: EngineInterface, p: Pending, results: Outcome[]): Pr
     }),
   )
   $.clock.after(ACTIVITY_TTL_MS + 500, () => void setActivities($, cur => cur.filter(a => a.state === 'running' || a.at > now)))
-}
-
-function failAll(p: Pending): Outcome[] {
-  return p.actions.map(a => ({ state: 'failed', label: `${a.verb} failed`, detail: '' }))
-}
-
-function proven(p: Pending | null, results: Outcome[]): GitAction[] {
-  return p ? p.actions.filter((_, i) => results[i]?.state !== 'failed') : []
 }
 
 async function endTasks($: EngineInterface, text: string): Promise<void> {
@@ -943,6 +914,10 @@ async function openNode($: EngineInterface, n: FileNode): Promise<void> {
   } else await openFile($, n.id)
 }
 
+function shortPath(path: string): string {
+  return shortenHome(path, home)
+}
+
 type Btn = { label: string; hotkey?: string; onPress: () => void }
 type Els = ReturnType<EngineInterface['ui']['resolve']>
 
@@ -967,10 +942,6 @@ async function loadTheme($: EngineInterface): Promise<void> {
     await $.state.set(THEME, DEFAULT_THEME)
     themeMtime = 0
   }
-}
-
-function shortPath(path: string): string {
-  return home && inside(home, path) ? `~${path.slice(home.length)}` : path
 }
 
 // ---- file viewer, repo branches, pull/push (merged from the file-viewer mod) ----
@@ -1213,7 +1184,6 @@ const videoPos = atom({ plugin: 'filetree', key: 'videoPos' } as const, 0)
 const tick = atom({ plugin: 'filetree', key: 'tick' } as const, 0)
 let ticker: Timer | undefined
 
-const cacheName = (path: string): string => path.replace(/[^A-Za-z0-9]+/g, '_').slice(-120)
 // Terminals that draw real images through the terminal's own protocol (iTerm2, WezTerm, Ghostty, Kitty); others get the text-cell picture
 const supportsImages = async ($: EngineInterface): Promise<boolean> => {
   const program = (await $.env.get('TERM_PROGRAM')) ?? ''
@@ -1222,7 +1192,6 @@ const supportsImages = async ($: EngineInterface): Promise<boolean> => {
   return Boolean(await $.env.get('KITTY_WINDOW_ID')) || (await $.env.get('TERM')) === 'xterm-kitty'
 }
 
-const clock = (seconds: number): string => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`
 
 const mediaDuration = async ($: EngineInterface, path: string): Promise<number> => {
   const run = await $.process.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', path], { timeoutMs: 15000 })
