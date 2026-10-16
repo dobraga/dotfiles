@@ -44,7 +44,7 @@ Installed it as `filetree@filetree` before the repository was renamed? Nothing t
 - Search the file tree, including folders you have not opened yet
 - Git status per file and folder in color, with exact lines changed (`+N` `-N`) on modified files and `?:N M:N D:N` file counts on folders
 - Branch, upstream and ahead/behind in the header
-- Visual indicator of Claude reads and searches (purple), writes (orange) and commits (green); collapsed folders open to show the file
+- Claude's reads and searches (purple), writes (orange) and commits (green) are listed in the Flightdeck `files` panel; the tree itself stays still and keeps only git colours, counts and sizes up to date
 
   <img src="media/filetree-read.gif" alt="Files shimmer purple while Claude reads and searches them" width="800">
 
@@ -75,8 +75,7 @@ You can resize the pane with the mouse, or by setting custom `pane:grow` or `pan
 
 All settings are in `/config` under filetree.
 
-- **Claude activity:** what shimmers: `reads and writes` (default), `writes`, `reads` or `none`. Git status, line counts and the git status at the bottom always show.
-- **Follow Claude:** `on` (default) scrolls the tree to what Claude reads, writes or commits; `off` keeps the view where you put it, and highlights still show.
+- **Claude activity:** what the Flightdeck `files` panel records: `reads and writes` (default), `writes`, `reads` or `none`. Git status, line counts and the git status at the bottom always show.
 - **Right column:** `date` (default) or `size`; what the right column shows when a session starts. The `Σ` button in the header toggles it.
 - **Glyphs:** `auto` (default) uses Nerd Font icons when a Nerd Font is installed and your terminal started after it was installed, plain Unicode in the desktop app, and Nerd Font over SSH. `nerd` or `plain` forces one.
 

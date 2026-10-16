@@ -46,10 +46,6 @@ export type FileTree = {
   prefix: string
   branch: Branch | null
   counts: Record<string, [number, number, number]>
-  flash: string[]
-  flashDim: string[]
-  flashOn: boolean
-  flashTones: Record<string, string>
   scroll: number | null
 }
 

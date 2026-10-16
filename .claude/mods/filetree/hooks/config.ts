@@ -5,7 +5,6 @@ export type Options = {
   glyphs: string
   showReads: boolean
   showWrites: boolean
-  follow: boolean
   accordion: boolean
   pinRoot: boolean
   showBranch: boolean
@@ -26,7 +25,6 @@ export const parseOptions = (raw: Raw): Options => {
     glyphs: pick(raw, 'glyphs', ['auto', 'nerd', 'plain'], 'auto'),
     showReads: activity.includes('reads'),
     showWrites: activity.includes('writes'),
-    follow: pick(raw, 'follow', ['on', 'off'], 'on') === 'on',
     accordion: pick(raw, 'accordion', ['on', 'off'], 'on') === 'on',
     pinRoot: pick(raw, 'root', ['launch', 'cwd'], 'launch') === 'launch',
     showBranch: pick(raw, 'branch', ['on', 'off'], 'off') === 'on',

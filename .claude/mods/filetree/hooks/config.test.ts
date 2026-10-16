@@ -3,13 +3,13 @@ import { isCompact, parseOptions } from './config'
 
 test('defaults apply when options are missing or mistyped', () => {
   const d = parseOptions(undefined)
-  expect(d).toMatchObject({ glyphs: 'auto', showReads: true, showWrites: true, follow: true, accordion: true, pinRoot: true, showBranch: false, sizeDefault: false, viewerLayout: 'auto' })
-  expect(parseOptions({ glyphs: 3, follow: {}, activity: 'bogus', viewerLayout: 'huge' })).toEqual(d)
+  expect(d).toMatchObject({ glyphs: 'auto', showReads: true, showWrites: true, accordion: true, pinRoot: true, showBranch: false, sizeDefault: false, viewerLayout: 'auto' })
+  expect(parseOptions({ glyphs: 3, accordion: {}, activity: 'bogus', viewerLayout: 'huge' })).toEqual(d)
 })
 
 test('valid values are honoured', () => {
-  const o = parseOptions({ activity: 'writes', follow: 'off', root: 'cwd', branch: 'on', column: 'size', viewerLayout: 'narrow' })
-  expect(o).toMatchObject({ showReads: false, showWrites: true, follow: false, pinRoot: false, showBranch: true, sizeDefault: true, viewerLayout: 'narrow' })
+  const o = parseOptions({ activity: 'writes', accordion: 'off', root: 'cwd', branch: 'on', column: 'size', viewerLayout: 'narrow' })
+  expect(o).toMatchObject({ showReads: false, showWrites: true, accordion: false, pinRoot: false, showBranch: true, sizeDefault: true, viewerLayout: 'narrow' })
   expect(parseOptions({ activity: 'none' })).toMatchObject({ showReads: false, showWrites: false })
 })
 

@@ -16,7 +16,7 @@
     "activity": {
       "type": "string",
       "title": "Claude activity",
-      "description": "Which of Claude's file activity shimmers in the tree: files read with the Read tool or Bash readers (rg, grep, find, cat) in purple, writes in orange and git actions in green",
+      "description": "Which of Claude's file activity the Flightdeck files panel records: files read with the Read tool or Bash readers (rg, grep, find, cat), writes, and git actions. The tree itself no longer moves or lights up; none records nothing.",
       "default": "reads and writes",
       "options": [
         "reads and writes",
@@ -34,16 +34,6 @@
         "auto",
         "nerd",
         "plain"
-      ]
-    },
-    "follow": {
-      "type": "string",
-      "title": "Follow Claude",
-      "description": "on: the tree scrolls to what Claude reads, writes or commits. off: the view stays where you put it and only your own scrolling moves it; highlights still show.",
-      "default": "on",
-      "options": [
-        "on",
-        "off"
       ]
     },
     "column": {

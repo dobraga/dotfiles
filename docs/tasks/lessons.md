@@ -5,3 +5,4 @@
 - Background shells/monitors have no list API in mods: rebuild them from `tool.call` results (`backgroundTaskId`, Monitor `taskId`) and `<task-notification>` text; anything started before a mod reload is invisible.
 - Check the premise before porting a pattern: flightdeck's `Client` rail exists because it animates continuously; filetree's flash is event-driven, so the same move would be pure risk.
 - Pure helpers go in `$`-free modules with `bun test`; the mod's own typecheck needs a scratch tsconfig mapping `claude-code` to the skill's `claude-code.d.ts` (compare error counts before/after, the baseline is noisy).
+- Before deleting an option, grep what it actually drove: `follow` looked like cwd-follow but only fed the flash focus, so it became dead with the flash.

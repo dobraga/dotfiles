@@ -34,10 +34,6 @@ export function emptyTree(root: string): FileTree {
     prefix: '',
     branch: null,
     counts: {},
-    flash: [],
-    flashDim: [],
-    flashOn: false,
-    flashTones: {},
     scroll: null,
   }
 }

@@ -105,8 +105,6 @@ const THEME = { plugin: 'filetree', key: 'theme' } as const
 const ACTIVITY = { plugin: 'filetree', key: 'activity' } as const
 const PANE = 'filetree'
 const SHIMMER = Object.fromEntries(Object.entries(TONES).map(([k, v]) => [k, { bright: v.bright, dim: v.dim }]))
-const BRANCH_ROW = '#branch'
-const FLASH_MS = 2700
 const RUNNING_MAX_MS = 600_000
 const NO_REPO_DEPTH = 4
 const DOUBLE_MS = 450
@@ -132,16 +130,13 @@ const SIZE_TIMEOUT_MS = 15_000
 const SIZE_JOBS = 2
 const SIZE_WALK_LIMIT = 50_000
 
-let blink: Timer | null = null
 let themePoll: Timer | null = null
 let themeMtime: number | null = null
-let generation = 0
 let lastPress = { key: '', at: 0 }
 let noNerd = false
 let glyphSetting = 'auto'
 let viewerLayout: ViewerLayout = 'auto'
 let follow = true
-let followClaude = true
 // One folder open at a time (setting: accordion)
 let accordion = true
 // Root stays where Claude was opened instead of following `cd` (setting: root)
@@ -345,9 +340,6 @@ function refreshGit($: EngineInterface): Promise<void> {
 
 async function reset($: EngineInterface, root: string, focus = false): Promise<void> {
   const prev = await get($)
-  generation += 1
-  blink?.cancel()
-  blink = null
   lastRoot = root
   searchIndex = null
   sizeEpoch += 1
@@ -522,58 +514,9 @@ function openDirs(t: FileTree): string[] {
 }
 
 function keepTop(cur: FileTree, expanded: string[]): Partial<FileTree> {
-  if (followClaude) return { scroll: null }
   const top = visibleRows(cur)[cur.scroll ?? view.from]?.node.id
   const at = top ? visibleRows({ ...cur, expanded }).findIndex(r => r.node.id === top) : -1
   return at < 0 ? {} : { scroll: at }
-}
-
-async function flash($: EngineInterface, tones: Record<string, string>): Promise<void> {
-  const unique = Object.keys(tones)
-  if (unique.length === 0) return
-  const mine = ++generation
-  const root = (await get($)).root
-  blink?.cancel()
-  blink = null
-  await patch($, cur => {
-    if (cur.root !== root) return {}
-    const open = new Set(cur.expanded)
-    const bright = new Set([...(cur.flashOn ? cur.flash.filter(id => !unique.includes(id)) : []), ...unique])
-    const dim = new Set<string>()
-    const all: Record<string, string> = cur.flashOn ? { ...cur.flashTones } : {}
-    if (cur.flashOn) {
-      for (const id of cur.flashDim) dim.add(id)
-    }
-    for (const id of unique) {
-      const tone = tones[id] ?? 'orange'
-      all[id] = tone
-      if (id === BRANCH_ROW) continue
-      const chain = ancestorsOf(id, cur.root)
-      if (!chain.some(a => !open.has(a))) continue
-      for (const a of chain) {
-        if (!open.has(a)) {
-          dim.add(a)
-          all[a] = all[a] ?? tone
-        }
-        open.add(a)
-      }
-    }
-    for (const id of bright) dim.delete(id)
-    return {
-      flash: [...bright],
-      flashDim: [...dim],
-      flashOn: true,
-      flashTones: all,
-      expanded: [...open],
-      ...keepTop(cur, [...open]),
-    }
-  })
-  if (generation !== mine) return
-  blink = $.clock.after(FLASH_MS, () => {
-    if (generation !== mine) return
-    blink = null
-    void patch($, cur => (generation === mine ? { flash: [], flashDim: [], flashOn: false, flashTones: {} } : {}))
-  })
 }
 
 async function followCwd($: EngineInterface): Promise<boolean> {
@@ -763,14 +706,12 @@ async function afterBash($: EngineInterface, jobs: Job[]): Promise<void> {
   }
   const fresh = await get($)
   const ignored = new Set(fresh.ignored)
-  const tones: Record<string, string> = {}
   if (writes) {
     const found = fresh.top
       ? await changedInRepo($, t.root, since, before, fresh.ignored)
       : { hits: since.os === 'win32' ? [] : await changedSince($, t.root, since, NO_REPO_DEPTH), gone: [] }
     const hits = found.hits.filter(x => inside(t.root, x) && !underAny(x, ignored, t.root)).slice(0, FIND_LIMIT)
     if (showWrites) await recordTouched($, 'write', hits)
-    await revealPaths($, hits)
     const loaded = await get($)
     const dirs = [...new Set([loaded.root, ...openDirs(loaded), ...hits.map(dirname), ...found.gone.map(dirname)])].filter(d => inside(loaded.root, d))
     const listed = await loadDirs($, dirs)
@@ -780,9 +721,6 @@ async function afterBash($: EngineInterface, jobs: Job[]): Promise<void> {
       const ids = new Set(cur.nodes.map(n => n.id))
       return { expanded: cur.expanded.filter(id => ids.has(id)) }
     })
-    const present = new Set((await get($)).nodes.map(n => n.id))
-    const touchTone = actions.find(a => !['commit', 'push', 'add'].includes(a.verb))?.tone ?? 'orange'
-    if (showWrites) for (const id of hits) if (present.has(id)) tones[id] = touchTone
   }
   if (showReads) {
     const found: string[] = []
@@ -790,12 +728,7 @@ async function afterBash($: EngineInterface, jobs: Job[]): Promise<void> {
       if (found.length >= READ_REVEAL_LIMIT) break
       if (r !== t.root && inside(t.root, r) && !underAny(r, ignored, t.root) && (await exists($, r))) found.push(r)
     }
-    if (found.length) {
-      await recordTouched($, 'read', found)
-      await revealPaths($, found)
-      const shown = new Set((await get($)).nodes.map(n => n.id))
-      for (const r of found) if (shown.has(r) && !tones[r]) tones[r] = 'purple'
-    }
+    await recordTouched($, 'read', found)
   }
   if (showWrites && actions.length) {
     const final = await get($)
@@ -803,15 +736,8 @@ async function afterBash($: EngineInterface, jobs: Job[]): Promise<void> {
     if ((committed || actions.some(a => a.verb === 'add')) && final.top) {
       const paths = (await gitPaths($, final.root, final.prefix, committed)).filter(x => !underAny(x, ignored, final.root)).slice(0, READ_REVEAL_LIMIT)
       await recordTouched($, 'git', paths, committed ? 'commit' : 'add')
-      await revealPaths($, paths)
-      const shown = new Set((await get($)).nodes.map(n => n.id))
-      for (const x of paths) if (shown.has(x)) tones[x] = 'green'
     }
-    const pushLike = actions.find(a => ['push', 'pull', 'fetch', 'checkout', 'switch', 'branch', 'merge', 'rebase', 'tag'].includes(a.verb) || a.kind.startsWith('gh '))
-    if (pushLike) tones[BRANCH_ROW] = pushLike.tone
-    else if (committed) tones[BRANCH_ROW] = 'green'
   }
-  await flash($, tones)
 }
 
 function scheduleScan($: EngineInterface, job: Job): void {
@@ -850,14 +776,9 @@ async function touched($: EngineInterface, paths: string[], tone: string, show: 
   if (tone !== 'purple') {
     searchIndex = null
     await staleSizes($, within)
-    await revealPaths($, within.map(dirname))
     await loadDirs($, [...new Set(within.map(dirname))].filter(d => inside(t.root, d)))
     await refreshGit($)
-  } else await revealPaths($, within)
-  if (!show) return
-  const tones: Record<string, string> = {}
-  for (const p of within) tones[p] = tone
-  await flash($, tones)
+  }
 }
 
 async function reveal($: EngineInterface, paths: string[]): Promise<void> {
@@ -2928,7 +2849,6 @@ export const register: Register = (on, options) => {
   glyphSetting = opt.glyphs
   showReads = opt.showReads
   showWrites = opt.showWrites
-  followClaude = opt.follow
   accordion = opt.accordion
   pinRoot = opt.pinRoot
   showBranch = opt.showBranch
@@ -2979,7 +2899,6 @@ export const register: Register = (on, options) => {
       themePoll?.cancel()
       themePoll = themeMtime ? $.clock.every(THEME_POLL_MS, () => void loadTheme($)) : null
       const t = await get($)
-      if (t.flashOn) await patch($, () => ({ flash: [], flashDim: [], flashOn: false, flashTones: {} }))
       await setActivities($, cur => cur.map(a => (a.state === 'running' ? { ...a, state: 'failed', label: `${a.kind} interrupted` } : a)))
       const cwd = await cwdOf($)
       if (!t.root || t.nodes.length === 0 || (follow && !pinRoot && t.root !== cwd)) await reset($, cwd)
@@ -3260,34 +3179,21 @@ export const register: Register = (on, options) => {
     const now = await $.clock.now()
     const live = (await activities($)).filter(a => now - a.at < (a.state === 'running' ? RUNNING_MAX_MS : ACTIVITY_TTL_MS))
     const latest = [...live].reverse().find(a => a.state === 'running') ?? live[live.length - 1]
-    const bright = new Set(t.flashOn ? t.flash : [])
-    const dimmed = new Set(t.flashOn ? t.flashDim : [])
     const ignored = new Set(t.ignored)
     const untracked = new Set(t.untrackedDirs)
     const width = Math.max(24, e.props.bodyColumns)
     const rows = visibleRows(t)
     const fixed = 2 + (t.top ? (showBranch && t.branch ? 1 : 0) : 1) + (t.selected || latest ? 1 : 0)
     const room = Math.max(5, (e.props.scroll?.bodyRows ?? 40) - fixed)
-    const isLit = (id: string) => bright.has(id) || dimmed.has(id)
-    const focus = followClaude && t.flashOn ? ([...t.flash].reverse().find(id => id !== BRANCH_ROW) ?? t.cursor) : t.cursor
-    const at = Math.max(0, rows.findIndex(r => r.node.id === focus))
-    const lit = followClaude && t.flashOn ? rows.findIndex(r => isLit(r.node.id)) : -1
-    const cap = Math.max(1, Math.floor(room / 3))
-    let from = Math.max(0, Math.min(lit >= 0 && at - lit < room - 2 ? Math.max(0, lit - 1) : at - Math.floor(room / 2), rows.length - room))
-    let pinned = followClaude && t.flashOn ? rows.slice(0, from).filter(r => isLit(r.node.id)).slice(-cap) : []
-    if (pinned.length) {
-      const rest = Math.max(3, room - pinned.length)
-      from = Math.max(0, Math.min(at - Math.floor(rest / 2), rows.length - rest))
-      pinned = rows.slice(0, from).filter(r => isLit(r.node.id)).slice(-cap)
-    }
+    const at = Math.max(0, rows.findIndex(r => r.node.id === t.cursor))
+    let from = Math.max(0, Math.min(at - Math.floor(room / 2), rows.length - room))
     const max = Math.max(0, rows.length - room)
     if (t.scroll !== null) {
       from = Math.max(0, Math.min(t.scroll, max))
-      pinned = []
     }
     view = { from, max }
-    const shown = rows.slice(from, from + room - pinned.length)
-    if (t.showSize) wantSizes($, [...pinned, ...shown].filter(r => r.node.kind === 'dir' && !(r.node.id in t.dirSizes)).map(r => r.node.id))
+    const shown = rows.slice(from, from + room)
+    if (t.showSize) wantSizes($, shown.filter(r => r.node.kind === 'dir' && !(r.node.id in t.dirSizes)).map(r => r.node.id))
     const totals: [number, number] = t.top ? (t.diff[t.root] ?? [0, 0]) : [0, 0]
     const countSegs = (c: [number, number, number] | undefined): Seg[] => {
       if (!c) return []
@@ -3306,9 +3212,6 @@ export const register: Register = (on, options) => {
       const status = own ?? (underAny(dirname(n.id), untracked, t.root) ? '?' : undefined)
       const isIgnored = !status && underAny(n.id, ignored, t.root)
       const gitColor = status === 'D' || status === 'U' ? theme.urgent : status ? (GIT_COLOR[status] ?? theme.muted) : undefined
-      const isBright = bright.has(n.id)
-      const isDim = !isBright && dimmed.has(n.id)
-      const tone = t.flashTones[n.id] ?? 'orange'
       const iconColor = typeColor(n) ?? (isIgnored || n.hidden ? theme.muted : (gitColor ?? (n.kind === 'dir' ? theme.accent : theme.muted)))
       const nameColor = isIgnored ? theme.muted : (gitColor ?? (n.hidden ? theme.muted : theme.fg || undefined))
       const loc = t.diff[n.id]
@@ -3334,12 +3237,11 @@ export const register: Register = (on, options) => {
       const caret = n.kind === 'dir' ? (unicode ? (r.open ? '▾' : '▸') : r.open ? CHEVRON_OPEN : CHEVRON_CLOSED) + ' ' : '  '
       const isRepo = n.kind === 'dir' && n.id === t.top
       const glyph = unicode ? (n.kind === 'dir' ? '■' : '·') : fileIcon(n, r.open, isRepo)
-      const lit = isBright || isDim
       const left: Seg[] = [
         { t: '  '.repeat(r.depth) },
         { t: caret, c: theme.muted },
-        lit ? { t: glyph + ' ', sh: tone, dim: isDim, one: true } : { t: glyph + ' ', c: iconColor },
-        lit ? { t: name, sh: tone, dim: isDim, b: isBright } : { t: name, c: nameColor, b: n.id === t.selected, s: status === 'D' && n.kind !== 'dir' },
+        { t: glyph + ' ', c: iconColor },
+        { t: name, c: nameColor, b: n.id === t.selected, s: status === 'D' && n.kind !== 'dir' },
       ]
       const right: Seg[] = []
       if (meta) right.push({ t: ` ${meta}`, c: theme.muted })
@@ -3353,27 +3255,23 @@ export const register: Register = (on, options) => {
     const note = (text: string): RowSpec => ({ id: '', left: [{ t: text, c: theme.muted }], right: [] })
     const specs: RowSpec[] = [
       ...(rows.length === 0 ? [note('empty')] : []),
-      ...pinned.map(rowSpec),
-      ...(pinned.length > 0 ? [note('  ⋮')] : []),
       ...shown.map(rowSpec),
     ]
     const barSize = Math.max(1, Math.round((specs.length * shown.length) / Math.max(1, rows.length)))
     const bar =
-      rows.length > shown.length + pinned.length
+      rows.length > shown.length
         ? { pos: max ? Math.round((from / max) * (specs.length - barSize)) : 0, size: barSize, thumb: theme.accent, track: theme.muted }
         : undefined
 
     const branchRow = () => {
       if (!showBranch || !t.top || !t.branch) return null
       const b = t.branch
-      const isFlash = bright.has(BRANCH_ROW)
-      const tone = t.flashTones[BRANCH_ROW] ?? 'teal'
       const label = b.head
       return (
         <Box flexDirection="row" height={1} overflow="hidden">
           <Box flexDirection="row" flexShrink={0}>
-            <Text color={isFlash ? (TONES[tone]?.solid ?? theme.accent) : theme.accent}>{(unicode ? BRANCH_ICON.plain : BRANCH_ICON.nerd) + ' '}</Text>
-            <Text bold color={isFlash ? (TONES[tone]?.solid ?? (theme.fg || undefined)) : theme.fg || undefined}>
+            <Text color={theme.accent}>{(unicode ? BRANCH_ICON.plain : BRANCH_ICON.nerd) + ' '}</Text>
+            <Text bold color={theme.fg || undefined}>
               {label}
             </Text>
             {b.ahead > 0 && <Text color={TONES.teal?.solid}>{` ↑${b.ahead}`}</Text>}

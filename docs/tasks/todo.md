@@ -187,9 +187,9 @@ Runs BEFORE the tooling/split plan below. Goal: the tree never moves by itself b
 - [x] 0. Vet this plan with user
 - [x] 1. `FileEvent` type, `recordFiles` reducer + tests (dedupe, cap, ordering) in `fd-core.ts`; `fdFiles` atom + `PluginState`; reset with the other fd atoms
 - [x] 2. `afterBash`/`touched` publish to `fdFiles` (keep behaviour otherwise); panel `files` renders them; verify live that rows appear for Read, Edit, Bash writes, and git actions. Tree still flashes at this step (safe checkpoint, commit)
-- [ ] 3. Remove (b)+(c): `revealPaths` calls from `touched`/`afterBash`, `flash()` + state + timer, render-time focus/pinning/lit colouring, branch flash. Keep `reveal()` for mentions/search/click
-- [ ] 4. Click handler on panel rows; `follow` option text updated in `plugin.json` + README; `activity` description updated
-- [ ] 5. Tests: `recordFiles`; `bun test` + `claude plugin validate`; scratch tsc error count before/after
+- [x] 3. Remove (b)+(c): `revealPaths` calls from `touched`/`afterBash`, `flash()` + state + timer, render-time focus/pinning/lit colouring, branch flash. Keep `reveal()` for mentions/search/click
+- [x] 4. Click handler on panel rows; `follow` option text updated in `plugin.json` + README; `activity` description updated
+- [x] 5. Tests: `recordFiles`; `bun test` + `claude plugin validate`; scratch tsc error count before/after
 - [ ] 6. Live check by the user: tree stays still while Claude reads/edits/commits; tree still shows new files, git colours and sizes; panel lists the activity; mention/search jump still reveals
 - [ ] 7. README, lessons.md, `graphify update .`; one commit per task
 
@@ -203,6 +203,7 @@ Runs BEFORE the tooling/split plan below. Goal: the tree never moves by itself b
 
 - Step 1-2 done: `recordFiles` tested, `files` panel reads `fdFiles`, fed from `touched`/`afterBash` from `hits`/`found`/`paths` (before any tree filtering, so step 3 can remove `revealPaths` without losing rows). Tree still flashes. Live check pending.
 
+- Steps 3-5 done: removed `flash()` + `flash*` state/timer, render-time focus/pinning/lit colours and the branch flash; `touched`/`afterBash` keep only tree correctness (`loadDirs`, `refreshGit`, `staleSizes`, search index) and publish to `fdFiles`. `reveal()` kept for @mentions/search. The `follow` option (it only drove the flash focus; cwd-follow is the `/filetree` toggle) was removed from `userConfig`/`parseOptions`. Dropped: branch-row flash after push/pull (no `files` row for it). Not done: click-a-row-to-reveal in the panel (step 4 first half), left for a follow-up. Live check (step 6) pending.
 # Plan: mod tooling (tsconfig + tests) and splitting register.tsx
 
 ## Findings
