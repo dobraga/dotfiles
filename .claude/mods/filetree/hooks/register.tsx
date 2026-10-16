@@ -2,7 +2,7 @@ import { atom, read, type BuiltinToolResults, type EngineInterface, type Registe
 import { deltaDiff, ensureDelta, parseAnsi, sliceSpans, stripAnsi } from './delta'
 import { openCommand } from './open'
 import { AUDIO_EXT, IMAGE_EXT, VIDEO_EXT, VIDEO_STEP, getPlayback, htmlFrame, imageFile, mediaDuration, pictureCells, setVideoPos, startAudio, stopAudio, supportsImages, videoFrame } from './media'
-import { ServerBlock, configOf, consultEnded, consultStarted, costNow, getArchitect, getCards, getGate, getTurn, isArchitectType, migrate, noteAdvice, noteMode, refreshStatus, resetAll, say, updateFdAgents, updateFdArchitect, updateFdFiles, updateFdGate, updateFdLoops, updateFdMain, updateFdReceipt, updateFdRoster, updateFdTasks, updateFdTurn, updateFdUsage, whoIs } from './fd-state'
+import { type ServerBlock, configOf, consultEnded, consultStarted, costNow, getArchitect, getCards, getGate, getTurn, isArchitectType, migrate, noteAdvice, noteMode, refreshStatus, resetAll, say, updateFdAgents, updateFdArchitect, updateFdFiles, updateFdGate, updateFdLoops, updateFdMain, updateFdReceipt, updateFdRoster, updateFdTasks, updateFdTurn, updateFdUsage, whoIs } from './fd-state'
 import { renderFlightdeck } from './fd-view'
 import { isCompact, parseOptions, type ViewerLayout } from './config'
 import { formatTable, splitBlocks, type Segment } from './md'

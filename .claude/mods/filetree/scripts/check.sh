@@ -11,3 +11,5 @@ echo "== claude plugin validate"
 claude plugin validate .
 echo "== typecheck"
 ./scripts/typecheck.sh
+echo "== load check"
+./scripts/load-check.sh 2>&1 | grep -v "Internal error"

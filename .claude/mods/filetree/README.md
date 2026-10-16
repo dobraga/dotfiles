@@ -93,7 +93,7 @@ Clicking rows needs herdr 0.9.1 or later. herdr 0.9.0 and older accept pixel mou
 
 ## Contributing
 
-Before a commit, run `scripts/check.sh` from the plugin folder: it runs `bun test hooks`, `claude plugin validate .` and `scripts/typecheck.sh`. The type check compares against `scripts/typecheck.baseline` and fails only on new errors; run `scripts/typecheck.sh --update` after fixing some to shrink the baseline. It needs the engine's `claude-code.d.ts` (found under `.claude-plugin/types/` once the engine has loaded the mod, or in the plugin-authoring skill's folder under `/tmp`, or at `$CLAUDE_CODE_TYPES`) and is skipped, not failed, when none is found. The 8 known errors come from element and event types that differ per surface (`props`, `viewport`, `Raster`, `Image`).
+Before a commit, run `scripts/check.sh` from the plugin folder: it runs `bun test hooks`, `claude plugin validate .`, `scripts/typecheck.sh` and `scripts/load-check.sh` (loads the module the way the engine does and rejects value imports of types, which tsc and the validator let through). The type check compares against `scripts/typecheck.baseline` and fails only on new errors; run `scripts/typecheck.sh --update` after fixing some to shrink the baseline. It needs the engine's `claude-code.d.ts` (found under `.claude-plugin/types/` once the engine has loaded the mod, or in the plugin-authoring skill's folder under `/tmp`, or at `$CLAUDE_CODE_TYPES`) and is skipped, not failed, when none is found. The 8 known errors come from element and event types that differ per surface (`props`, `viewport`, `Raster`, `Image`).
 
 Turn on the pre-commit hook once per clone; it runs `claude plugin validate` and the plugin tests before each commit that touches the plugin:
 
