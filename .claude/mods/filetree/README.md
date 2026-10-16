@@ -80,6 +80,10 @@ All settings are in `/config` under filetree.
 - **Right column:** `date` (default) or `size`; what the right column shows when a session starts. The `Σ` button in the header toggles it.
 - **Glyphs:** `auto` (default) uses Nerd Font icons when a Nerd Font is installed and your terminal started after it was installed, plain Unicode in the desktop app, and Nerd Font over SSH. `nerd` or `plain` forces one.
 
+## Flightdeck tab
+
+A **Flightdeck** tab (its own pane, opened with `/flightdeck`) shows a live agent dashboard: context and cost, permission gate, subagents, turn receipt and session log. Ported from [claude-flightdeck](https://github.com/scasella/claude-flightdeck). Switch it off with **Flightdeck tab: off** in `/config`: no tab, no command, no hooks, nothing tracked. Set **Flightdeck open at start: on** to open the tab when a session starts (default `off`). Reload plugins after changing it.
+
 ## herdr
 
 Clicking rows needs herdr 0.9.1 or later. herdr 0.9.0 and older accept pixel mouse reporting but still send cell positions, which would put every click in the session in the wrong place, so on those versions the rows ignore the mouse and the rest of the pane and session keep working. Run `herdr update` to get row clicks.

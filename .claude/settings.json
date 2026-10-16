@@ -138,7 +138,9 @@
         "column": "date",
         "accordion": "on",
         "root": "launch",
-        "branch": "off"
+        "branch": "off",
+        "flightdeck": "on",
+        "flightdeckStart": "on"
       }
     }
   }

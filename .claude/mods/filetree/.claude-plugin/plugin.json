@@ -1,6 +1,6 @@
 {
   "name": "filetree",
-  "version": "0.2.24-fv4",
+  "version": "0.3.0-fd1",
   "description": "Fork of data-goblin/claude-code-filetree (MIT) with a built-in file viewer (diff, file, markdown/mermaid preview) and per-repo branches with pull/push",
   "types": "./types/index.d.ts",
   "author": {
@@ -74,6 +74,26 @@
       "options": [
         "launch",
         "cwd"
+      ]
+    },
+    "flightdeck": {
+      "type": "string",
+      "title": "Flightdeck tab",
+      "description": "on: adds a Flightdeck tab to the file viewer (context and cost, permission gate, subagents, session log; ported from scasella/claude-flightdeck) and the /flightdeck command. off: no tab, no hooks, nothing tracked.",
+      "default": "on",
+      "options": [
+        "on",
+        "off"
+      ]
+    },
+    "flightdeckStart": {
+      "type": "string",
+      "title": "Flightdeck open at start",
+      "description": "on: open the Flightdeck tab when a session starts (without taking focus). off: open it with /flightdeck. Needs Flightdeck tab on.",
+      "default": "off",
+      "options": [
+        "on",
+        "off"
       ]
     },
     "branch": {
