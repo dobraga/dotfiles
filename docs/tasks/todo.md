@@ -191,7 +191,7 @@ Runs BEFORE the tooling/split plan below. Goal: the tree never moves by itself b
 - [x] 4. Click handler on panel rows; `follow` option text updated in `plugin.json` + README; `activity` description updated
 - [x] 5. Tests: `recordFiles`; `bun test` + `claude plugin validate`; scratch tsc error count before/after
 - [x] 6. Live check by the user (read confirmed; write/commit/mention not yet reported): tree stays still while Claude reads/edits/commits; tree still shows new files, git colours and sizes; panel lists the activity; mention/search jump still reveals
-- [ ] 7. README, lessons.md, `graphify update .`; one commit per task
+- [x] 7. README, lessons.md, `graphify update .` (graphify runs from the commit hook)
 
 ## Risks
 - Step 3 deletes a lot (flash, parts of `afterBash`, render focus code): do it only after step 2 is verified, as its own commit so it can be reverted alone.
@@ -203,7 +203,7 @@ Runs BEFORE the tooling/split plan below. Goal: the tree never moves by itself b
 
 - Step 1-2 done: `recordFiles` tested, `files` panel reads `fdFiles`, fed from `touched`/`afterBash` from `hits`/`found`/`paths` (before any tree filtering, so step 3 can remove `revealPaths` without losing rows). Tree still flashes. Live check pending.
 
-- Steps 3-5 done: removed `flash()` + `flash*` state/timer, render-time focus/pinning/lit colours and the branch flash; `touched`/`afterBash` keep only tree correctness (`loadDirs`, `refreshGit`, `staleSizes`, search index) and publish to `fdFiles`. `reveal()` kept for @mentions/search. The `follow` option (it only drove the flash focus; cwd-follow is the `/filetree` toggle) was removed from `userConfig`/`parseOptions`. Dropped: branch-row flash after push/pull (no `files` row for it). Not done: click-a-row-to-reveal in the panel (step 4 first half), left for a follow-up. Live check (step 6) pending.
+- Steps 3-5 done: removed `flash()` + `flash*` state/timer, render-time focus/pinning/lit colours and the branch flash; `touched`/`afterBash` keep only tree correctness (`loadDirs`, `refreshGit`, `staleSizes`, search index) and publish to `fdFiles`. `reveal()` kept for @mentions/search. The `follow` option (it only drove the flash focus; cwd-follow is the `/filetree` toggle) was removed from `userConfig`/`parseOptions`. Dropped: branch-row flash after push/pull (no `files` row for it). Click-a-row-to-reveal was added afterwards (`showFile`), and the panel got a strip plus per-kind lists. Live checks done by the user: read, write, click, per-kind lists.
 # Plan: mod tooling (tsconfig + tests) and splitting register.tsx
 
 ## Findings
