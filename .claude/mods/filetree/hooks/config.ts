@@ -10,6 +10,7 @@ export type Options = {
   showBranch: boolean
   sizeDefault: boolean
   viewerLayout: ViewerLayout
+  approval: boolean
 }
 
 type Raw = Readonly<Record<string, unknown>> | undefined
@@ -30,6 +31,7 @@ export const parseOptions = (raw: Raw): Options => {
     showBranch: pick(raw, 'branch', ['on', 'off'], 'off') === 'on',
     sizeDefault: pick(raw, 'column', ['date', 'size'], 'date') === 'size',
     viewerLayout: pick(raw, 'viewerLayout', ['auto', 'wide', 'narrow'], 'auto'),
+    approval: pick(raw, 'approval', ['on', 'off'], 'on') === 'on',
   }
 }
 

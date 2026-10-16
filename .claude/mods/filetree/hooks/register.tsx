@@ -1,8 +1,9 @@
 import { atom, read, type BuiltinToolResults, type EngineInterface, type Register, type RenderNode, type Timer, update } from 'claude-code'
 import { deltaDiff, ensureDelta, parseAnsi, sliceSpans, stripAnsi } from './delta'
 import { openCommand } from './open'
+import { holdBlocked } from './blocked'
 import { AUDIO_EXT, IMAGE_EXT, VIDEO_EXT, VIDEO_STEP, getPlayback, htmlFrame, imageFile, mediaDuration, pictureCells, setVideoPos, startAudio, stopAudio, supportsImages, videoFrame } from './media'
-import { type ServerBlock, configOf, consultEnded, consultStarted, costNow, getArchitect, getCards, getGate, getTurn, isArchitectType, migrate, noteAdvice, noteMode, refreshStatus, resetAll, say, updateFdAgents, updateFdArchitect, updateFdFiles, updateFdGate, updateFdLoops, updateFdMain, updateFdReceipt, updateFdRoster, updateFdTasks, updateFdTurn, updateFdUsage, whoIs } from './fd-state'
+import { configOf, consultEnded, consultStarted, costNow, getArchitect, getCards, getGate, getMain, getTurn, isArchitectType, migrate, noteAdvice, noteMode, refreshStatus, resetAll, say, type ServerBlock, updateFdAgents, updateFdArchitect, updateFdFiles, updateFdGate, updateFdLoops, updateFdMain, updateFdReceipt, updateFdRoster, updateFdTasks, updateFdTurn, updateFdUsage, whoIs } from './fd-state'
 import { renderFlightdeck } from './fd-view'
 import { isCompact, parseOptions, type ViewerLayout } from './config'
 import { formatTable, splitBlocks, type Segment } from './md'
@@ -53,6 +54,7 @@ let lastPress = { key: '', at: 0 }
 let noNerd = false
 let glyphSetting = 'auto'
 let viewerLayout: ViewerLayout = 'auto'
+let approvalOn = true
 let follow = true
 // One folder open at a time (setting: accordion)
 let accordion = true
@@ -1722,6 +1724,7 @@ export const register: Register = (on, options) => {
   showBranch = opt.showBranch
   sizeDefault = opt.sizeDefault
   viewerLayout = opt.viewerLayout
+  approvalOn = opt.approval
   on('session.start', async ($, e, next) => {
     if (fdCfg) {
       const cfg = fdCfg
@@ -1842,6 +1845,10 @@ export const register: Register = (on, options) => {
       const cfg = fdCfg
       await (async () => {
       const didRun = ran.deny === undefined
+      // A Bash command the engine refused is held in the Flightdeck for the user to run themselves; nothing is overridden or run here.
+      if (!didRun && e.tool === 'Bash' && approvalOn && e.command) {
+        await holdBlocked($, { id: e.tool_use_id, command: e.command, reason: String(ran.deny ?? '') }, { id: FD_PANE, title: 'Flightdeck' })
+      }
       if (didRun && !ran.isError && (e.tool === 'Bash' || String(e.tool) === 'Monitor')) {
         const input = e as unknown as { command?: string; description?: string }
         const out = (ran.result && typeof ran.result === 'object' ? ran.result : {}) as { backgroundTaskId?: string; taskId?: string }

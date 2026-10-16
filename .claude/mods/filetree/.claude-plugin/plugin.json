@@ -106,6 +106,16 @@
         "wide",
         "narrow"
       ]
+    },
+    "approval": {
+      "type": "string",
+      "title": "Hold blocked commands",
+      "description": "on: when the engine refuses a Bash command, the Flightdeck opens with the full command and a Run it button, so you can run it yourself and send the result to the prompt. Nothing runs without your click and the engine's refusal is not overridden. off: no box.",
+      "default": "on",
+      "options": [
+        "on",
+        "off"
+      ]
     }
   },
   "license": "MIT"

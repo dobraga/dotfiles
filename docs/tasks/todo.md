@@ -237,3 +237,24 @@ Runs BEFORE the tooling/split plan below. Goal: the tree never moves by itself b
 - B4b/B5 STOPPED by the pivot rule. The viewer pane (`on('ui.render', VIEWER_PANE)`, ~555 lines inline in `register`) plus `reposView`/`changedFiles`/`gitAction` need the shared atoms (mode 15 call sites, row 7, col 6, target 5, repoPick 5, single 4, repos 4, auto 3, isOpen 2, allRepos 2 = 53) and the tree state (`get/put/patch`). The validator wants each atom defined in the file that reads or writes it, so a `viewer.tsx` would own those atoms and register would need 53 wrapper call sites, plus a host with the tree readers: well past 5 closures. Re-plan before doing it: (1) extract tree state (`TREE` atom, `get/put/patch`, `emptyTree` use) into `tree-state.ts` first, (2) move the viewer atoms + `reposView` into `viewer-state.ts` with `updateX/getX` wrappers, (3) only then lift the pane body. Each step is a commit; (1) alone is ~40 call sites. Not worth starting without a live check between steps.
 - B4a done: `media.ts` (media helpers + playback atoms, 197 l) moved out; register.tsx now ~2300 lines.
 - B1-B3 done: `pure.ts` (+7 tests), `fd-state.ts` (atoms, readers, writers, 201 l), `fd-view.tsx` (`renderFlightdeck`, 674 l); `register.tsx` 3395 -> 2487 lines. Validator rules found while moving: `$` crosses an import only into `function` declarations (not arrow consts), and `read/update` need the atom defined in the same file, so fd-state exports `updateFd*`/`get*` wrappers and fd-view gets file-tree access through a `FlightdeckHost` argument. Live check by the user pending.
+
+---
+
+# Plan: box in Flightdeck for blocked Bash commands (REVISED: the mod runs the command, nothing is overridden)
+
+Decisions from the user: Authorize makes the mod answer `allow` to the engine's `tool.check` (Claude's own call runs); it appears only when the engine **denied** the Bash command; the UI is a **panel in the Flightdeck tab**, not a new tab.
+
+## Design
+- In the existing `tool.check` hook: after `next(e)`, a Bash `deny` with no `ceiling` and not in plan mode -> `requestApproval`; `allow` rewrites the result to `allow` (recorded as `cleared`), anything else keeps the deny. Fail closed: tab not placeable, 120 s without an answer, queue cleared, any error -> deny. Never remembered, never automatic.
+- State `fdApprovals` (`pending` queue + `decided` map) in fd-state; pure reducers in `approval-core.ts` with tests; `approval.ts` holds `requestApproval` (enqueue, open Flightdeck with focus, toast, poll every 300 ms) and `answerApproval`.
+- Panel `approval` first in the Flightdeck: why (`reason`, `rule`), the full command wrapped and unabridged, `1 of N`, **Deny** (hotkey `n`) and **Authorize** (hotkey `y`). The mini layout shows a one-line warning.
+- Config `approval: on|off` (default on).
+
+## Tasks
+- [ ] 1. approval-core + tests
+- [ ] 2. state, approval.ts, panel, mini row
+- [ ] 3. hook wiring, config, README
+- [ ] 4. check.sh + headless fail-closed run
+- [ ] 5. live check by the user
+
+- Revision after the live test: Authorize through `tool.check` did not work because an explicit settings deny rule is enforced again after the hook (the engine's own safety), and the auto-mode classifier's refusals never reach `tool.check`. The hook override was removed. New flow: a Bash `tool.call` that comes back refused (`ran.deny`) is held in `fdBlocked` (`holdBlocked`), the Flightdeck opens, the panel `blocked` shows the full command and reason, **Run it** (`y`) runs it once via `sh -c` in the session cwd (120 s timeout) and shows the output, **Send to prompt** (`p`) appends command + output to the composer, **Dismiss** (`n`). Core in `blocked-core.ts` (6 tests); actions in `blocked.ts`. Live check pending.

@@ -1,6 +1,7 @@
 // Flightdeck state: atoms, readers that tolerate older shapes, and the small writers the hooks share. No drawing here.
 import { atom, read, type EngineInterface, update } from 'claude-code'
-import { type AgentCard, type Architect, type BgTask, type FileEvent, type Gate, type LogLine, type Loop, type Main, type Receipt, type Roster, type Turn, type Usage, type View } from '../types'
+import { DEFAULT_BLOCKED, normalizeBlocked } from './blocked-core'
+import { type AgentCard, type BlockedCommand, type Architect, type BgTask, type FileEvent, type Gate, type LogLine, type Loop, type Main, type Receipt, type Roster, type Turn, type Usage, type View } from '../types'
 import { DEFAULT_ARCHITECT, DEFAULT_GATE, DEFAULT_MAIN, DEFAULT_ROSTER, DEFAULT_TURN, DEFAULT_USAGE, DEFAULT_VIEW, SCHEMA_VERSION, cardTitle, endConsult, gateSummary, isAdvising, listOf, momentOf, normalize, normalizeCard, normalizeGate, normalizeLog, parseConfig, shorten, startConsult } from './fd-core'
 import { type Config } from './fd-core'
 
@@ -13,6 +14,7 @@ export const fdArchitect = atom({ plugin: 'filetree', key: 'fdArchitect' } as co
 export const fdGate = atom({ plugin: 'filetree', key: 'fdGate' } as const, DEFAULT_GATE)
 export const fdAgents = atom({ plugin: 'filetree', key: 'fdAgents' } as const, [])
 export const fdLoops = atom({ plugin: 'filetree', key: 'fdLoops' } as const, [])
+export const fdBlocked = atom({ plugin: 'filetree', key: 'fdBlocked' } as const, DEFAULT_BLOCKED)
 export const fdTasks = atom({ plugin: 'filetree', key: 'fdTasks' } as const, [])
 export const fdFiles = atom({ plugin: 'filetree', key: 'fdFiles' } as const, [])
 export const fdLog = atom({ plugin: 'filetree', key: 'fdLog' } as const, [])
@@ -42,6 +44,9 @@ export async function getCards($: EngineInterface): Promise<AgentCard[]> {
 }
 export async function getLoops($: EngineInterface): Promise<Loop[]> {
   return listOf<Loop>(await read($, fdLoops))
+}
+export async function getBlocked($: EngineInterface): Promise<BlockedCommand[]> {
+  return normalizeBlocked(await read($, fdBlocked))
 }
 export async function getTasks($: EngineInterface): Promise<BgTask[]> {
   return listOf<BgTask>(await read($, fdTasks))
@@ -137,6 +142,7 @@ export async function resetAll($: EngineInterface) {
   await update($, fdLoops, () => [])
   await update($, fdLog, () => [])
   await update($, fdTasks, () => [])
+  await update($, fdBlocked, () => DEFAULT_BLOCKED)
   await update($, fdFiles, () => [])
   await update($, fdTurn, () => DEFAULT_TURN)
   await update($, fdReceipt, () => null)
@@ -198,4 +204,7 @@ export async function updateFdView($: EngineInterface, fn: (current: View) => Vi
 }
 export async function getReceipt($: EngineInterface): Promise<Receipt | null> {
   return (await read($, fdReceipt)) ?? null
+}
+export async function updateFdBlocked($: EngineInterface, fn: (current: BlockedCommand[]) => BlockedCommand[]): Promise<void> {
+  await update($, fdBlocked, fn)
 }

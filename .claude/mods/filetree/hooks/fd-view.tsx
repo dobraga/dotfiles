@@ -1,9 +1,10 @@
 // The Flightdeck tab body: every panel, laid out from fd-state's readers and fd-core's reducers.
 import { type EngineInterface } from 'claude-code'
-import { type AgentCard, type Bucket, type Check, type FileEvent, type LogLine } from '../types'
+import { dismissBlockedCommand, runBlocked, sendBlockedToPrompt } from './blocked'
+import { type AgentCard, type BlockedCommand, type Bucket, type Check, type FileEvent, type LogLine } from '../types'
 import { DEFAULT_VIEW, cardTitle, consultTimeline, fitLegend, fmtClock, fmtDuration, fmtTimer, fmtUsd, plural, gateSummary, gauge, isAdvising, isLoopActive, kTokens, lanes, limitLabel, fmtResetIn, fmtSpeed, logRows, normalize, PALETTES, SVG_COLORS, prettyModel, shorten } from './fd-core'
 import { type Panel } from './fd-core'
-import { configOf, getArchitect, getCards, getFiles, getGate, getLog, getLoops, getMain, getReceipt, getTasks, getTurn, getUsage, getView, updateFdView } from './fd-state'
+import { configOf, getBlocked, getArchitect, getCards, getFiles, getGate, getLog, getLoops, getMain, getReceipt, getTasks, getTurn, getUsage, getView, updateFdView } from './fd-state'
 
 // ---------------------------------------------------------------- drawing
 
@@ -23,7 +24,7 @@ export async function renderFlightdeck($: EngineInterface, e: PaneEvent, options
   const els = $.ui.resolve(e)
   const { Box, Text, Button } = els
   const hasClient = 'Client' in els
-  const [m, u, a, g, cards, lp, tasks, files, treeRoot, lines, t, r, v, now] = await Promise.all([
+  const [m, u, a, g, cards, lp, tasks, blocked, files, treeRoot, lines, t, r, v, now] = await Promise.all([
     getMain($),
     getUsage($),
     getArchitect($),
@@ -31,6 +32,7 @@ export async function renderFlightdeck($: EngineInterface, e: PaneEvent, options
     getCards($),
     getLoops($),
     getTasks($),
+    getBlocked($),
     getFiles($),
     host.treeRoot(),
     getLog($),
@@ -51,6 +53,7 @@ export async function renderFlightdeck($: EngineInterface, e: PaneEvent, options
   const motion = cfg.motion && hasClient
   // A panel with nothing to show yet takes no room: most sessions never spawn an agent.
   const isEmpty: Record<Panel, boolean> = {
+    blocked: blocked.length === 0,
     main: false,
     architect: !showArchitect,
     gate: g.recent.length === 0 && gateSummary(g).total === 0,
@@ -409,6 +412,50 @@ export async function renderFlightdeck($: EngineInterface, e: PaneEvent, options
     )
   }
 
+  // ---- blocked: a command the engine refused, held for the user to run themselves
+  const blockedButtons = (b: BlockedCommand) => (
+    <Box columnGap={2}>
+      {b.status === 'waiting' ? <Button key={`run-${b.id}`} label="Run it" hotkey="y" variant="secondary" onPress={() => void runBlocked($, b.id)} /> : null}
+      {b.status === 'done' || b.status === 'failed' ? <Button key={`send-${b.id}`} label="Send to prompt" hotkey="p" variant="secondary" onPress={() => void sendBlockedToPrompt($, b.id)} /> : null}
+      {b.status !== 'running' ? <Button key={`dismiss-${b.id}`} label="Dismiss" hotkey="n" variant="primary" autoFocus onPress={() => void dismissBlockedCommand($, b.id)} /> : null}
+    </Box>
+  )
+  const blockedPanel = (w: number) => {
+    const b = blocked[0]
+    if (!b) return null
+    const title = b.status === 'waiting' ? 'command blocked · run it yourself?' : b.status === 'running' ? 'running…' : `ran it · exit ${b.exitCode ?? '?'}`
+    return (
+      <Box flexDirection="column" borderStyle="double" borderColor={b.status === 'failed' ? C.warn : b.status === 'done' ? C.gate : C.amber} paddingX={1} width={w}>
+        <Box justifyContent="space-between">
+          <Text color={C.amber} bold>
+            {title}
+          </Text>
+          <Text dimColor>{blocked.length > 1 ? `1 of ${blocked.length}` : ''}</Text>
+        </Box>
+        {b.reason ? (
+          <Text dimColor wrap="wrap">
+            {b.reason}
+          </Text>
+        ) : null}
+        <Box flexDirection="column">
+          {b.command.split('\n').map(line => (
+            <Text wrap="wrap">{line === '' ? ' ' : `${b.status === 'waiting' ? '' : '$ '}${line}`}</Text>
+          ))}
+        </Box>
+        {b.output !== '' ? (
+          <Box flexDirection="column">
+            {b.output.split('\n').map(line => (
+              <Text color={C.dim} wrap="wrap">
+                {line === '' ? ' ' : line}
+              </Text>
+            ))}
+          </Box>
+        ) : null}
+        {blockedButtons(b)}
+      </Box>
+    )
+  }
+
   // ---- shell: background shells and monitors, running first
   const shellPanel = (w: number) => {
     const live = tasks.filter(x => x.endedAt === null)
@@ -468,7 +515,7 @@ export async function renderFlightdeck($: EngineInterface, e: PaneEvent, options
 
   // ---- log: whatever rows the other panels leave, 4 to 8
   // The main box's speed line and the gap above the log are a row each.
-  const used = 2 + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length ? 3 + Math.min(6, cards.length) : 0) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + (files.length ? 5 + (v.filesOpen ? Math.min(6, files.filter(f => f.kind === v.filesOpen).length) : 0) : 0) + (tasks.length ? 3 + Math.min(6, tasks.length) : 0) + 3
+  const used = 2 + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length ? 3 + Math.min(6, cards.length) : 0) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + (blocked[0] ? 6 + Math.min(10, blocked[0].command.split('\n').length) + Math.min(15, blocked[0].output.split('\n').length) : 0) + (files.length ? 5 + (v.filesOpen ? Math.min(6, files.filter(f => f.kind === v.filesOpen).length) : 0) : 0) + (tasks.length ? 3 + Math.min(6, tasks.length) : 0) + 3
   const bodyRows = e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 40
   const nLog = logRows(bodyRows, used)
   const shownLines = (viewed ? lines.filter(l => l.agentId === viewed) : lines).slice(-nLog)
@@ -497,7 +544,9 @@ export async function renderFlightdeck($: EngineInterface, e: PaneEvent, options
   )
 
   const draw = (p: Panel, w: number) =>
-    p === 'main'
+    p === 'blocked'
+      ? blockedPanel(w)
+      : p === 'main'
       ? mainPanel(w)
       : p === 'architect'
         ? architectPanel(w)
@@ -521,7 +570,7 @@ export async function renderFlightdeck($: EngineInterface, e: PaneEvent, options
       {ps.map((p, i) => {
         const prev = ps[i - 1]
         const link =
-          i === 0 || p === 'agents' || prev === 'agents' || p === 'log' || p === 'loops' || prev === 'loops' || p === 'files' || prev === 'files' || p === 'shell' || prev === 'shell' || p === 'receipt' || prev === 'receipt'
+          i === 0 || p === 'agents' || prev === 'agents' || p === 'log' || p === 'loops' || prev === 'loops' || p === 'files' || prev === 'files' || p === 'shell' || prev === 'shell' || p === 'receipt' || prev === 'receipt' || p === 'blocked' || prev === 'blocked'
             ? null
             : rail(`link-${p}`, p === 'architect' ? advising : m.isRunning, p === 'architect' ? C.arch : C.main, w)
         return (
@@ -573,8 +622,15 @@ export async function renderFlightdeck($: EngineInterface, e: PaneEvent, options
     const counts = ` ${s.rule} allowed · ${s.cleared} ${decider}${s.ask > 0 ? ` · ${s.ask} pending` : ''} · ${s.deny} denied`
     const strip = g.recent.slice(-Math.max(4, W - cfg.gateLabel.length - 1 - counts.length))
     const mg = u.pct !== null ? gauge(u.pct, 6) : null
+    const waiting = blocked[0]
     return (
       <Box flexDirection="column" width={W}>
+        {waiting ? (
+          <Text color={C.warn} bold wrap="truncate">
+            {`⚠ command blocked: ${shorten(waiting.command.replace(/\s+/g, ' '), Math.max(10, W - 24))}`}
+          </Text>
+        ) : null}
+        {waiting ? blockedButtons(waiting) : null}
         <Text wrap="truncate">
           <Text color={C.main} bold>
             {modelName}
@@ -637,7 +693,7 @@ export async function renderFlightdeck($: EngineInterface, e: PaneEvent, options
   const body = isWide ? (
     <Box flexDirection="column">
       <Box columnGap={2}>
-        {column(panels.filter(p => p === 'receipt' || p === 'main' || p === 'architect' || p === 'gate' || p === 'files'), colW)}
+        {column(panels.filter(p => p === 'blocked' || p === 'receipt' || p === 'main' || p === 'architect' || p === 'gate' || p === 'files'), colW)}
         {column(panels.filter(p => p === 'agents' || p === 'shell' || p === 'loops'), colW)}
       </Box>
       {panels.includes('log') ? logPanel(W) : null}

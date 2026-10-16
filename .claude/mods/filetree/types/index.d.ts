@@ -136,6 +136,17 @@ export type FileEvent = {
   at: number
 }
 
+/** A Bash command the engine refused, held in the Flightdeck so the user can run it themselves. */
+export type BlockedCommand = {
+  id: string
+  command: string
+  reason: string
+  at: number
+  status: 'waiting' | 'running' | 'done' | 'failed'
+  output: string
+  exitCode: number | null
+}
+
 export type ToolNote = { tool: string; text: string; isError: boolean }
 
 export type AgentCard = {
@@ -224,6 +235,7 @@ declare module 'claude-code' {
       fdLoops: Loop[]
       fdTasks: BgTask[]
       fdFiles: FileEvent[]
+      fdBlocked: BlockedCommand[]
       fdLog: LogLine[]
       fdTurn: Turn
       fdReceipt: Receipt | null
