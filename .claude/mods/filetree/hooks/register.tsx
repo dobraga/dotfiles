@@ -1816,12 +1816,12 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
           const isViewed = viewed === c.id
           const stats = c.lastStop === 'max_tokens' ? 'max_tokens' : c.steps > 0 ? `ctx ${kTokens(c.ctx)} · out ${kTokens(c.out)} · ${c.steps} st` : 'starting…'
           return (
-            <Box>
+            <Box flexDirection="row" height={1} overflow="hidden">
               <Box width={2} flexShrink={0}>
                 <Text color={c.lastStop === 'max_tokens' ? C.warn : statusColor(c)} bold={isViewed}>{isViewed ? '▶' : glyph(c)}</Text>
               </Box>
-              <Box width={wide ? 20 : 16} flexShrink={0}>
-                <Button key={`card-${c.id}`} plain hotkey={String(i + 1)} label={shorten(cardTitle(c), wide ? 18 : 14)} onPress={expandOnPress(c.id)} />
+              <Box width={wide ? 22 : 16} flexShrink={0}>
+                <Button key={`card-${c.id}`} plain hotkey={String(i + 1)} label={shorten(cardTitle(c), wide ? 17 : 11)} onPress={expandOnPress(c.id)} />
               </Box>
               <Box width={wide ? 18 : 12} flexShrink={0}>
                 <Text color={C.dim} wrap="truncate">
