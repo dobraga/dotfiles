@@ -36,7 +36,7 @@ JSON
 
 # One line per error, without the machine path or the line and column, so edits above an error do not change it.
 current="$work/current"
-(cd "$work" && bunx -p typescript tsc -p tsconfig.json 2>&1 || true) \
+(cd "$work" && bunx -p typescript tsc -p tsconfig.json ${TSC_FLAGS:-} 2>&1 || true) \
   | grep 'error TS' \
   | sed -E 's#^.*/(hooks|types)/#\1/#; s/\([0-9]+,[0-9]+\)//' \
   | sort > "$current"

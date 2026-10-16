@@ -1,104 +1,20 @@
 import { atom, read, type BuiltinToolResults, type EngineInterface, type Register, type RenderNode, type Timer, update } from 'claude-code'
 import { deltaDiff, ensureDelta, parseAnsi, sliceSpans, stripAnsi } from './delta'
 import { openCommand } from './open'
+import { ServerBlock, configOf, consultEnded, consultStarted, costNow, getArchitect, getCards, getGate, getTurn, isArchitectType, migrate, noteAdvice, noteMode, refreshStatus, resetAll, say, updateFdAgents, updateFdArchitect, updateFdFiles, updateFdGate, updateFdLoops, updateFdMain, updateFdReceipt, updateFdRoster, updateFdTasks, updateFdTurn, updateFdUsage, whoIs } from './fd-state'
+import { renderFlightdeck } from './fd-view'
 import { isCompact, parseOptions, type ViewerLayout } from './config'
 import { formatTable, splitBlocks, type Segment } from './md'
 import { cacheName, clean, clock, failAll, faint, openDirs, type Outcome, type Pending, proven, rootOfDisk, shortenHome } from './pure'
 
-type PaneEvent = Parameters<EngineInterface['ui']['resolve']>[0]
-
-import type { Activity, AgentCard, Architect, BgTask, Bucket, Check, FileEvent, FileNode, FileTree, Gate, Layout, LogLine, Loop, Main, RepoRow, Roster, Theme, Turn, Usage, View, ViewMode } from '../types'
-import {
-  DEFAULT_ARCHITECT,
-  DEFAULT_GATE,
-  DEFAULT_MAIN,
-  DEFAULT_ROSTER,
-  DEFAULT_TURN,
-  DEFAULT_USAGE,
-  DEFAULT_VIEW,
-  EDIT_TOOLS,
-  SCHEMA_VERSION,
-  afterCall,
-  applyStep,
-  bucketOf,
-  cardTitle,
-  consultTimeline,
-  describeInput,
-  endConsult,
-  fitLegend,
-  fmtClock,
-  fmtDuration,
-  fmtTimer,
-  fmtUsd,
-  plural,
-  gateSummary,
-  gauge,
-  isAdvising,
-  isLoopActive,
-  kTokens,
-  lanes,
-  limitLabel,
-  limitOf,
-  fmtResetIn,
-  fmtSpeed,
-  listOf,
-  logRows,
-  momentOf,
-  normalize,
-  normalizeCard,
-  normalizeGate,
-  normalizeLog,
-  noteTool,
-  PALETTES,
-  SVG_COLORS,
-  parseConfig,
-  prettyModel,
-  promptLine,
-  handbackOf,
-  adviceLine,
-  receiptOf,
-  recordCheck,
-  settleCheck,
-  shorten,
-  startConsult,
-  stepSpeed,
-  stepLoop,
-  startTask,
-  endTask,
-  recordFiles,
-  taskEnds,
-} from './fd-core'
-import type { Config, Panel } from './fd-core'
+import type { Activity, AgentCard, BgTask, Check, FileEvent, FileNode, FileTree, Loop, RepoRow, Theme, ViewMode } from '../types'
+import { DEFAULT_ARCHITECT, DEFAULT_MAIN, DEFAULT_ROSTER, DEFAULT_TURN, DEFAULT_USAGE, EDIT_TOOLS, afterCall, applyStep, bucketOf, cardTitle, describeInput, fmtDuration, limitOf, listOf, normalize, normalizeCard, normalizeGate, noteTool, promptLine, handbackOf, adviceLine, receiptOf, recordCheck, settleCheck, shorten, stepSpeed, stepLoop, startTask, endTask, recordFiles, taskEnds } from './fd-core'
+import type { Config } from './fd-core'
 
 import { BRANCH_ICON, chainOf, type GitAction, gitActions, readOnly, readTargets, resolve, TONES } from './git'
 import type { RowSpec, RowsProps, Seg } from './rows'
 import { CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR, iconColor as typeColor } from './icons'
-import {
-  ancestorsOf,
-  type Change,
-  DEFAULT_THEME,
-  dirname,
-  emptyTree,
-  formatSize,
-  inside,
-  isAbsolute,
-  join,
-  mapper,
-  parseGit,
-  parseNumstat,
-  parseTheme,
-  posix,
-  relative,
-  dropBelow,
-  useDrives,
-  rollCounts,
-  replaceChildren,
-  rollUp,
-  stamp,
-  toNodes,
-  underAny,
-  visibleRows,
-} from './tree'
+import { ancestorsOf, type Change, DEFAULT_THEME, dirname, emptyTree, formatSize, inside, isAbsolute, join, mapper, parseGit, parseNumstat, parseTheme, posix, relative, dropBelow, useDrives, rollCounts, replaceChildren, rollUp, stamp, toNodes, underAny, visibleRows } from './tree'
 
 const TREE = { plugin: 'filetree', key: 'tree' } as const
 const THEME = { plugin: 'filetree', key: 'theme' } as const
@@ -493,12 +409,6 @@ async function staleSizes($: EngineInterface, paths?: string[]): Promise<void> {
   })
 }
 
-function keepTop(cur: FileTree, expanded: string[]): Partial<FileTree> {
-  const top = visibleRows(cur)[cur.scroll ?? view.from]?.node.id
-  const at = top ? visibleRows({ ...cur, expanded }).findIndex(r => r.node.id === top) : -1
-  return at < 0 ? {} : { scroll: at }
-}
-
 async function followCwd($: EngineInterface): Promise<boolean> {
   if (!follow) return false
   const t = await get($)
@@ -580,7 +490,7 @@ async function finishGit($: EngineInterface, p: Pending, results: Outcome[]): Pr
 async function endTasks($: EngineInterface, text: string): Promise<void> {
   if (!fdCfg || !text.includes('<task-notification>')) return
   const at = await $.clock.now()
-  for (const [id, status] of taskEnds(text)) await update($, fdTasks, list => endTask(listOf<BgTask>(list), id, status, at))
+  for (const [id, status] of taskEnds(text)) await updateFdTasks($, list => endTask(listOf<BgTask>(list), id, status, at))
 }
 
 async function settleBackground($: EngineInterface, text: string): Promise<void> {
@@ -733,7 +643,7 @@ function scheduleScan($: EngineInterface, job: Job): void {
 async function recordTouched($: EngineInterface, kind: FileEvent['kind'], paths: string[], verb = ''): Promise<void> {
   if (!fdCfg || paths.length === 0) return
   const at = await $.clock.now()
-  await update($, fdFiles, list => recordFiles(listOf<FileEvent>(list), paths.map(path => ({ path, kind, verb, at }))))
+  await updateFdFiles($, list => recordFiles(listOf<FileEvent>(list), paths.map(path => ({ path, kind, verb, at }))))
 }
 
 async function touched($: EngineInterface, paths: string[], tone: string, show: boolean): Promise<void> {
@@ -1364,831 +1274,13 @@ const pictureCells = async ($: EngineInterface, file: string, columns: number, r
 // ---- Flightdeck (ported from scasella/claude-flightdeck, MIT) ----
 
 
-
-
-
-// ---------------------------------------------------------------- state
-
-const fdMeta = atom({ plugin: 'filetree', key: 'fdMeta' } as const, { schemaVersion: SCHEMA_VERSION })
-const fdMain = atom({ plugin: 'filetree', key: 'fdMain' } as const, DEFAULT_MAIN)
-const fdUsage = atom({ plugin: 'filetree', key: 'fdUsage' } as const, DEFAULT_USAGE)
-const fdArchitect = atom({ plugin: 'filetree', key: 'fdArchitect' } as const, DEFAULT_ARCHITECT)
-const fdGate = atom({ plugin: 'filetree', key: 'fdGate' } as const, DEFAULT_GATE)
-const fdAgents = atom({ plugin: 'filetree', key: 'fdAgents' } as const, [])
-const fdLoops = atom({ plugin: 'filetree', key: 'fdLoops' } as const, [])
-const fdTasks = atom({ plugin: 'filetree', key: 'fdTasks' } as const, [])
-const fdFiles = atom({ plugin: 'filetree', key: 'fdFiles' } as const, [])
-const fdLog = atom({ plugin: 'filetree', key: 'fdLog' } as const, [])
-const fdTurn = atom({ plugin: 'filetree', key: 'fdTurn' } as const, DEFAULT_TURN)
-const fdReceipt = atom({ plugin: 'filetree', key: 'fdReceipt' } as const, null)
-const fdView = atom({ plugin: 'filetree', key: 'fdView' } as const, DEFAULT_VIEW)
-const fdRoster = atom({ plugin: 'filetree', key: 'fdRoster' } as const, DEFAULT_ROSTER)
-
-type ServerBlock = { type: string; id?: string; name?: string; tool_use_id?: string }
-
-// Every read goes through these, so a value saved under an older shape still reads.
-async function getMain($: EngineInterface): Promise<Main> {
-  return normalize(DEFAULT_MAIN, await read($, fdMain))
-}
-async function getUsage($: EngineInterface): Promise<Usage> {
-  return normalize(DEFAULT_USAGE, await read($, fdUsage))
-}
-async function getArchitect($: EngineInterface): Promise<Architect> {
-  const a = normalize(DEFAULT_ARCHITECT, await read($, fdArchitect))
-  return { ...a, consults: listOf(a.consults), ids: listOf(a.ids), seen: listOf(a.seen) }
-}
-async function getGate($: EngineInterface): Promise<Gate> {
-  return normalizeGate(await read($, fdGate))
-}
-async function getCards($: EngineInterface): Promise<AgentCard[]> {
-  return listOf<unknown>(await read($, fdAgents)).map(normalizeCard)
-}
-async function getLoops($: EngineInterface): Promise<Loop[]> {
-  return listOf<Loop>(await read($, fdLoops))
-}
-async function getTasks($: EngineInterface): Promise<BgTask[]> {
-  return listOf<BgTask>(await read($, fdTasks))
-}
-async function getFiles($: EngineInterface): Promise<FileEvent[]> {
-  return listOf<FileEvent>(await read($, fdFiles))
-}
-async function getLog($: EngineInterface): Promise<LogLine[]> {
-  return normalizeLog(await read($, fdLog))
-}
-async function getTurn($: EngineInterface): Promise<Turn> {
-  return normalize(DEFAULT_TURN, await read($, fdTurn))
-}
-async function getView($: EngineInterface): Promise<View> {
-  return normalize(DEFAULT_VIEW, await read($, fdView))
-}
-async function getRoster($: EngineInterface): Promise<Roster> {
-  const r = normalize(DEFAULT_ROSTER, await read($, fdRoster))
-  return { architectTypes: listOf(r.architectTypes) }
-}
-
-/** A stored shape older than this build's: drop what cannot be read, keep the rest. */
-async function migrate($: EngineInterface) {
-  const m = await read($, fdMeta)
-  if ((m?.schemaVersion ?? 0) >= SCHEMA_VERSION) return
-  await update($, fdLog, list => normalizeLog(list))
-  await update($, fdAgents, list => listOf<unknown>(list).map(normalizeCard))
-  await update($, fdGate, g => normalizeGate(g))
-  await update($, fdMeta, () => ({ schemaVersion: SCHEMA_VERSION }))
-}
-
-async function say($: EngineInterface, who: string, text: string, kind: LogLine['kind'] = 'info', agentId: string | null = null) {
-  const line: LogLine = { at: await $.clock.now(), who, text, kind, agentId }
-  await update($, fdLog, list => [...normalizeLog(list), line].slice(-60))
-}
-
-async function refreshStatus($: EngineInterface, cfg: Config) {
-  if (!cfg.statusLine) return $.ui.status(undefined)
-  const [u, a, g, cards] = await Promise.all([getUsage($), getArchitect($), getGate($), getCards($)])
-  const running = cards.filter(c => c.status === 'running').length
-  const s = gateSummary(g)
-  const parts = [
-    u.pct !== null ? `ctx ${Math.round(u.pct)}%` : null,
-    cards.length > 0 ? `agents ${running}/${cards.length}` : null,
-    a.consults.length > 0 || a.ids.length > 0 ? `${cfg.architectLabel.toLowerCase()} ${isAdvising(a) ? 'advising' : a.consults.length}` : null,
-    s.deny > 0 ? `denied ${s.deny}` : null,
-  ]
-  // Only fields with something to say; with none, no status entry at all.
-  const shown = parts.filter(Boolean)
-  $.ui.status(shown.length > 0 ? shown.join(' · ') : undefined)
-}
-
-async function whoIs($: EngineInterface, agentId: string | undefined) {
-  if (!agentId) return 'main'
-  const card = (await getCards($)).find(c => c.id === agentId)
-  return card ? shorten(cardTitle(card), 14) : 'agent'
-}
-
-async function consultStarted($: EngineInterface, cfg: Config, id: string, via: string) {
-  const t = await getTurn($)
-  const moment = momentOf(t)
-  const at = await $.clock.now()
-  await update($, fdArchitect, a => startConsult(normalize(DEFAULT_ARCHITECT, a), { id, at, moment, via }))
-  if (moment === 'before done') await update($, fdTurn, x => ({ ...normalize(DEFAULT_TURN, x), isReviewing: true }))
-  await say($, cfg.architectLabel.toLowerCase(), cfg.moments ? `${moment} · ${via}` : `consulted · ${via}`, 'consult')
-  await refreshStatus($, cfg)
-}
-
-async function consultEnded($: EngineInterface, cfg: Config, advice: string | null, id?: string) {
-  const at = await $.clock.now()
-  const first = advice?.split('\n').find(l => l.trim()) ?? null
-  const text = first ? shorten(first.replace(/^[#>*\s-]+/, ''), 160) : null
-  await update($, fdArchitect, a => endConsult(normalize(DEFAULT_ARCHITECT, a), at, text, id))
-  await update($, fdTurn, t => ({ ...normalize(DEFAULT_TURN, t), isReviewing: false }))
-  await say($, cfg.architectLabel.toLowerCase(), text ? `advice: ${shorten(text, 60)}` : 'advice returned', 'consult')
-  await refreshStatus($, cfg)
-}
-
-async function noteAdvice($: EngineInterface, cfg: Config, advice: string) {
-  await update($, fdArchitect, x => ({ ...normalize(DEFAULT_ARCHITECT, x), lastAdvice: advice }))
-  await say($, cfg.architectLabel.toLowerCase(), `advice: ${shorten(advice, 60)}`, 'consult')
-}
-
-async function isArchitectType($: EngineInterface, cfg: Config, type: string) {
-  return cfg.architect.test(type) || (await getRoster($)).architectTypes.includes(type)
-}
-
-async function resetAll($: EngineInterface) {
-  await update($, fdMain, m => ({ ...DEFAULT_MAIN, model: normalize(DEFAULT_MAIN, m).model, mode: normalize(DEFAULT_MAIN, m).mode }))
-  await update($, fdArchitect, () => DEFAULT_ARCHITECT)
-  await update($, fdGate, () => DEFAULT_GATE)
-  await update($, fdAgents, () => [])
-  await update($, fdLoops, () => [])
-  await update($, fdLog, () => [])
-  await update($, fdTasks, () => [])
-  await update($, fdFiles, () => [])
-  await update($, fdTurn, () => DEFAULT_TURN)
-  await update($, fdReceipt, () => null)
-  await update($, fdView, () => DEFAULT_VIEW)
-  // The context gauge waits for the next measurement rather than showing the pre-clear fill.
-  await update($, fdUsage, x => ({ ...normalize(DEFAULT_USAGE, x), pct: null, tokens: null }))
-}
-
-/** The session's cost read fresh, not from the last measurement: the receipt subtracts two of these. */
-async function costNow($: EngineInterface): Promise<number | null> {
-  const u = await $.session.usage().catch(() => null)
-  return u?.cost?.usd ?? null
-}
-
-async function noteMode($: EngineInterface, mode: string | undefined) {
-  if (mode) await update($, fdMain, m => (normalize(DEFAULT_MAIN, m).mode === mode ? normalize(DEFAULT_MAIN, m) : { ...normalize(DEFAULT_MAIN, m), mode }))
-}
-
-// ---------------------------------------------------------------- hooks
-
-// The tab replaces the standalone pane and the status entry.
-const configOf = (options: Readonly<Record<string, unknown>>): Config => ({ ...parseConfig(options), openOnStart: false, statusLine: false })
-
-// ---------------------------------------------------------------- drawing
-
-/** The Flightdeck tab's body. */
-export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options: Readonly<Record<string, unknown>>) => {
-  const cfg = configOf(options)
-  const C = PALETTES[cfg.palette]
-  const els = $.ui.resolve(e)
-  const { Box, Text, Button } = els
-  const hasClient = 'Client' in els
-  const [m, u, a, g, cards, lp, tasks, files, tree, lines, t, r, v, now] = await Promise.all([
-    getMain($),
-    getUsage($),
-    getArchitect($),
-    getGate($),
-    getCards($),
-    getLoops($),
-    getTasks($),
-    getFiles($),
-    get($),
-    getLog($),
-    getTurn($),
-    read($, fdReceipt),
-    getView($),
-    $.clock.now(),
-  ])
-  const W = Math.max(40, e.props.bodyColumns)
-  const layout = v.layout ?? cfg.layout
-  const isWide = layout === 'wide' || (layout === 'auto' && W >= 110)
-  const colW = isWide ? Math.floor((W - 2) / 2) : W
-  const modelName = prettyModel(m.model)
-  const viewed = e.props.view?.agentId ?? null
-  const advising = isAdvising(a)
-  const running = cards.filter(c => c.status === 'running')
-  const showArchitect = a.consults.length > 0 || a.ids.length > 0
-  const motion = cfg.motion && hasClient
-  // A panel with nothing to show yet takes no room: most sessions never spawn an agent.
-  const isEmpty: Record<Panel, boolean> = {
-    main: false,
-    architect: !showArchitect,
-    gate: g.recent.length === 0 && gateSummary(g).total === 0,
-    agents: cards.length === 0,
-    loops: lp.length === 0,
-    files: files.length === 0,
-    shell: tasks.length === 0,
-    receipt: !m.isRunning && !r,
-    log: false,
-  }
-  const panels = cfg.panels.filter(p => !isEmpty[p])
-  const decider = m.mode === 'auto' ? 'classifier' : 'you'
-
-  // A connector between panels: animated while its flow is live, a dim line otherwise.
-  const rail = (key: string, active: boolean, color: string, width: number, marks: number[] = [], isMerge = false) =>
-    motion ? (
-      <els.Client
-        key={key}
-        module="./fd-rail.tsx"
-        width={width}
-        height={1}
-        props={{ active, width, color, dim: C.faint, marks, isMerge }}
-      />
-    ) : (
-      <Text color={C.faint}>{'─'.repeat(Math.max(1, width))}</Text>
-    )
-
-  // A start time of 0 is unknown (state saved before it was recorded): no clock, not decades.
-  const clock = (key: string, since: number, endAt: number | null, color: string) =>
-    since <= 0 ? (
-      <Text color={color}>—</Text>
-    ) : hasClient ? (
-      <els.Client key={key} module="./fd-elapsed.tsx" props={{ since, now, endAt, color }} />
-    ) : (
-      <Text color={color}>{fmtTimer((endAt ?? now) - since)}</Text>
-    )
-
-  // ---- main
-  const effortN = { low: 1, medium: 2, high: 3, xhigh: 4, max: 4 }[m.effort] ?? 0
-  const ctxGauge = u.pct !== null ? gauge(u.pct, 10) : null
-  const mainPanel = (w: number) => (
-    <Box flexDirection="column" borderStyle="round" borderColor={C.main} paddingX={1} width={w}>
-      <Box justifyContent="space-between">
-        <Text color={C.main} bold>
-          {modelName} · main
-        </Text>
-        <Text color={m.isRunning ? C.main : C.dim}>{m.isRunning ? '● working' : '○ idle'}</Text>
-      </Box>
-      <Text wrap="truncate">
-        <Text dimColor>effort </Text>
-        <Text color={C.main}>{'▮'.repeat(effortN) + '▯'.repeat(4 - effortN)} </Text>
-        <Text color={C.main} bold>
-          {m.effort || '—'}
-        </Text>
-        {m.mode ? <Text dimColor>{`   mode ${m.mode}`}</Text> : null}
-        <Text dimColor>{`   ${m.steps} req`}</Text>
-      </Text>
-      {ctxGauge ? (
-        <Text wrap="truncate">
-          <Text dimColor>ctx </Text>
-          <Text color={u.pct !== null && u.pct >= 80 ? C.warn : C.main}>{ctxGauge.on}</Text>
-          <Text color={C.faint}>{ctxGauge.off}</Text>
-          <Text bold>{` ${Math.round(u.pct ?? 0)}%`}</Text>
-          {u.tokens !== null ? <Text dimColor>{` ${kTokens(u.tokens)}/${kTokens(u.window)}`}</Text> : null}
-          {u.compactions > 0 ? <Text color={C.amber}>{`  ⟲${u.compactions}`}</Text> : null}
-        </Text>
-      ) : null}
-      {u.costUsd !== null || u.limits.length > 0 ? (
-        <Text wrap="truncate">
-          {u.costUsd !== null ? <Text color={C.text}>{`${fmtUsd(u.costUsd)}   `}</Text> : null}
-          {u.limits.slice(0, 2).map(l => {
-            const lg = gauge(l.pct, 5)
-            // The time to each reset where the line has room for it: both windows fit from 56 columns,
-            // so a wide pane's half column (59 at 120) has them and a 40-column pane keeps its gauges.
-            const resetIn = w >= 56 ? fmtResetIn(l.resetsAt, now) : ''
-            return (
-              <Text wrap="truncate">
-                <Text dimColor>{`${limitLabel(l.kind)} `}</Text>
-                <Text color={l.pct >= 80 ? C.warn : C.main}>{lg.on}</Text>
-                <Text color={C.faint}>{lg.off}</Text>
-                <Text dimColor>{` ${Math.round(l.pct)}%${resetIn ? ` ↻${resetIn}` : ''}  `}</Text>
-              </Text>
-            )
-          })}
-        </Text>
-      ) : null}
-      {m.speed ? <Text dimColor wrap="truncate">{`last req  ${fmtSpeed(m.speed)}`}</Text> : null}
-    </Box>
-  )
-
-  // ---- architect
-  const lastConsult = a.consults[a.consults.length - 1]
-  const architectPanel = (w: number) => {
-    const tl = consultTimeline(a, now, Math.max(8, w - 4))
-    return (
-      <Box flexDirection="column" borderStyle="round" borderColor={C.arch} paddingX={1} width={w}>
-        <Box justifyContent="space-between">
-          <Text color={C.arch} bold>
-            {cfg.architectLabel} · {advising ? 'advising' : 'on call'}
-          </Text>
-          <Text>
-            <Text dimColor>consults </Text>
-            <Text color={C.arch} bold>
-              {a.consults.length}
-            </Text>
-          </Text>
-        </Box>
-        <Text color={C.arch}>{tl}</Text>
-        {lastConsult ? (
-          <Text dimColor wrap="truncate">
-            {advising
-              ? `consulting since ${fmtClock(lastConsult.at)}`
-              : `last ${fmtDuration(now - (lastConsult.endAt ?? lastConsult.at))} ago · took ${fmtDuration((lastConsult.endAt ?? now) - lastConsult.at)}`}
-          </Text>
-        ) : (
-          <Text dimColor>not consulted yet</Text>
-        )}
-        {cfg.moments ? (
-          <Box flexWrap="wrap" columnGap={2}>
-            {(['before a plan', 'error repeats', 'before done'] as const).map(mo => {
-              const isOn = lastConsult?.moment === mo
-              return (
-                <Text color={isOn ? C.arch : C.dim} bold={isOn}>
-                  {isOn ? '◆' : '◇'} {mo}
-                </Text>
-              )
-            })}
-            <Text color={C.faint}>(inferred)</Text>
-          </Box>
-        ) : null}
-        {a.lastAdvice ? (
-          <Text color={C.arch} wrap="truncate">
-            » {a.lastAdvice}
-          </Text>
-        ) : null}
-      </Box>
-    )
-  }
-
-  // ---- gate
-  const s = gateSummary(g)
-  const verdictColor = (c: Check) =>
-    c.verdict === 'rule' ? C.gate : c.verdict === 'cleared' ? C.cleared : c.verdict === 'ask' ? C.amber : C.warn
-  const gatePanel = (w: number) => {
-    const strip = g.recent.slice(-Math.max(8, w - 4))
-    const open = v.gateOpen
-    return (
-      <Box flexDirection="column" borderStyle="round" borderColor={C.gate} paddingX={1} width={w}>
-        <Box justifyContent="space-between">
-          <Text color={C.gate} bold>
-            {cfg.gateLabel} · permissions
-          </Text>
-          <Text dimColor>{`${s.total} checks`}</Text>
-        </Box>
-        <Box>
-          {strip.length === 0 ? <Text color={C.faint}>no checks yet</Text> : null}
-          {strip.map(c => (
-            <Text color={verdictColor(c)} dimColor={c.inSubagent}>
-              {c.verdict === 'deny' ? '✗' : '■'}
-            </Text>
-          ))}
-        </Box>
-        <Text wrap="truncate">
-          <Text color={C.gate}>■</Text>
-          <Text dimColor>{` ${s.rule} allowed  `}</Text>
-          <Text color={C.cleared}>■</Text>
-          <Text dimColor>{` ${s.cleared} ${decider}  `}</Text>
-          {s.ask > 0 ? <Text color={C.amber}>{`■ ${s.ask} pending  `}</Text> : null}
-          <Text color={s.deny > 0 ? C.warn : C.dim}>{`✗ ${s.deny} denied`}</Text>
-          {w >= 80 && g.recent.some(c => c.inSubagent) ? <Text color={C.faint}>{'  dim: in subagents'}</Text> : null}
-        </Text>
-        <Box columnGap={2}>
-          {(['file', 'shell', 'other'] as const).map((b: Bucket) => {
-            const tl = g.totals[b]
-            const n = tl.rule + tl.ask + tl.cleared + tl.deny
-            return (
-              <Button
-                key={`gate-${b}`}
-                plain
-                hotkey={b[0]}
-                label={`${b} ${n}${open === b ? ' ▾' : ''}`}
-                dimColor={n === 0}
-                onPress={() => update($, fdView, x => ({ ...normalize(DEFAULT_VIEW, x), gateOpen: normalize(DEFAULT_VIEW, x).gateOpen === b ? null : b }))}
-              />
-            )
-          })}
-        </Box>
-        {open
-          ? g.recent
-              .filter(c => c.bucket === open)
-              .slice(-5)
-              .map(c => (
-                <Text wrap="truncate">
-                  <Text color={verdictColor(c)}>{c.verdict === 'deny' ? '✗ ' : '■ '}</Text>
-                  <Text color={C.dim}>{`${(c.verdict === 'rule' ? 'allowed' : c.verdict === 'cleared' ? decider : c.verdict === 'ask' ? 'pending' : 'denied').padEnd(10)} `}</Text>
-                  <Text dimColor={c.inSubagent}>{shorten(c.detail, Math.max(10, w - 18))}</Text>
-                </Text>
-              ))
-          : null}
-      </Box>
-    )
-  }
-
-  // ---- agents: cards up to the limit, swimlanes beyond it
-  const statusColor = (c: AgentCard) => (c.status === 'failed' ? C.warn : c.status === 'done' ? C.gate : C.agent)
-  const glyph = (c: AgentCard) => (c.status === 'running' ? '◐' : c.status === 'done' ? '✓' : c.status === 'failed' ? '✗' : '■')
-  const expandOnPress = (id: string) => () =>
-    update($, fdView, x => ({ ...normalize(DEFAULT_VIEW, x), expanded: normalize(DEFAULT_VIEW, x).expanded === id ? null : id }))
-
-  const agentsPanel = (w: number) => {
-    const shown = cards.slice(-6)
-    // Inner width after the border and padding. Fixed columns: glyph, type, clock; the detail and the title (hotkey hint "1: " included) share the rest.
-    const inner = w - 4
-    const clockW = 7
-    const typeW = Math.min(12, shown.reduce((n, c) => Math.max(n, c.type.length), 4) + 2)
-    const detailW = inner >= 62 ? Math.min(32, inner - 2 - typeW - clockW - 24) : 0
-    const titleW = inner - 2 - typeW - detailW - clockW
-    const detailOf = (c: AgentCard): { text: string; color: string } => {
-      if (c.lastStop === 'max_tokens') return { text: 'max_tokens', color: C.warn }
-      if (c.status === 'running') {
-        const t = c.tools[c.tools.length - 1]
-        return t ? { text: t.text, color: t.isError ? C.warn : C.text } : { text: 'starting…', color: C.faint }
-      }
-      return { text: c.steps > 0 ? `${kTokens(c.ctx)} ctx · ${kTokens(c.out)} out · ${plural(c.steps, 'step')}` : '', color: C.faint }
-    }
-    return (
-      <Box flexDirection="column" borderStyle="round" borderColor={C.agent} borderDimColor={running.length === 0} paddingX={1} width={w}>
-        <Box justifyContent="space-between">
-          <Text color={C.agent} bold>
-            {`agents · ${running.length} running`}
-          </Text>
-          <Text dimColor>{`${cards.length} total${cards.length > 0 ? ' · 1-' + shown.length + ' expand' : ''}`}</Text>
-        </Box>
-        {cards.length > shown.length ? <Text color={C.faint}>{`+${cards.length - shown.length} earlier`}</Text> : null}
-        {shown.map((c, i) => {
-          const isViewed = viewed === c.id
-          const live = c.status === 'running'
-          const d = detailOf(c)
-          return (
-            <Box flexDirection="row" height={1} overflow="hidden">
-              <Box width={2} flexShrink={0}>
-                <Text color={c.lastStop === 'max_tokens' ? C.warn : statusColor(c)} bold={isViewed}>{isViewed ? '▶' : glyph(c)}</Text>
-              </Box>
-              <Box width={titleW} flexShrink={0}>
-                <Button key={`card-${c.id}`} plain hotkey={String(i + 1)} label={shorten(cardTitle(c), Math.max(4, titleW - 3))} onPress={expandOnPress(c.id)} />
-              </Box>
-              <Box width={typeW} flexShrink={0}>
-                <Text color={live ? C.agent : C.faint} wrap="truncate">
-                  {c.type}
-                </Text>
-              </Box>
-              {detailW > 0 ? (
-                <Box width={detailW} flexShrink={0}>
-                  <Text color={d.color} wrap="truncate">
-                    {d.text}
-                  </Text>
-                </Box>
-              ) : null}
-              <Box width={clockW} flexShrink={0} justifyContent="flex-end">
-                {clock(`card-clock-${c.id}`, c.spawnedAt, c.endedAt, live ? C.text : C.faint)}
-              </Box>
-            </Box>
-          )
-        })}
-      </Box>
-    )
-  }
-
-  const expandedCard = cards.find(c => c.id === v.expanded)
-  const expandedPanel = (w: number) =>
-    expandedCard ? (
-      <Box flexDirection="column" borderStyle="single" borderColor={C.agent} paddingX={1} width={w}>
-        <Text bold wrap="wrap">
-          {expandedCard.description || expandedCard.type}
-        </Text>
-        <Text dimColor wrap="truncate">{`${expandedCard.type} · ${prettyModel(expandedCard.model)} · ${expandedCard.status} · ${expandedCard.steps} steps`}</Text>
-        {expandedCard.tools.length === 0 ? <Text color={C.faint}>no tool calls yet</Text> : null}
-        {expandedCard.tools.map(n => (
-          <Text color={n.isError ? C.warn : C.text} wrap="truncate">
-            {`${n.isError ? '✗' : '·'} ${n.text}`}
-          </Text>
-        ))}
-        {expandedCard.answer ? (
-          <Text dimColor wrap="wrap">
-            {`» ${shorten(expandedCard.answer, 240)}`}
-          </Text>
-        ) : null}
-      </Box>
-    ) : null
-
-  // ---- other loops (workflow agents, forks): ids that match no card
-  const loopsPanel = (w: number) => {
-    if (lp.length === 0) return null
-    const active = lp.filter(l => isLoopActive(l, now)).length
-    const dots = lp.slice(-Math.max(4, w - 38))
-    return (
-      <Box width={w}>
-        <Text bold>other loops </Text>
-        <Text dimColor>{`${lp.length} seen · ${active} active  `}</Text>
-        {dots.map(l => (
-          <Text color={isLoopActive(l, now) ? C.agent : l.isDone ? C.dim : C.faint}>{isLoopActive(l, now) ? '●' : l.isDone ? '✓' : '○'}</Text>
-        ))}
-      </Box>
-    )
-  }
-
-  // ---- files: what Claude read, wrote and committed, newest first
-  const filesPanel = (w: number) => {
-    const root = tree.root
-    const open = v.filesOpen
-    const strip = files.slice(-Math.max(8, w - 4))
-    const count = (k: FileEvent['kind']) => files.filter(f => f.kind === k).length
-    const shown = open ? files.filter(f => f.kind === open).slice(-6).reverse() : []
-    const color = (k: FileEvent['kind']) => (k === 'read' ? C.arch : k === 'write' ? C.amber : C.gate)
-    const toggle = (k: FileEvent['kind']) => update($, fdView, x => ({ ...normalize(DEFAULT_VIEW, x), filesOpen: normalize(DEFAULT_VIEW, x).filesOpen === k ? null : k }))
-    return (
-      <Box flexDirection="column" borderStyle="round" borderColor={C.amber} paddingX={1} width={w}>
-        <Box justifyContent="space-between">
-          <Text color={C.amber} bold>
-            files · claude
-          </Text>
-          <Text dimColor>{`${files.length} touched`}</Text>
-        </Box>
-        <Box>
-          {strip.map(f => (
-            <Text color={color(f.kind)}>■</Text>
-          ))}
-        </Box>
-        <Box columnGap={2}>
-          {(['read', 'write', 'git'] as const).map(k => (
-            <Box>
-              <Text color={color(k)}>■ </Text>
-              <Button key={`files-${k}`} plain label={`${k === 'write' ? 'written' : k} ${count(k)}${open === k ? ' ▾' : ''}`} dimColor={count(k) === 0} onPress={() => toggle(k)} />
-            </Box>
-          ))}
-        </Box>
-        {shown.map(f => (
-          <Box>
-            <Box width={9} flexShrink={0}>
-              <Text color={C.faint}>{fmtClock(f.at)}</Text>
-            </Box>
-            {f.kind === 'git' && f.verb ? (
-              <Box width={8} flexShrink={0}>
-                <Text color={color(f.kind)}>{f.verb}</Text>
-              </Box>
-            ) : null}
-            <Button
-              key={`file-${f.kind}-${f.path}`}
-              plain
-              label={shorten(root && f.path.startsWith(`${root}/`) ? f.path.slice(root.length + 1) : shortPath(f.path), Math.max(8, w - 22))}
-              onPress={() => void showFile($, f)}
-            />
-          </Box>
-        ))}
-      </Box>
-    )
-  }
-
-  // ---- shell: background shells and monitors, running first
-  const shellPanel = (w: number) => {
-    const live = tasks.filter(x => x.endedAt === null)
-    const shown = [...live, ...tasks.filter(x => x.endedAt !== null).reverse()].slice(0, 6)
-    return (
-      <Box flexDirection="column" borderStyle="round" borderColor={C.agent} borderDimColor={live.length === 0} paddingX={1} width={w}>
-        <Box justifyContent="space-between">
-          <Text color={C.agent} bold>
-            shell · background
-          </Text>
-          <Text dimColor>{`${live.length} running`}</Text>
-        </Box>
-        {shown.map(x => (
-          <Box>
-            <Box width={2} flexShrink={0}>
-              <Text color={x.endedAt === null ? C.agent : x.status === 'completed' ? C.gate : C.warn}>{x.endedAt === null ? '●' : x.status === 'completed' ? '✓' : '✗'}</Text>
-            </Box>
-            <Box width={9} flexShrink={0}>
-              <Text color={C.dim}>{x.kind}</Text>
-            </Box>
-            <Box width={8} flexShrink={0}>
-              <Text color={C.faint}>{fmtDuration((x.endedAt ?? now) - x.startedAt)}</Text>
-            </Box>
-            <Text color={x.endedAt === null ? C.text : C.dim} wrap="truncate">
-              {x.label}
-            </Text>
-          </Box>
-        ))}
-      </Box>
-    )
-  }
-
-  // ---- receipt: the turn now, or the last one
-  const receiptPanel = (w: number) => {
-    const isReview = t.isReviewing
-    return (
-      <Box flexDirection="column" borderStyle="round" borderColor={C.main} borderDimColor={!m.isRunning && !isReview} paddingX={1} width={w}>
-        {m.isRunning ? (
-          <Box>
-            <Text color={C.main} wrap="truncate">{`◐ back to ${modelName.toLowerCase()} · turn `}</Text>
-            <Box flexShrink={0}>{clock('turn-clock', t.startedAt, null, C.main)}</Box>
-            {w >= 60 ? <Text dimColor wrap="truncate">{` · ${plural(t.edits, 'edit')} · ${plural(t.errors, 'error')}`}</Text> : null}
-          </Box>
-        ) : r ? (
-          <Text wrap="truncate">
-            <Text color={r.reason === 'answer' ? C.gate : C.warn}>{r.reason === 'answer' ? '✓ ' : '✗ '}</Text>
-            <Text>{`last turn ${fmtDuration(r.durationMs)} · ${plural(r.agents, 'agent')} · ${plural(r.edits, 'edit')} · ${plural(r.errors, 'error')}`}</Text>
-            {r.costDelta !== null ? <Text color={C.main}>{` · +${fmtUsd(r.costDelta)}`}</Text> : null}
-          </Text>
-        ) : (
-          <Text color={C.faint}>no turn finished yet</Text>
-        )}
-        {isReview ? <Text color={C.arch}>{`${cfg.architectLabel.toLowerCase()} reviewing before done (inferred)`}</Text> : null}
-      </Box>
-    )
-  }
-
-  // ---- log: whatever rows the other panels leave, 4 to 8
-  // The main box's speed line and the gap above the log are a row each.
-  const used = 2 + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length ? 3 + Math.min(6, cards.length) : 0) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + (files.length ? 5 + (v.filesOpen ? Math.min(6, files.filter(f => f.kind === v.filesOpen).length) : 0) : 0) + (tasks.length ? 3 + Math.min(6, tasks.length) : 0) + 3
-  const bodyRows = e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 40
-  const nLog = logRows(bodyRows, used)
-  const shownLines = (viewed ? lines.filter(l => l.agentId === viewed) : lines).slice(-nLog)
-  const colorOf = (l: LogLine) =>
-    l.kind === 'error' ? C.warn : l.kind === 'consult' ? C.arch : l.who === 'main' ? C.main : l.who === 'gate' ? C.gate : l.who === 'you' ? C.text : C.agent
-  const logPanel = (w: number) => (
-    <Box flexDirection="column" borderStyle="round" borderColor={C.faint} paddingX={1} marginTop={1} width={w}>
-      <Text dimColor>{viewed ? 'session log · this agent' : 'session log'}</Text>
-      {shownLines.length === 0 ? <Text color={C.faint}>nothing yet</Text> : null}
-      {shownLines.map(l => (
-        <Box>
-          <Box width={9} flexShrink={0}>
-            <Text color={C.faint}>{fmtClock(l.at)}</Text>
-          </Box>
-          <Box width={13} flexShrink={0}>
-            <Text color={colorOf(l)} bold wrap="truncate">
-              {l.who}
-            </Text>
-          </Box>
-          <Text color={l.kind === 'error' ? C.warn : C.text} wrap="truncate">
-            {l.text}
-          </Text>
-        </Box>
-      ))}
-    </Box>
-  )
-
-  const draw = (p: Panel, w: number) =>
-    p === 'main'
-      ? mainPanel(w)
-      : p === 'architect'
-        ? architectPanel(w)
-        : p === 'gate'
-          ? gatePanel(w)
-          : p === 'agents'
-            ? agentsPanel(w)
-            : p === 'loops'
-              ? loopsPanel(w)
-              : p === 'files'
-                ? filesPanel(w)
-                : p === 'shell'
-                  ? shellPanel(w)
-                : p === 'receipt'
-                  ? receiptPanel(w)
-                  : logPanel(w)
-
-  // Panels with the flow between them; the agents panel draws its own rails.
-  const column = (ps: Panel[], w: number) => (
-    <Box flexDirection="column" width={w}>
-      {ps.map((p, i) => {
-        const prev = ps[i - 1]
-        const link =
-          i === 0 || p === 'agents' || prev === 'agents' || p === 'log' || p === 'loops' || prev === 'loops' || p === 'files' || prev === 'files' || p === 'shell' || prev === 'shell' || p === 'receipt' || prev === 'receipt'
-            ? null
-            : rail(`link-${p}`, p === 'architect' ? advising : m.isRunning, p === 'architect' ? C.arch : C.main, w)
-        return (
-          <Box flexDirection="column">
-            {link}
-            {draw(p, w)}
-            {p === 'agents' ? expandedPanel(w) : null}
-          </Box>
-        )
-      })}
-    </Box>
-  )
-
-  // Desktop draws the agents' time axis as SVG under the panels.
-  const svgLanes =
-    e.surface !== 'terminal' && cards.length > 0
-      ? (() => {
-          const { Svg } = $.ui.resolve(e)
-          const rowH = 18
-          const pxW = 520
-          const geo = lanes(cards.slice(-10), now, 100)
-          const rects = cards
-            .slice(-10)
-            .map((c, i) => {
-              const gm = geo[i]
-              const x = 150 + ((gm?.before ?? 0) / 100) * (pxW - 160)
-              const wpx = Math.max(3, ((gm?.bar ?? 1) / 100) * (pxW - 160))
-              const fill = c.status === 'running' ? SVG_COLORS.running : c.status === 'done' ? SVG_COLORS.done : c.status === 'failed' ? SVG_COLORS.failed : SVG_COLORS.other
-              const label = shorten(cardTitle(c), 22).replace(/[<&>]/g, '')
-              return `<text x="4" y="${i * rowH + 13}" font-size="11" fill="${SVG_COLORS.label}">${label}</text><rect x="${x}" y="${i * rowH + 4}" width="${wpx}" height="10" rx="3" fill="${fill}"/>`
-            })
-            .join('')
-          const svgH = Math.min(10, cards.length) * rowH + 4
-          return (
-            <Svg
-              source={`<svg xmlns="http://www.w3.org/2000/svg" width="${pxW}" height="${svgH}" viewBox="0 0 ${pxW} ${svgH}">${rects}</svg>`}
-              alt={`${cards.length} agents on a time axis`}
-              width={pxW}
-              height={svgH}
-            />
-          )
-        })()
-      : null
-
-  // Inline above the prompt (the terminal's main screen), the pane is a summary of at most 8 rows.
-  const isMini = layout === 'mini' || (layout === 'auto' && e.props.placement === 'inline')
-  if (isMini) {
-    const live = [...cards.filter(c => c.status === 'running'), ...cards.filter(c => c.status !== 'running').reverse()].slice(0, 3)
-    const counts = ` ${s.rule} allowed · ${s.cleared} ${decider}${s.ask > 0 ? ` · ${s.ask} pending` : ''} · ${s.deny} denied`
-    const strip = g.recent.slice(-Math.max(4, W - cfg.gateLabel.length - 1 - counts.length))
-    const mg = u.pct !== null ? gauge(u.pct, 6) : null
-    return (
-      <Box flexDirection="column" width={W}>
-        <Text wrap="truncate">
-          <Text color={C.main} bold>
-            {modelName}
-          </Text>
-          <Text color={m.isRunning ? C.main : C.dim}>{m.isRunning ? ' ● working' : ' ○ idle'}</Text>
-          {mg ? <Text dimColor> · ctx </Text> : null}
-          {mg ? <Text color={(u.pct ?? 0) >= 80 ? C.warn : C.main}>{mg.on}</Text> : null}
-          {mg ? <Text color={C.faint}>{mg.off}</Text> : null}
-          {mg ? <Text>{` ${Math.round(u.pct ?? 0)}%`}</Text> : null}
-          {u.compactions > 0 ? <Text color={C.amber}>{` ⟲${u.compactions}`}</Text> : null}
-          {u.costUsd !== null ? <Text dimColor>{` · ${fmtUsd(u.costUsd)}`}</Text> : null}
-          {showArchitect ? <Text color={C.arch}>{` · ${cfg.architectLabel.toLowerCase()} ${advising ? 'advising' : a.consults.length}`}</Text> : null}
-        </Text>
-        {strip.length > 0 ? (
-          <Box>
-            <Text dimColor>{`${cfg.gateLabel.toLowerCase()} `}</Text>
-            {strip.map(c => (
-              <Text color={verdictColor(c)} dimColor={c.inSubagent}>
-                {c.verdict === 'deny' ? '✗' : '■'}
-              </Text>
-            ))}
-            <Text color={s.deny > 0 ? C.warn : s.ask > 0 ? C.amber : C.dim} wrap="truncate">
-              {counts}
-            </Text>
-          </Box>
-        ) : null}
-        {live.map(c => (
-          <Box>
-            <Text color={statusColor(c)}>{`${glyph(c)} `}</Text>
-            <Box width={Math.max(10, W - 30)}>
-              <Text wrap="truncate">{cardTitle(c)}</Text>
-            </Box>
-            <Text dimColor>{c.steps > 0 ? ` ctx ${kTokens(c.ctx)} ` : ' '}</Text>
-            {clock(`mini-clock-${c.id}`, c.spawnedAt, c.endedAt, C.dim)}
-          </Box>
-        ))}
-        {cards.length > live.length ? (
-          <Text color={C.faint} wrap="truncate">{`+${cards.length - live.length} more agents · /flightdeck layout compact for all`}</Text>
-        ) : null}
-        {lp.length > 0 ? <Text dimColor>{`other loops ${lp.length} · ${lp.filter(l => isLoopActive(l, now)).length} active`}</Text> : null}
-        {!m.isRunning && r ? (
-          <Text dimColor wrap="truncate">
-            {`last turn ${fmtDuration(r.durationMs)} · ${plural(r.agents, 'agent')} · ${plural(r.edits, 'edit')} · ${plural(r.errors, 'error')}${r.costDelta !== null ? ` · +${fmtUsd(r.costDelta)}` : ''}`}
-          </Text>
-        ) : null}
-      </Box>
-    )
-  }
-
-  const legend = fitLegend(
-    [
-      { label: 'main', color: C.main },
-      { label: 'agents', color: C.agent },
-      { label: cfg.gateLabel.toLowerCase(), color: C.gate },
-      ...(showArchitect ? [{ label: cfg.architectLabel.toLowerCase(), color: C.arch }] : []),
-    ],
-    W,
-  )
-
-  const body = isWide ? (
-    <Box flexDirection="column">
-      <Box columnGap={2}>
-        {column(panels.filter(p => p === 'receipt' || p === 'main' || p === 'architect' || p === 'gate' || p === 'files'), colW)}
-        {column(panels.filter(p => p === 'agents' || p === 'shell' || p === 'loops'), colW)}
-      </Box>
-      {panels.includes('log') ? logPanel(W) : null}
-    </Box>
-  ) : (
-    column(panels, W)
-  )
-
-  return (
-    <Box flexDirection="column" width={W}>
-      <Box justifyContent="center">
-        <Text bold wrap="truncate">
-          <Text>FLIGHTDECK</Text>
-          <Text color={C.dim}> · </Text>
-          <Text color={C.main}>{modelName.toUpperCase()}</Text>
-          <Text>{m.isRunning ? ' WORKS' : ' IDLE'}</Text>
-          {showArchitect ? <Text color={C.dim}> · </Text> : null}
-          {showArchitect ? <Text color={C.arch}>{cfg.architectLabel}</Text> : null}
-          {showArchitect ? <Text>{advising ? ' ADVISING' : ' ON CALL'}</Text> : null}
-        </Text>
-      </Box>
-      <Box justifyContent="center" columnGap={2}>
-        {legend.map(l => (
-          <Text>
-            <Text color={l.color}>■</Text>
-            <Text dimColor>{` ${l.label}`}</Text>
-          </Text>
-        ))}
-      </Box>
-      {body}
-      {svgLanes}
-    </Box>
-  )
-}
-
 export const register: Register = (on, options) => {
   fdOptions = options?.flightdeck === 'off' ? null : (options ?? {})
   if (fdOptions) {
     const cfg = configOf(fdOptions)
     fdCfg = cfg
     const options = fdOptions
-    on('ui.render', { component: 'Pane', requestId: FD_PANE }, async ($, e) => renderFlightdeck($, e, options))
+    on('ui.render', { component: 'Pane', requestId: FD_PANE }, async ($, e) => renderFlightdeck($, e, options, { treeRoot: async () => (await get($)).root, showFile: f => showFile($, f), shortPath }))
 
     on('session.end', async ($, e, next) => {
       if (e.reason === 'clear') {
@@ -2206,7 +1298,7 @@ export const register: Register = (on, options) => {
     on('agent.offer', async ($, e, next) => {
       const offered = await next(e)
       if (cfg.architect.test(e.agent) || (cfg.matchDescriptions && cfg.architect.test(e.description))) {
-        await update($, fdRoster, r => {
+        await updateFdRoster($, r => {
           const x = normalize(DEFAULT_ROSTER, r)
           return x.architectTypes.includes(e.agent) ? x : { architectTypes: [...listOf<string>(x.architectTypes), e.agent].slice(-20) }
         })
@@ -2216,8 +1308,8 @@ export const register: Register = (on, options) => {
 
     on('turn.start', async ($, e, next) => {
       const [now, cost] = await Promise.all([$.clock.now(), costNow($)])
-      await update($, fdTurn, () => ({ ...DEFAULT_TURN, startedAt: now, costAtStart: cost }))
-      await update($, fdMain, m => ({ ...normalize(DEFAULT_MAIN, m), isRunning: true }))
+      await updateFdTurn($, () => ({ ...DEFAULT_TURN, startedAt: now, costAtStart: cost }))
+      await updateFdMain($, m => ({ ...normalize(DEFAULT_MAIN, m), isRunning: true }))
       // A background architect's report reaches the main loop as the text opening this turn. The
       // SubagentHandback tool call (in tool.call) normally carries it first; this is the fallback.
       const back = e.text ? handbackOf(e.text) : null
@@ -2235,7 +1327,7 @@ export const register: Register = (on, options) => {
     on('turn.step', async function* ($, e, next) {
       // The main loop's model is known when its request starts; a long first request shouldn't read "—".
       if (!e.agentId) {
-        await update($, fdMain, m => {
+        await updateFdMain($, m => {
           const x = normalize(DEFAULT_MAIN, m)
           return { ...x, model: e.model, effort: String(e.effort ?? x.effort), steps: x.steps + 1 }
         })
@@ -2252,7 +1344,7 @@ export const register: Register = (on, options) => {
         }
         const result = await s.result
         const speed = result.usage && stopAt !== null ? stepSpeed(sentAt, firstAt, stopAt, result.usage.output_tokens) : null
-        if (speed) await update($, fdMain, m => ({ ...normalize(DEFAULT_MAIN, m), speed }))
+        if (speed) await updateFdMain($, m => ({ ...normalize(DEFAULT_MAIN, m), speed }))
         return result
       }
       const result = yield* next(e)
@@ -2260,17 +1352,17 @@ export const register: Register = (on, options) => {
       const [cards, a] = await Promise.all([getCards($), getArchitect($)])
       if (cards.some(c => c.id === id)) {
         const step = { model: e.model, usage: result.usage, stopReason: result.stopReason }
-        await update($, fdAgents, list => listOf<unknown>(list).map(normalizeCard).map(c => (c.id === id ? applyStep(c, step) : c)))
+        await updateFdAgents($, list => listOf<unknown>(list).map(normalizeCard).map(c => (c.id === id ? applyStep(c, step) : c)))
         if (result.stopReason === 'max_tokens') await say($, await whoIs($, id), 'hit max_tokens', 'error', id)
       } else if (!a.ids.includes(id)) {
         const now = await $.clock.now()
-        await update($, fdLoops, l => stepLoop(listOf<Loop>(l), id, now))
+        await updateFdLoops($, l => stepLoop(listOf<Loop>(l), id, now))
       }
       return result
     })
 
     on('session.measure', async ($, e, next) => {
-      await update($, fdUsage, x => ({
+      await updateFdUsage($, x => ({
         ...normalize(DEFAULT_USAGE, x),
         pct: e.context.percent ?? null,
         tokens: e.context.tokens ?? null,
@@ -2286,7 +1378,7 @@ export const register: Register = (on, options) => {
       const done = await next(e)
       if (!e.agentId && e.trigger !== 'precompute') {
         const now = await $.clock.now()
-        await update($, fdUsage, x => {
+        await updateFdUsage($, x => {
           const u = normalize(DEFAULT_USAGE, x)
           return { ...u, compactions: u.compactions + 1, lastCompactAt: now }
         })
@@ -2307,7 +1399,7 @@ export const register: Register = (on, options) => {
           detail: shorten(describeInput(e.tool, e.input), 90),
           at: await $.clock.now(),
         }
-        await update($, fdGate, g => recordCheck(normalizeGate(g), check))
+        await updateFdGate($, g => recordCheck(normalizeGate(g), check))
         // The status line updates when the call settles; only a refusal ends here.
         if (verdict.decision === 'deny') {
           await say($, 'gate', `denied by rule · ${check.detail}`, 'error')
@@ -2328,7 +1420,7 @@ export const register: Register = (on, options) => {
           if (block.type === 'server_tool_use' && block.name && block.id && cfg.architect.test(block.name)) {
             if (a.seen.includes(block.id)) continue
             const id = block.id
-            await update($, fdArchitect, x => {
+            await updateFdArchitect($, x => {
               const y = normalize(DEFAULT_ARCHITECT, x)
               return { ...y, seen: [...listOf<string>(y.seen), id].slice(-60) }
             })
@@ -2350,11 +1442,11 @@ export const register: Register = (on, options) => {
       if (started.deny !== undefined || !started.agentId) return started
       const id = started.agentId
       if (await isArchitectType($, cfg, e.subagentType)) {
-        await update($, fdArchitect, a => {
+        await updateFdArchitect($, a => {
           const x = normalize(DEFAULT_ARCHITECT, a)
           return { ...x, ids: [...listOf<string>(x.ids), id].slice(-40) }
         })
-        await update($, fdLoops, l => listOf<Loop>(l).filter(x => x.id !== id))
+        await updateFdLoops($, l => listOf<Loop>(l).filter(x => x.id !== id))
         await consultStarted($, cfg, id, e.subagentType.split(':').pop() ?? 'agent')
         return started
       }
@@ -2366,8 +1458,8 @@ export const register: Register = (on, options) => {
         description: e.description,
         spawnedAt: await $.clock.now(),
       }
-      await update($, fdAgents, list => [...listOf<unknown>(list).map(normalizeCard), card].slice(-24))
-      await update($, fdLoops, l => listOf<Loop>(l).filter(x => x.id !== id))
+      await updateFdAgents($, list => [...listOf<unknown>(list).map(normalizeCard), card].slice(-24))
+      await updateFdLoops($, l => listOf<Loop>(l).filter(x => x.id !== id))
       await say($, shorten(cardTitle(card), 12), `spawned · ${card.type}`, 'info', id)
       await refreshStatus($, cfg)
       return started
@@ -2390,8 +1482,8 @@ export const register: Register = (on, options) => {
             costNow: cost,
             reason: e.reason,
           })
-          await update($, fdReceipt, () => r)
-          await update($, fdMain, m => ({ ...normalize(DEFAULT_MAIN, m), isRunning: false }))
+          await updateFdReceipt($, () => r)
+          await updateFdMain($, m => ({ ...normalize(DEFAULT_MAIN, m), isRunning: false }))
           await refreshStatus($, cfg)
           return done
         }
@@ -2402,7 +1494,7 @@ export const register: Register = (on, options) => {
         const cards = await getCards($)
         if (cards.some(c => c.id === id)) {
           const status = e.reason === 'answer' ? 'done' : e.reason === 'aborted' ? 'stopped' : 'failed'
-          await update($, fdAgents, list =>
+          await updateFdAgents($, list =>
             listOf<unknown>(list)
               .map(normalizeCard)
               .map(c => (c.id === id ? { ...c, status, endedAt: now, answer: shorten(e.answer, 400) } : c)),
@@ -2411,7 +1503,7 @@ export const register: Register = (on, options) => {
           const took = card ? fmtDuration(now - card.spawnedAt) : ''
           await say($, await whoIs($, id), status === 'done' ? `done · ${took}` : status, status === 'done' ? 'done' : 'error', id)
         } else {
-          await update($, fdLoops, l => listOf<Loop>(l).map(x => (x.id === id ? { ...x, isDone: true, lastAt: now } : x)))
+          await updateFdLoops($, l => listOf<Loop>(l).map(x => (x.id === id ? { ...x, isDone: true, lastAt: now } : x)))
         }
         await refreshStatus($, cfg)
         return done
@@ -2575,7 +1667,7 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'Pane', requestId: VIEWER_PANE }, async ($, e) => {
     const els = $.ui.resolve(e)
-    const { Box, Text, Button, Code, Markdown, Raster, Image } = els
+    const { Box, Text, Code, Markdown, Raster, Image } = els
     const t = await read($, TREE)
     const chosen = await read($, mode)
     const path = (await read($, target)) || (t?.selected ?? '')
@@ -2828,7 +1920,7 @@ export const register: Register = (on, options) => {
       // A host without usage (headless, an SDK host, a session not yet bound) just starts without it.
       const u = await $.session.usage().catch(() => null)
       if (u) {
-        await update($, fdUsage, x => ({
+        await updateFdUsage($, x => ({
           ...normalize(DEFAULT_USAGE, x),
           pct: u.context.percent ?? null,
           tokens: u.context.tokens ?? null,
@@ -2949,7 +2041,7 @@ export const register: Register = (on, options) => {
           const at = await $.clock.now()
           const kind = e.tool === 'Bash' ? 'shell' : 'monitor'
           const label = (e.tool === 'Bash' ? input.command : input.description || input.command) ?? ''
-          await update($, fdTasks, list => startTask(listOf<BgTask>(list), { id, kind, label, at }))
+          await updateFdTasks($, list => startTask(listOf<BgTask>(list), { id, kind, label, at }))
         }
       }
       if (String(e.tool) === 'TaskStop') {
@@ -2957,13 +2049,13 @@ export const register: Register = (on, options) => {
         const id = input.task_id ?? input.shell_id
         if (id && didRun && !ran.isError) {
           const at = await $.clock.now()
-          await update($, fdTasks, list => endTask(listOf<BgTask>(list), id, 'killed', at))
+          await updateFdTasks($, list => endTask(listOf<BgTask>(list), id, 'killed', at))
         }
       }
       // Settle this call's pending ask, if it had one; skip the write (and the redraw) otherwise.
       const g0 = await getGate($)
       const isSettled = settleCheck(g0, e.tool_use_id, didRun) !== g0
-      if (isSettled) await update($, fdGate, g => settleCheck(normalizeGate(g), e.tool_use_id, didRun))
+      if (isSettled) await updateFdGate($, g => settleCheck(normalizeGate(g), e.tool_use_id, didRun))
       // A background agent hands its report back through this tool; an architect's report is its advice.
       if (String(e.tool) === 'SubagentHandback') {
         const message = (e as unknown as { message?: unknown }).message
@@ -2982,12 +2074,12 @@ export const register: Register = (on, options) => {
       const isEdit = !hasFailed && didRun && EDIT_TOOLS.has(e.tool)
       const t0 = await getTurn($)
       if (isEdit || hasFailed || (!e.agentId && t0.errorStreak > 0)) {
-        await update($, fdTurn, t => afterCall(normalize(DEFAULT_TURN, t), { inSubagent: Boolean(e.agentId), hasFailed, isEdit }))
+        await updateFdTurn($, t => afterCall(normalize(DEFAULT_TURN, t), { inSubagent: Boolean(e.agentId), hasFailed, isEdit }))
       }
       const text = shorten(describeInput(e.tool, e), 64)
       if (e.agentId) {
         const id = e.agentId
-        await update($, fdAgents, list =>
+        await updateFdAgents($, list =>
           listOf<unknown>(list)
             .map(normalizeCard)
             .map(c => (c.id === id ? noteTool(c, { tool: e.tool, text, isError: hasFailed || ran.deny !== undefined }) : c)),

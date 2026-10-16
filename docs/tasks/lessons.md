@@ -7,3 +7,4 @@
 - Pure helpers go in `$`-free modules with `bun test`; the mod's own typecheck needs a scratch tsconfig mapping `claude-code` to the skill's `claude-code.d.ts` (compare error counts before/after, the baseline is noisy).
 - Before deleting an option, grep what it actually drove: `follow` looked like cwd-follow but only fed the flash focus, so it became dead with the flash.
 - A typecheck baseline keyed on message text (no line or column) lets you adopt tsc on a noisy codebase: fail on new errors only, shrink on cleanup.
+- Splitting a mod module: the validator follows `$` into imported `function` declarations only (not arrow consts) and wants each state atom defined in the file that reads or writes it, so move atoms with their readers and export wrapper functions for writers. Pass cross-module needs (tree root, open-file action) as a host object instead of importing the entry file.

@@ -221,9 +221,9 @@ Runs BEFORE the tooling/split plan below. Goal: the tree never moves by itself b
 - Verify: introduce a deliberate type error, confirm `check.sh` fails; remove it, confirm pass.
 
 ## Part B - split register.tsx (after A; each step = own commit, `check.sh` green, behaviour unchanged)
-- [ ] B1. `hooks/pure.ts`: move the `$`-free helpers listed above; tests for `clean`, `shortPath`, `keepTop`, `openDirs`, `pruneArgs`, `broad`, `indexPaths`, `failAll`/`proven`.
-- [ ] B2. `hooks/fd-state.ts`: `fd*` atoms, `getX` readers, `migrate`, `say`, `refreshStatus` (takes `$`, no `on`). Export, import back into register.
-- [ ] B3. `hooks/fd-view.tsx`: `renderFlightdeck` + panels; imports `fd-state` + `fd-core`. register keeps only hook wiring for flightdeck.
+- [x] B1. `hooks/pure.ts`: move the `$`-free helpers listed above; tests for `clean`, `shortPath`, `keepTop`, `openDirs`, `pruneArgs`, `broad`, `indexPaths`, `failAll`/`proven`.
+- [x] B2. `hooks/fd-state.ts`: `fd*` atoms, `getX` readers, `migrate`, `say`, `refreshStatus` (takes `$`, no `on`). Export, import back into register.
+- [x] B3. `hooks/fd-view.tsx`: `renderFlightdeck` + panels; imports `fd-state` + `fd-core`. register keeps only hook wiring for flightdeck.
 - [ ] B4. `hooks/viewer.tsx`: `reposView`, media (`imageFile`, `videoFrame`, `htmlFrame`, audio) and the pane body renderer; imports atoms from a small `hooks/atoms.ts` (tree, mode, row, col, ...), which B2 prepares.
 - [ ] B5. Measure: `wc -l register.tsx` before/after, `claude plugin validate`, live check by the user (tree, viewer, repos, flightdeck, media).
 - Order rationale: B1 is risk-free; B2 -> B3 is the biggest cut (~750 lines); B4 touches the most shared state, do last and stop if it needs more than imports to separate.
@@ -233,3 +233,5 @@ Runs BEFORE the tooling/split plan below. Goal: the tree never moves by itself b
 - The `claude-code` types file is per-session and version-stamped; `typecheck.sh` must degrade to "skipped, no types found" instead of failing in CI-less environments.
 - Circular imports between `atoms.ts`, `fd-state.ts`, `viewer.tsx`: keep atoms leaf-level.
 - Live UI cannot be verified by me; B3/B4 need the user's check.
+
+- B1-B3 done: `pure.ts` (+7 tests), `fd-state.ts` (atoms, readers, writers, 201 l), `fd-view.tsx` (`renderFlightdeck`, 674 l); `register.tsx` 3395 -> 2487 lines. Validator rules found while moving: `$` crosses an import only into `function` declarations (not arrow consts), and `read/update` need the atom defined in the same file, so fd-state exports `updateFd*`/`get*` wrappers and fd-view gets file-tree access through a `FlightdeckHost` argument. Live check by the user pending.
