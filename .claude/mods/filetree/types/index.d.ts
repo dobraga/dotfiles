@@ -122,6 +122,16 @@ export type Tally = { rule: number; ask: number; cleared: number; deny: number }
 
 export type Gate = { recent: Check[]; totals: Record<Bucket, Tally> }
 
+/** A background shell or monitor seen starting; `endedAt` is null while it runs. */
+export type BgTask = {
+  id: string
+  kind: 'shell' | 'monitor'
+  label: string
+  startedAt: number
+  endedAt: number | null
+  status: string
+}
+
 export type ToolNote = { tool: string; text: string; isError: boolean }
 
 export type AgentCard = {
@@ -208,6 +218,7 @@ declare module 'claude-code' {
       fdGate: Gate
       fdAgents: AgentCard[]
       fdLoops: Loop[]
+      fdTasks: BgTask[]
       fdLog: LogLine[]
       fdTurn: Turn
       fdReceipt: Receipt | null

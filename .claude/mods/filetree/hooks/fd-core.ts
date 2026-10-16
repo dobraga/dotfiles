@@ -4,6 +4,7 @@
 import type {
   AgentCard,
   Architect,
+  BgTask,
   Bucket,
   Check,
   Gate,
@@ -91,8 +92,8 @@ export const normalizeLog = (stored: unknown): LogLine[] =>
 
 // ---------------------------------------------------------------- config
 
-export type Panel = 'main' | 'architect' | 'gate' | 'agents' | 'loops' | 'receipt' | 'log'
-const PANELS: readonly Panel[] = ['main', 'architect', 'gate', 'agents', 'loops', 'receipt', 'log']
+export type Panel = 'main' | 'architect' | 'gate' | 'agents' | 'loops' | 'shell' | 'receipt' | 'log'
+const PANELS: readonly Panel[] = ['main', 'architect', 'gate', 'agents', 'loops', 'shell', 'receipt', 'log']
 
 export type Config = {
   architect: RegExp
@@ -444,6 +445,32 @@ export const stepLoop = (loops: Loop[], id: string, at: number): Loop[] => {
     : [...loops, { id, steps: 1, firstAt: at, lastAt: at, isDone: false }]
   return next.slice(-60)
 }
+
+/** `[id, status]` for each `<task-notification>` block in a message. */
+export function taskEnds(text: string): [string, string][] {
+  return [...text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)].flatMap(m => {
+    const id = /<task-id>([^<]*)<\/task-id>/.exec(m[1] ?? '')?.[1]?.trim()
+    const status = /<status>([^<]*)<\/status>/.exec(m[1] ?? '')?.[1]?.trim()
+    return id && status ? [[id, status] as [string, string]] : []
+  })
+}
+
+const TASK_KEEP = 20
+
+/** Drops the oldest ended tasks past `TASK_KEEP`; a running one is never dropped. */
+export const trimTasks = (tasks: BgTask[]): BgTask[] => {
+  let extra = tasks.length - TASK_KEEP
+  return tasks.filter(t => (extra > 0 && t.endedAt !== null ? (extra--, false) : true))
+}
+
+export const startTask = (tasks: BgTask[], t: { id: string; kind: BgTask['kind']; label: string; at: number }): BgTask[] =>
+  tasks.some(x => x.id === t.id)
+    ? tasks
+    : trimTasks([...tasks, { id: t.id, kind: t.kind, label: redact(shorten(t.label, 200)), startedAt: t.at, endedAt: null, status: 'running' }])
+
+/** Ends a running task; an id seen at no start (the mod reloaded mid-run) is left alone. */
+export const endTask = (tasks: BgTask[], id: string, status: string, at: number): BgTask[] =>
+  tasks.some(x => x.id === id && x.endedAt === null) ? tasks.map(x => (x.id === id && x.endedAt === null ? { ...x, endedAt: at, status } : x)) : tasks
 
 export const LOOP_ACTIVE_MS = 15_000
 export const isLoopActive = (l: Loop, now: number) => !l.isDone && now - l.lastAt < LOOP_ACTIVE_MS

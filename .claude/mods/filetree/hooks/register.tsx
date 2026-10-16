@@ -1,10 +1,11 @@
 import { atom, read, type BuiltinToolResults, type EngineInterface, type Register, type RenderNode, type Timer, update } from 'claude-code'
 import { deltaDiff, ensureDelta, parseAnsi, sliceSpans, stripAnsi } from './delta'
 import { openCommand } from './open'
+import { formatTable, splitBlocks, type Segment } from './md'
 
 type PaneEvent = Parameters<EngineInterface['ui']['resolve']>[0]
 
-import type { Activity, AgentCard, Architect, Bucket, Check, FileNode, FileTree, Gate, Layout, LogLine, Loop, Main, RepoRow, Roster, Theme, Turn, Usage, View, ViewMode } from '../types'
+import type { Activity, AgentCard, Architect, BgTask, Bucket, Check, FileNode, FileTree, Gate, Layout, LogLine, Loop, Main, RepoRow, Roster, Theme, Turn, Usage, View, ViewMode } from '../types'
 import {
   DEFAULT_ARCHITECT,
   DEFAULT_GATE,
@@ -61,6 +62,9 @@ import {
   startConsult,
   stepSpeed,
   stepLoop,
+  startTask,
+  endTask,
+  taskEnds,
 } from './fd-core'
 import type { Config, Panel } from './fd-core'
 
@@ -657,12 +661,10 @@ function proven(p: Pending | null, results: Outcome[]): GitAction[] {
   return p ? p.actions.filter((_, i) => results[i]?.state !== 'failed') : []
 }
 
-function taskEnds(text: string): [string, string][] {
-  return [...text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)].flatMap(m => {
-    const id = /<task-id>([^<]*)<\/task-id>/.exec(m[1] ?? '')?.[1]?.trim()
-    const status = /<status>([^<]*)<\/status>/.exec(m[1] ?? '')?.[1]?.trim()
-    return id && status ? [[id, status] as [string, string]] : []
-  })
+async function endTasks($: EngineInterface, text: string): Promise<void> {
+  if (!fdCfg || !text.includes('<task-notification>')) return
+  const at = await $.clock.now()
+  for (const [id, status] of taskEnds(text)) await update($, fdTasks, list => endTask(listOf<BgTask>(list), id, status, at))
 }
 
 async function settleBackground($: EngineInterface, text: string): Promise<void> {
@@ -1246,75 +1248,6 @@ const drawDiagram = async ($: EngineInterface, source: string): Promise<string> 
   return text
 }
 
-// `scroll` blocks (mermaid, code fences, tables) slide sideways; `markdown` blocks keep the engine's own wrapping
-type Segment = { kind: 'markdown' | 'mermaid' | 'code' | 'table'; text: string; language?: string }
-
-const splitBlocks = (text: string): Segment[] => {
-  const segments: Segment[] = []
-  let prose: string[] = []
-  const flush = (): void => {
-    if (prose.length > 0) segments.push({ kind: 'markdown', text: prose.join('\n') })
-    prose = []
-  }
-  const lines = text.split('\n')
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? ''
-    const fence = /^\s*```\s*([\w+-]*)/.exec(line)
-    if (fence) {
-      const body: string[] = []
-      i++
-      while (i < lines.length && !/^\s*```\s*$/.test(lines[i] ?? '')) body.push(lines[i++] ?? '')
-      flush()
-      const language = fence[1] ?? ''
-      segments.push(language === 'mermaid' ? { kind: 'mermaid', text: body.join('\n') } : { kind: 'code', text: body.join('\n'), language })
-    } else if (/^\s*\|.*\|\s*$/.test(line)) {
-      const rows: string[] = []
-      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i] ?? '')) rows.push(lines[i++] ?? '')
-      i--
-      flush()
-      segments.push({ kind: 'table', text: rows.join('\n') })
-    } else prose.push(line)
-  }
-  flush()
-
-  return segments
-}
-
-// Markdown table -> box-drawing grid; column alignment comes from the `:---:` row, inline markup is stripped
-const formatTable = (text: string): string => {
-  const cells = (row: string): string[] =>
-    row
-      .trim()
-      .replace(/^\||\|$/g, '')
-      .split('|')
-      .map(c => c.trim().replace(/\*\*(.+?)\*\*|__(.+?)__/g, '$1$2').replace(/`([^`]+)`/g, '$1'))
-  const rows = text.split('\n').map(cells)
-  const rule = rows[1]
-  const hasRule = rule !== undefined && rule.every(c => /^:?-{1,}:?$/.test(c))
-  const align = (hasRule ? rule : []).map(c => (c.startsWith(':') && c.endsWith(':') ? 'center' : c.endsWith(':') ? 'right' : 'left'))
-  const body = hasRule ? [rows[0] ?? [], ...rows.slice(2)] : rows
-  const count = body.reduce((n, r) => Math.max(n, r.length), 0)
-  const widths = Array.from({ length: count }, (_, c) => body.reduce((n, r) => Math.max(n, (r[c] ?? '').length), 1))
-  const pad = (value: string, c: number): string => {
-    const room = (widths[c] ?? 1) - value.length
-    const how = align[c] ?? 'left'
-    if (how === 'right') return ' '.repeat(room) + value
-    if (how === 'center') return ' '.repeat(Math.floor(room / 2)) + value + ' '.repeat(room - Math.floor(room / 2))
-    return value + ' '.repeat(room)
-  }
-  const line = (l: string, m: string, r: string): string => l + widths.map(w => '─'.repeat(w + 2)).join(m) + r
-  const row = (r: string[]): string => '│ ' + widths.map((_, c) => pad(r[c] ?? '', c)).join(' │ ') + ' │'
-  const out = [line('┌', '┬', '┐')]
-  body.forEach((r, i) => {
-    out.push(row(r))
-    if (i === 0 && body.length > 1) out.push(line('├', '┼', '┤'))
-  })
-  out.push(line('└', '┴', '┘'))
-
-  return out.join('\n')
-}
-
-
 // Media: images (converted to PNG with sips), audio (afplay) and video (a poster frame from ffmpeg, seekable) in the viewer
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|tiff?|heic)$/i
 const AUDIO_EXT = /\.(mp3|wav|m4a|aac|flac|ogg|aiff?)$/i
@@ -1522,6 +1455,7 @@ const fdArchitect = atom({ plugin: 'filetree', key: 'fdArchitect' } as const, DE
 const fdGate = atom({ plugin: 'filetree', key: 'fdGate' } as const, DEFAULT_GATE)
 const fdAgents = atom({ plugin: 'filetree', key: 'fdAgents' } as const, [])
 const fdLoops = atom({ plugin: 'filetree', key: 'fdLoops' } as const, [])
+const fdTasks = atom({ plugin: 'filetree', key: 'fdTasks' } as const, [])
 const fdLog = atom({ plugin: 'filetree', key: 'fdLog' } as const, [])
 const fdTurn = atom({ plugin: 'filetree', key: 'fdTurn' } as const, DEFAULT_TURN)
 const fdReceipt = atom({ plugin: 'filetree', key: 'fdReceipt' } as const, null)
@@ -1549,6 +1483,9 @@ async function getCards($: EngineInterface): Promise<AgentCard[]> {
 }
 async function getLoops($: EngineInterface): Promise<Loop[]> {
   return listOf<Loop>(await read($, fdLoops))
+}
+async function getTasks($: EngineInterface): Promise<BgTask[]> {
+  return listOf<BgTask>(await read($, fdTasks))
 }
 async function getLog($: EngineInterface): Promise<LogLine[]> {
   return normalizeLog(await read($, fdLog))
@@ -1637,6 +1574,7 @@ async function resetAll($: EngineInterface) {
   await update($, fdAgents, () => [])
   await update($, fdLoops, () => [])
   await update($, fdLog, () => [])
+  await update($, fdTasks, () => [])
   await update($, fdTurn, () => DEFAULT_TURN)
   await update($, fdReceipt, () => null)
   await update($, fdView, () => DEFAULT_VIEW)
@@ -1668,13 +1606,14 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
   const els = $.ui.resolve(e)
   const { Box, Text, Button } = els
   const hasClient = 'Client' in els
-  const [m, u, a, g, cards, lp, lines, t, r, v, now] = await Promise.all([
+  const [m, u, a, g, cards, lp, tasks, lines, t, r, v, now] = await Promise.all([
     getMain($),
     getUsage($),
     getArchitect($),
     getGate($),
     getCards($),
     getLoops($),
+    getTasks($),
     getLog($),
     getTurn($),
     read($, fdReceipt),
@@ -1698,6 +1637,7 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
     gate: g.recent.length === 0 && gateSummary(g).total === 0,
     agents: cards.length === 0,
     loops: lp.length === 0,
+    shell: tasks.length === 0,
     receipt: !m.isRunning && !r,
     log: false,
   }
@@ -2028,6 +1968,38 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
     )
   }
 
+  // ---- shell: background shells and monitors, running first
+  const shellPanel = (w: number) => {
+    const live = tasks.filter(x => x.endedAt === null)
+    const shown = [...live, ...tasks.filter(x => x.endedAt !== null).reverse()].slice(0, 6)
+    return (
+      <Box flexDirection="column" borderStyle="round" borderColor={C.agent} borderDimColor={live.length === 0} paddingX={1} width={w}>
+        <Box justifyContent="space-between">
+          <Text color={C.agent} bold>
+            shell · background
+          </Text>
+          <Text dimColor>{`${live.length} running`}</Text>
+        </Box>
+        {shown.map(x => (
+          <Box>
+            <Box width={2} flexShrink={0}>
+              <Text color={x.endedAt === null ? C.agent : x.status === 'completed' ? C.gate : C.warn}>{x.endedAt === null ? '●' : x.status === 'completed' ? '✓' : '✗'}</Text>
+            </Box>
+            <Box width={9} flexShrink={0}>
+              <Text color={C.dim}>{x.kind}</Text>
+            </Box>
+            <Box width={8} flexShrink={0}>
+              <Text color={C.faint}>{fmtDuration((x.endedAt ?? now) - x.startedAt)}</Text>
+            </Box>
+            <Text color={x.endedAt === null ? C.text : C.dim} wrap="truncate">
+              {x.label}
+            </Text>
+          </Box>
+        ))}
+      </Box>
+    )
+  }
+
   // ---- receipt: the turn now, or the last one
   const receiptPanel = (w: number) => {
     const isReview = t.isReviewing
@@ -2055,7 +2027,7 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
 
   // ---- log: whatever rows the other panels leave, 4 to 8
   // The main box's speed line and the gap above the log are a row each.
-  const used = 2 + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length > cfg.maxCards ? 3 + Math.min(6, cards.length) : 8) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + 3
+  const used = 2 + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length > cfg.maxCards ? 3 + Math.min(6, cards.length) : 8) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + (tasks.length ? 3 + Math.min(6, tasks.length) : 0) + 3
   const bodyRows = e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 40
   const nLog = logRows(bodyRows, used)
   const shownLines = (viewed ? lines.filter(l => l.agentId === viewed) : lines).slice(-nLog)
@@ -2094,9 +2066,11 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
             ? agentsPanel(w)
             : p === 'loops'
               ? loopsPanel(w)
-              : p === 'receipt'
-                ? receiptPanel(w)
-                : logPanel(w)
+              : p === 'shell'
+                ? shellPanel(w)
+                : p === 'receipt'
+                  ? receiptPanel(w)
+                  : logPanel(w)
 
   // Panels with the flow between them; the agents panel draws its own rails.
   const column = (ps: Panel[], w: number) => (
@@ -2104,7 +2078,7 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
       {ps.map((p, i) => {
         const prev = ps[i - 1]
         const link =
-          i === 0 || p === 'agents' || prev === 'agents' || p === 'log' || p === 'loops' || prev === 'loops'
+          i === 0 || p === 'agents' || prev === 'agents' || p === 'log' || p === 'loops' || prev === 'loops' || p === 'shell' || prev === 'shell'
             ? null
             : rail(`link-${p}`, p === 'architect' ? advising : m.isRunning, p === 'architect' ? C.arch : C.main, w)
         return (
@@ -2221,7 +2195,7 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
     <Box flexDirection="column">
       <Box columnGap={2}>
         {column(panels.filter(p => p === 'main' || p === 'architect' || p === 'gate'), colW)}
-        {column(panels.filter(p => p === 'agents' || p === 'loops' || p === 'receipt'), colW)}
+        {column(panels.filter(p => p === 'agents' || p === 'loops' || p === 'shell' || p === 'receipt'), colW)}
       </Box>
       {panels.includes('log') ? logPanel(W) : null}
     </Box>
@@ -2792,16 +2766,21 @@ export const register: Register = (on, options) => {
 
     type Item = { rows: number; node: RenderNode }
     const items: Item[] = []
+    const gap = (): void => {
+      if (items.length > 0) items.push({ rows: 1, node: <Text> </Text> })
+    }
     if (view === 'rendered') {
       segments.forEach((seg, i) => {
         const text = drawn[i] ?? ''
         if (seg.kind === 'markdown') {
           for (const para of text.split(/\n\s*\n/)) {
             if (para.trim() === '') continue
+            gap()
             const rows = para.split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(l.length / width)), 1)
             items.push({ rows, node: <Markdown text={para} /> })
           }
         } else {
+          gap()
           text.split('\n').forEach((row, n) => {
             const shown = slice(row) === '' ? ' ' : slice(row)
             items.push({
@@ -3023,6 +3002,25 @@ export const register: Register = (on, options) => {
       const cfg = fdCfg
       await (async () => {
       const didRun = ran.deny === undefined
+      if (didRun && !ran.isError && (e.tool === 'Bash' || String(e.tool) === 'Monitor')) {
+        const input = e as unknown as { command?: string; description?: string }
+        const out = (ran.result && typeof ran.result === 'object' ? ran.result : {}) as { backgroundTaskId?: string; taskId?: string }
+        const id = e.tool === 'Bash' ? out.backgroundTaskId : out.taskId
+        if (id) {
+          const at = await $.clock.now()
+          const kind = e.tool === 'Bash' ? 'shell' : 'monitor'
+          const label = (e.tool === 'Bash' ? input.command : input.description || input.command) ?? ''
+          await update($, fdTasks, list => startTask(listOf<BgTask>(list), { id, kind, label, at }))
+        }
+      }
+      if (String(e.tool) === 'TaskStop') {
+        const input = e as unknown as { task_id?: string; shell_id?: string }
+        const id = input.task_id ?? input.shell_id
+        if (id && didRun && !ran.isError) {
+          const at = await $.clock.now()
+          await update($, fdTasks, list => endTask(listOf<BgTask>(list), id, 'killed', at))
+        }
+      }
       // Settle this call's pending ask, if it had one; skip the write (and the redraw) otherwise.
       const g0 = await getGate($)
       const isSettled = settleCheck(g0, e.tool_use_id, didRun) !== g0
@@ -3161,6 +3159,7 @@ export const register: Register = (on, options) => {
 
   on('prompt.submit', async ($, e, next) => {
     void settleBackground($, e.text)
+    void endTasks($, e.text)
     if (!(await followCwd($))) void sync($)
     const t = await get($)
     const context = [...(e.context ?? [])]
@@ -3189,6 +3188,7 @@ export const register: Register = (on, options) => {
 
   on('prompt.attachment', async ($, e, next) => {
     void settleBackground($, e.text)
+    void endTasks($, e.text)
     return next(e)
   })
 

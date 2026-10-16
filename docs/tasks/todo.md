@@ -103,3 +103,60 @@ Decision: reuse what exists (no w3m/chromium); add an "Open" button (`o`) for `.
 - [x] 7. ACKNOWLEDGEMENTS, README section, lessons.md entry, `graphify update .`
 
 - Deviation: the validator allows one hooks module, no `on` passed to helpers and no duplicate matcher-less `on(event)`, so the port lives inside `register.tsx` and its session.start/tool.call/turn.complete bodies are merged into filetree's handlers. Upstream tests need `claude-code/testing` (not installed here), so only `plugin validate` + an fd-core smoke import ran; the live tab is untested.
+
+---
+
+# Plan: Shells & monitors panel in Flightdeck
+
+## Findings
+- No API lists live background shells/monitors. `$.agent.list()` covers subagents only; `background_tasks` exists only on the Stop *shell-hook* input, not on the mod `on(...)` events.
+- Start signals (tool results): `Bash` with `run_in_background` -> `backgroundTaskId`; `Monitor` -> `taskId`, `timeoutMs`, `persistent`. Tool inputs give `command` / `description`.
+- End signals: `<task-notification>` blocks (`<task-id>`, `<status>`) already parsed by `taskEnds` in `register.tsx:660`; also `TaskStop` calls.
+- Limit: a shell/monitor started before the mod (re)loads is invisible; state is rebuilt only from events seen.
+
+## Design
+- One panel `shell` (added to `Panel`/`PANELS` in `fd-core.ts:94`, shown in `fdPanels` config), listing active + recently ended tasks: kind (shell|monitor), description/command (via `redact`), elapsed (`fmtDuration`), status. Hidden when empty.
+- State: `fdTasks` atom (list of `{id, kind, label, startedAt, endedAt?, status}`), reducers in `fd-core.ts` (`startTask`, `endTask`, `trimTasks`), same pattern as `recordCheck`/`settleCheck`.
+- Wire in existing `tool.call`/`tool.result` and the `settleBackground` path; no new hooks module.
+
+## Tasks
+- [x] 1. Vet this plan with user
+- [x] 2. Add `Task` type + reducers to `fd-core.ts`; extend `PluginState` in `types/index.d.ts`
+- [x] 3. Feed `fdTasks` from Bash/Monitor `tool.result`, `<task-notification>` and `TaskStop`
+- [x] 4. Render the `shell` panel; add to `PANELS` and `fdPanels` config
+- [x] 5. `claude plugin validate`, reducer smoke test, manual check with a `sleep` job + a Monitor
+- [x] 6. README, lessons.md, `graphify update .`
+
+- Verified: `claude plugin validate` passes; `startTask`/`endTask` smoke-tested with bun (dedupe, redact, trim keeps running). Not verified: live panel, and `tool.call` result shape for Monitor (`taskId`) is read from the type file only; no tsc (no tsconfig until the mod loads).
+
+---
+
+# Plan: filetree improvements learned from flightdeck
+
+## Findings
+- `hooks/register.tsx` is 3552 lines / 153 KB with ~109 top-level functions; pure pieces (`splitBlocks`, `formatTable`, `taskEnds`, git-command parsing, `readOnly`, `readTargets`) are mixed with `$`-calling code. Only `fd-core.ts` is `$`-free and testable.
+- Persisted atoms (`tree`, `repos`, `theme`, `mode`, ...) are read raw; only `fd*` go through `normalize`/`SCHEMA_VERSION`.
+- Activity labels/commands shown by the tree are not passed through `redact`.
+- The viewer ignores width except for scroll math; header button rows are hand-repeated 3x (25 `Button label=`).
+- Constraint: the validator allows one hooks module, so extracted modules must be plain imports (no `on` inside them), like `fd-core.ts`.
+
+## Design
+Order matters: 1 enables safe refactors; 2/4 are small protections; 3/5/6/7 build on 1.
+1. **Pure core + tests.** Move `$`-free helpers into `hooks/md.ts` (splitBlocks, formatTable), `hooks/cmd.ts` (gitActions, readOnly, readTargets, taskEnds) and keep `fd-core.ts`. Add `hooks/*.test.ts` run with `bun test` (the `claude plugin test` kit is not installed). Behaviour unchanged; each move verified by tests written first on current outputs.
+2. **Versioned persisted state.** Generalize `SCHEMA_VERSION`/`migrate`/`normalize` to the filetree atoms that persist across sessions (`theme`, `mode`, `auto`, `single`); bad shapes fall back to defaults instead of throwing.
+3. **Header buttons from data.** One `headerButtons(mode, file)` list rendered by a single `Header` component replacing the 3 hand-repeated rows; hidden buttons simply absent.
+4. **Redact activity labels.** Run `redact` (exported from `fd-core.ts`) on `Activity.label/detail` where they are created.
+5. **Adaptive viewer.** `wide|mini|auto` choice from `bodyColumns` for the viewer: narrow = header buttons collapse to icons/hotkeys only, tables fall back to scroll; config `viewerLayout`.
+6. **Cheaper animation.** Move flash/tick redraws into a `Client` module (`surface.every`) like `fd-rail.tsx`, so only the changing region redraws; keep `tick` atom only for non-terminal surfaces.
+7. **Validated config.** Route all `userConfig` reads through one `parseConfig`-style function with safe fallbacks (invalid values, bad regex) and tests.
+
+## Tasks
+- [x] 0. Vet this plan with user (rule of three)
+- [x] 1. Extract `md.ts`, `cmd.ts`; write tests first; `bun test` + `claude plugin validate`
+- [ ] 2. Versioned persisted state + migration test
+- [ ] 3. Single `Header` component for the 3 button rows
+- [ ] 4. `redact` on activity labels + test
+- [ ] 5. Adaptive viewer layout + `viewerLayout` config
+- [ ] 6. Move flash/tick animation into a `Client` module (verify live; most visual risk, do last)
+- [ ] 7. Centralized, tested config parsing
+- [ ] 8. README, lessons.md, `graphify update .`; commit per task
