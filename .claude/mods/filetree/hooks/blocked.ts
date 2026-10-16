@@ -10,10 +10,11 @@ const RUN_TIMEOUT_MS = 120_000
 export async function holdBlocked($: EngineInterface, item: { id: string; command: string; reason: string }, pane: { id: string; title: string }): Promise<void> {
   const at = await $.clock.now()
   await updateFdBlocked($, list => addBlocked(list, { ...item, at, status: 'waiting', output: '', exitCode: null }))
-  const isUp = (await $.ui.panes().catch(() => [])).some(p => p.id === pane.id && p.isPlaced)
-  if (!isUp) {
+  // Bring the Flightdeck to the front: opening an id that is already up retitles it in place and, with `focus`, selects it.
+  const front = (await $.ui.panes().catch(() => [])).some(p => p.id === pane.id && p.isShown && p.isFocused)
+  if (!front) {
     const placed = await $.ui.open({ id: pane.id, title: pane.title, columns: 66, rows: 12, focus: true }).catch(() => undefined)
-    if (!placed?.isPlaced) $.ui.log('A command was blocked; open the Flightdeck tab to run it yourself.')
+    if (!placed?.isPlaced) $.ui.log(`A command was blocked; open the Flightdeck tab to run it yourself.${placed && !placed.isPlaced ? ` (${placed.reason})` : ''}`)
   }
   $.ui.toast('A command was blocked: you can run it yourself in the Flightdeck tab')
 }

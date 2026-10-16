@@ -1202,6 +1202,11 @@ export const register: Register = (on, options) => {
 
     on('tool.check', async ($, e, next) => {
       const verdict = await next(e)
+      // A Bash command the engine refused by a rule or mode is held for the user to run themselves; the verdict is left as it is.
+      const refused = (e.input as { command?: unknown } | null)?.command
+      if (approvalOn && verdict.decision === 'deny' && e.tool === 'Bash' && e.tool_use_id && typeof refused === 'string' && refused !== '') {
+        await holdBlocked($, { id: e.tool_use_id, command: refused, reason: [verdict.reason, verdict.rule ? `rule ${verdict.rule}` : ''].filter(Boolean).join(' · ') }, { id: FD_PANE, title: 'Flightdeck' })
+      }
       if (e.tool_use_id) {
         const check: Check = {
           id: e.tool_use_id,
