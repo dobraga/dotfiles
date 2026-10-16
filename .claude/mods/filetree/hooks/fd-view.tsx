@@ -2,7 +2,7 @@
 import { type EngineInterface } from 'claude-code'
 import { dismissBlockedCommand, runBlocked } from './blocked'
 import { type AgentCard, type BlockedCommand, type Bucket, type Check, type FileEvent, type LogLine } from '../types'
-import { DEFAULT_VIEW, cardTitle, consultTimeline, fitLegend, fmtClock, fmtDuration, fmtTimer, fmtUsd, plural, gateSummary, gauge, isAdvising, isLoopActive, kTokens, lanes, limitLabel, fmtResetIn, fmtSpeed, logRows, normalize, PALETTES, SVG_COLORS, prettyModel, shorten } from './fd-core'
+import { DEFAULT_VIEW, cardTitle, consultTimeline, fitLegend, fmtClock, fmtDuration, fmtTimer, fmtUsd, plural, gateSummary, gauge, isAdvising, isLoopActive, kTokens, lanes, limitLabel, fmtResetIn, fmtSpeed, logRows, normalize, PALETTES, SVG_COLORS, prettyModel, shorten, FD_PANE } from './fd-core'
 import { type Panel } from './fd-core'
 import { configOf, getBlocked, getArchitect, getCards, getFiles, getGate, getLog, getLoops, getMain, getReceipt, getTasks, getTurn, getUsage, getView, updateFdView } from './fd-state'
 
@@ -11,8 +11,6 @@ import { configOf, getBlocked, getArchitect, getCards, getFiles, getGate, getLog
 type PaneEvent = Parameters<EngineInterface['ui']['resolve']>[0]
 
 /** What the tab needs from the file tree, passed in so this module never imports register.tsx. */
-const FD_PANE = 'flightdeck'
-
 export type FlightdeckHost = {
   treeRoot: () => Promise<string>
   showFile: (f: FileEvent) => Promise<void>

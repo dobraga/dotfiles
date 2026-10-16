@@ -10,7 +10,7 @@ import { formatTable, splitBlocks, type Segment } from './md'
 import { clean, clock, failAll, faint, openDirs, type Outcome, type Pending, proven, rootOfDisk, shortenHome } from './pure'
 
 import type { Activity, AgentCard, BgTask, Check, FileEvent, FileNode, FileTree, Loop, RepoRow, Theme, ViewMode } from '../types'
-import { DEFAULT_ARCHITECT, DEFAULT_MAIN, DEFAULT_ROSTER, DEFAULT_TURN, DEFAULT_USAGE, EDIT_TOOLS, afterCall, applyStep, bucketOf, cardTitle, describeInput, fmtDuration, limitOf, listOf, normalize, normalizeCard, normalizeGate, noteTool, promptLine, handbackOf, adviceLine, receiptOf, recordCheck, settleCheck, shorten, stepSpeed, stepLoop, startTask, endTask, recordFiles, taskEnds } from './fd-core'
+import { DEFAULT_ARCHITECT, DEFAULT_MAIN, DEFAULT_ROSTER, DEFAULT_TURN, DEFAULT_USAGE, EDIT_TOOLS, afterCall, applyStep, bucketOf, cardTitle, describeInput, fmtDuration, limitOf, listOf, normalize, normalizeCard, normalizeGate, noteTool, promptLine, handbackOf, adviceLine, receiptOf, recordCheck, settleCheck, shorten, stepSpeed, stepLoop, startTask, endTask, recordFiles, taskEnds, FD_PANE } from './fd-core'
 import type { Config } from './fd-core'
 
 import { BRANCH_ICON, chainOf, type GitAction, gitActions, readOnly, readTargets, resolve, TONES } from './git'
@@ -863,7 +863,6 @@ const TITLE = 'File viewer'
 const MAX_CHARS = 90000
 const RENDER_TIMEOUT_MS = 10000
 // Set by register() when the Flightdeck tab is on; null hides the tab (its hooks live in fd.tsx and skip registering)
-const FD_PANE = 'flightdeck'
 let fdOptions: Readonly<Record<string, unknown>> | null = null
 let fdCfg: Config | null = null
 // tool.check carries no loop id; the tool.call around it does, keyed by the call's id.
