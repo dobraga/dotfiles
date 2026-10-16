@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { addBlocked, clipOutput, dismissBlocked, isStartable, normalizeBlocked, patchBlocked, promptText } from './blocked-core'
 import type { BlockedCommand } from '../types'
 
-const item = (id: string, over: Partial<BlockedCommand> = {}): BlockedCommand => ({ id, command: `echo ${id}`, reason: 'denied', at: 1, status: 'waiting', output: '', exitCode: null, ...over })
+const item = (id: string, over: Partial<BlockedCommand> = {}): BlockedCommand => ({ id, command: `echo ${id}`, reason: 'denied', at: 1, status: 'waiting', output: '', exitCode: null, openedPane: false, ...over })
 
 test('addBlocked ignores a repeated id and keeps the newest ten', () => {
   let l = addBlocked([], item('a'))

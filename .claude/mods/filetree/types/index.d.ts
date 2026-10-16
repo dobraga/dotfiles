@@ -145,6 +145,8 @@ export type BlockedCommand = {
   status: 'waiting' | 'running' | 'done' | 'failed'
   output: string
   exitCode: number | null
+  /** True when holding this command is what opened the Flightdeck, so answering it may close the tab again. */
+  openedPane: boolean
 }
 
 export type ToolNote = { tool: string; text: string; isError: boolean }

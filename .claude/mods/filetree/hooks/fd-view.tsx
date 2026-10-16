@@ -1,6 +1,6 @@
 // The Flightdeck tab body: every panel, laid out from fd-state's readers and fd-core's reducers.
 import { type EngineInterface } from 'claude-code'
-import { dismissBlockedCommand, runBlocked, sendBlockedToPrompt } from './blocked'
+import { dismissBlockedCommand, runBlocked } from './blocked'
 import { type AgentCard, type BlockedCommand, type Bucket, type Check, type FileEvent, type LogLine } from '../types'
 import { DEFAULT_VIEW, cardTitle, consultTimeline, fitLegend, fmtClock, fmtDuration, fmtTimer, fmtUsd, plural, gateSummary, gauge, isAdvising, isLoopActive, kTokens, lanes, limitLabel, fmtResetIn, fmtSpeed, logRows, normalize, PALETTES, SVG_COLORS, prettyModel, shorten } from './fd-core'
 import { type Panel } from './fd-core'
@@ -11,6 +11,8 @@ import { configOf, getBlocked, getArchitect, getCards, getFiles, getGate, getLog
 type PaneEvent = Parameters<EngineInterface['ui']['resolve']>[0]
 
 /** What the tab needs from the file tree, passed in so this module never imports register.tsx. */
+const FD_PANE = 'flightdeck'
+
 export type FlightdeckHost = {
   treeRoot: () => Promise<string>
   showFile: (f: FileEvent) => Promise<void>
@@ -415,9 +417,8 @@ export async function renderFlightdeck($: EngineInterface, e: PaneEvent, options
   // ---- blocked: a command the engine refused, held for the user to run themselves
   const blockedButtons = (b: BlockedCommand) => (
     <Box columnGap={2}>
-      {b.status === 'waiting' ? <Button key={`run-${b.id}`} label="Run it" hotkey="y" variant="secondary" onPress={() => void runBlocked($, b.id)} /> : null}
-      {b.status === 'done' || b.status === 'failed' ? <Button key={`send-${b.id}`} label="Send to prompt" hotkey="p" variant="secondary" onPress={() => void sendBlockedToPrompt($, b.id)} /> : null}
-      {b.status !== 'running' ? <Button key={`dismiss-${b.id}`} label="Dismiss" hotkey="n" variant="primary" autoFocus onPress={() => void dismissBlockedCommand($, b.id)} /> : null}
+      {b.status === 'waiting' ? <Button key={`run-${b.id}`} label="Run it" hotkey="y" variant="secondary" onPress={() => void runBlocked($, b.id, { id: FD_PANE })} /> : null}
+      {b.status !== 'running' ? <Button key={`dismiss-${b.id}`} label={b.status === 'waiting' ? 'Dismiss' : 'Close'} hotkey="n" variant="primary" autoFocus onPress={() => void dismissBlockedCommand($, b.id, { id: FD_PANE })} /> : null}
     </Box>
   )
   const blockedPanel = (w: number) => {
