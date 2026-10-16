@@ -136,15 +136,13 @@ export type FileEvent = {
   at: number
 }
 
-/** A Bash command the engine refused, held in the Flightdeck so the user can run it themselves. */
+/** A Bash command the engine refused, held in the Flightdeck until the user approves or denies running it. */
 export type BlockedCommand = {
   id: string
   command: string
   reason: string
   at: number
-  status: 'waiting' | 'running' | 'done' | 'failed'
-  output: string
-  exitCode: number | null
+  status: 'waiting' | 'running'
   /** True when holding this command is what opened the Flightdeck, so answering it may close the tab again. */
   openedPane: boolean
 }

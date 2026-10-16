@@ -415,21 +415,21 @@ export async function renderFlightdeck($: EngineInterface, e: PaneEvent, options
   }
 
   // ---- blocked: a command the engine refused, held for the user to run themselves
-  const blockedButtons = (b: BlockedCommand) => (
-    <Box columnGap={2}>
-      {b.status === 'waiting' ? <Button key={`run-${b.id}`} label="Run it" hotkey="y" variant="secondary" onPress={() => void runBlocked($, b.id, { id: FD_PANE })} /> : null}
-      {b.status !== 'running' ? <Button key={`dismiss-${b.id}`} label={b.status === 'waiting' ? 'Dismiss' : 'Close'} hotkey="n" variant="primary" autoFocus onPress={() => void dismissBlockedCommand($, b.id, { id: FD_PANE })} /> : null}
-    </Box>
-  )
+  const blockedButtons = (b: BlockedCommand) =>
+    b.status === 'waiting' ? (
+      <Box columnGap={2}>
+        <Button key={`deny-${b.id}`} label="Deny" hotkey="n" variant="primary" autoFocus onPress={() => void dismissBlockedCommand($, b.id, { id: FD_PANE })} />
+        <Button key={`approve-${b.id}`} label="Approve and run" hotkey="y" variant="secondary" onPress={() => void runBlocked($, b.id, { id: FD_PANE })} />
+      </Box>
+    ) : null
   const blockedPanel = (w: number) => {
     const b = blocked[0]
     if (!b) return null
-    const title = b.status === 'waiting' ? 'command blocked · run it yourself?' : b.status === 'running' ? 'running…' : `ran it · exit ${b.exitCode ?? '?'}`
     return (
-      <Box flexDirection="column" borderStyle="double" borderColor={b.status === 'failed' ? C.warn : b.status === 'done' ? C.gate : C.amber} paddingX={1} width={w}>
+      <Box flexDirection="column" borderStyle="double" borderColor={C.amber} paddingX={1} width={w}>
         <Box justifyContent="space-between">
           <Text color={C.amber} bold>
-            {title}
+            {b.status === 'waiting' ? 'command blocked · run it?' : 'running…'}
           </Text>
           <Text dimColor>{blocked.length > 1 ? `1 of ${blocked.length}` : ''}</Text>
         </Box>
@@ -440,18 +440,9 @@ export async function renderFlightdeck($: EngineInterface, e: PaneEvent, options
         ) : null}
         <Box flexDirection="column">
           {b.command.split('\n').map(line => (
-            <Text wrap="wrap">{line === '' ? ' ' : `${b.status === 'waiting' ? '' : '$ '}${line}`}</Text>
+            <Text wrap="wrap">{line === '' ? ' ' : line}</Text>
           ))}
         </Box>
-        {b.output !== '' ? (
-          <Box flexDirection="column">
-            {b.output.split('\n').map(line => (
-              <Text color={C.dim} wrap="wrap">
-                {line === '' ? ' ' : line}
-              </Text>
-            ))}
-          </Box>
-        ) : null}
         {blockedButtons(b)}
       </Box>
     )
@@ -516,7 +507,7 @@ export async function renderFlightdeck($: EngineInterface, e: PaneEvent, options
 
   // ---- log: whatever rows the other panels leave, 4 to 8
   // The main box's speed line and the gap above the log are a row each.
-  const used = 2 + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length ? 3 + Math.min(6, cards.length) : 0) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + (blocked[0] ? 6 + Math.min(10, blocked[0].command.split('\n').length) + Math.min(15, blocked[0].output.split('\n').length) : 0) + (files.length ? 5 + (v.filesOpen ? Math.min(6, files.filter(f => f.kind === v.filesOpen).length) : 0) : 0) + (tasks.length ? 3 + Math.min(6, tasks.length) : 0) + 3
+  const used = 2 + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length ? 3 + Math.min(6, cards.length) : 0) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + (blocked[0] ? 6 + Math.min(10, blocked[0].command.split('\n').length) : 0) + (files.length ? 5 + (v.filesOpen ? Math.min(6, files.filter(f => f.kind === v.filesOpen).length) : 0) : 0) + (tasks.length ? 3 + Math.min(6, tasks.length) : 0) + 3
   const bodyRows = e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 40
   const nLog = logRows(bodyRows, used)
   const shownLines = (viewed ? lines.filter(l => l.agentId === viewed) : lines).slice(-nLog)

@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
-import { addBlocked, clipOutput, dismissBlocked, isStartable, normalizeBlocked, patchBlocked, promptText } from './blocked-core'
+import { addBlocked, dismissBlocked, isStartable, normalizeBlocked, patchBlocked } from './blocked-core'
 import type { BlockedCommand } from '../types'
 
-const item = (id: string, over: Partial<BlockedCommand> = {}): BlockedCommand => ({ id, command: `echo ${id}`, reason: 'denied', at: 1, status: 'waiting', output: '', exitCode: null, openedPane: false, ...over })
+const item = (id: string, over: Partial<BlockedCommand> = {}): BlockedCommand => ({ id, command: `echo ${id}`, reason: 'denied', at: 1, status: 'waiting', openedPane: false, ...over })
 
 test('addBlocked ignores a repeated id and keeps the newest ten', () => {
   let l = addBlocked([], item('a'))
@@ -20,28 +20,11 @@ test('patchBlocked and dismissBlocked touch only a held id', () => {
   expect(dismissBlocked(l, 'zz')).toBe(l)
 })
 
-test('only a waiting command is startable', () => {
-  const l = [item('a'), item('b', { status: 'running' }), item('c', { status: 'done' })]
+test('only a waiting command can be approved', () => {
+  const l = [item('a'), item('b', { status: 'running' })]
   expect(isStartable(l, 'a')).toBe(true)
   expect(isStartable(l, 'b')).toBe(false)
-  expect(isStartable(l, 'c')).toBe(false)
   expect(isStartable(l, 'zz')).toBe(false)
-})
-
-test('clipOutput keeps the tail and marks a cut', () => {
-  expect(clipOutput('a\nb')).toBe('a\nb')
-  const long = Array.from({ length: 30 }, (_, i) => `l${i}`).join('\n')
-  const out = clipOutput(long, 3)
-  expect(out).toBe('… l27\nl28\nl29')
-  expect(clipOutput('x'.repeat(5000), 14, 100)).toHaveLength(102)
-})
-
-test('promptText states what ran and how it ended', () => {
-  const t = promptText(item('a', { status: 'done', output: 'hi', exitCode: 0 }))
-  expect(t).toContain('$ echo a')
-  expect(t).toContain('hi')
-  expect(t).toContain('(exit 0)')
-  expect(promptText(item('b', { exitCode: 1 }))).toContain('(no output)')
 })
 
 test('normalizeBlocked drops unreadable entries', () => {
