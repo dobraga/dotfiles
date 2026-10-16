@@ -9,6 +9,8 @@ model = data["model"]["display_name"]
 directory = os.path.basename(data["workspace"]["current_dir"])
 cost = data.get("cost", {}).get("total_cost_usd", 0) or 0
 pct = int(data.get("context_window", {}).get("used_percentage", 0) or 0)
+effort = (data.get("effort") or {}).get("level")
+model_label = f"{model} · {effort}" if effort else model
 
 CYAN, GREEN, YELLOW, RED, RESET = (
     "\033[36m",
@@ -48,5 +50,5 @@ except:
     branch = ""
 
 print(
-    f"{CYAN}[{model}]{RESET} {branch} {bar_color}{bar}{RESET} {pct}%{quota} | {YELLOW}${cost:.2f}{RESET}"
+    f"{CYAN}[{model_label}]{RESET} {branch} {bar_color}{bar}{RESET} {pct}%{quota} | {YELLOW}${cost:.2f}{RESET}"
 )

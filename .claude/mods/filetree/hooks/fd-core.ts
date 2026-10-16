@@ -104,6 +104,8 @@ export const normalizeLog = (stored: unknown): LogLine[] =>
 
 export type Panel = 'main' | 'architect' | 'gate' | 'agents' | 'loops' | 'files' | 'shell' | 'receipt' | 'log'
 const PANELS: readonly Panel[] = ['main', 'architect', 'gate', 'agents', 'loops', 'files', 'shell', 'receipt', 'log']
+// The statusline already shows model, context, quota, cost and effort, so `main` is opt-in through `panels`.
+const DEFAULT_PANELS: readonly Panel[] = PANELS.filter(p => p !== 'main')
 
 export type Config = {
   architect: RegExp
@@ -132,7 +134,7 @@ const safeRegExp = (source: string, fallback: string) => {
 export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => {
   const str = (k: string, d: string) => (typeof o[k] === 'string' && o[k] !== '' ? (o[k] as string) : d)
   const bool = (k: string, d: boolean) => (typeof o[k] === 'boolean' ? (o[k] as boolean) : d)
-  const panels = str('panels', PANELS.join(','))
+  const panels = str('panels', DEFAULT_PANELS.join(','))
     .split(',')
     .map(s => s.trim())
     .filter((p): p is Panel => (PANELS as readonly string[]).includes(p))
@@ -142,7 +144,7 @@ export const parseConfig = (o: Readonly<Record<string, unknown>>): Config => {
     architect: safeRegExp(str('architectPattern', ''), 'advisor|architect'),
     architectLabel: str('architectLabel', 'ARCHITECT'),
     gateLabel: str('gateLabel', 'GATE'),
-    panels: panels.length > 0 ? [...new Set(panels)] : [...PANELS],
+    panels: panels.length > 0 ? [...new Set(panels)] : [...DEFAULT_PANELS],
     motion: str('motion', 'while-active') !== 'off',
     moments: bool('moments', true),
     matchDescriptions: bool('matchDescriptions', false),

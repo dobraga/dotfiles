@@ -81,7 +81,7 @@ All settings are in `/config` under filetree.
 
 ## Flightdeck tab
 
-A **Flightdeck** tab (its own pane, opened with `/flightdeck`) shows a live agent dashboard: context and cost, permission gate, subagents, turn receipt, background shells and monitors (the `shell` panel; only those started after the mod loaded are listed) and session log. Ported from [claude-flightdeck](https://github.com/scasella/claude-flightdeck). Switch it off with **Flightdeck tab: off** in `/config`: no tab, no command, no hooks, nothing tracked. Set **Flightdeck open at start: on** to open the tab when a session starts (default `off`). Reload plugins after changing it.
+A **Flightdeck** tab (its own pane, opened with `/flightdeck`) shows a live agent dashboard: context and cost, permission gate, subagents, turn receipt, background shells and monitors (the `shell` panel; only those started after the mod loaded are listed) and session log. Ported from [claude-flightdeck](https://github.com/scasella/claude-flightdeck). The model, context, quota and cost panel (`main`) is off by default because the statusline shows them; add `main` to the `panels` option to bring it back. Switch the tab off with **Flightdeck tab: off** in `/config`: no tab, no command, no hooks, nothing tracked. Set **Flightdeck open at start: on** to open the tab when a session starts (default `off`). Reload plugins after changing it.
 
 ## Viewer layout
 
