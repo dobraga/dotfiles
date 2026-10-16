@@ -7,6 +7,7 @@ import type {
   BgTask,
   Bucket,
   Check,
+  FileEvent,
   Gate,
   Layout,
   LogLine,
@@ -101,8 +102,8 @@ export const normalizeLog = (stored: unknown): LogLine[] =>
 
 // ---------------------------------------------------------------- config
 
-export type Panel = 'main' | 'architect' | 'gate' | 'agents' | 'loops' | 'shell' | 'receipt' | 'log'
-const PANELS: readonly Panel[] = ['main', 'architect', 'gate', 'agents', 'loops', 'shell', 'receipt', 'log']
+export type Panel = 'main' | 'architect' | 'gate' | 'agents' | 'loops' | 'files' | 'shell' | 'receipt' | 'log'
+const PANELS: readonly Panel[] = ['main', 'architect', 'gate', 'agents', 'loops', 'files', 'shell', 'receipt', 'log']
 
 export type Config = {
   architect: RegExp
@@ -462,6 +463,15 @@ export function taskEnds(text: string): [string, string][] {
     const status = /<status>([^<]*)<\/status>/.exec(m[1] ?? '')?.[1]?.trim()
     return id && status ? [[id, status] as [string, string]] : []
   })
+}
+
+const FILES_KEEP = 50
+
+/** Adds file events, newest last; an earlier event for the same path and kind is replaced so a file edited ten times is one row. */
+export const recordFiles = (list: FileEvent[], events: FileEvent[]): FileEvent[] => {
+  if (events.length === 0) return list
+  const fresh = new Set(events.map(e => `${e.kind}\0${e.path}`))
+  return [...list.filter(e => !fresh.has(`${e.kind}\0${e.path}`)), ...events].slice(-FILES_KEEP)
 }
 
 const TASK_KEEP = 20

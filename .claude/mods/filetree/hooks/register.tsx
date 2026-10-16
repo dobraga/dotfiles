@@ -6,7 +6,7 @@ import { formatTable, splitBlocks, type Segment } from './md'
 
 type PaneEvent = Parameters<EngineInterface['ui']['resolve']>[0]
 
-import type { Activity, AgentCard, Architect, BgTask, Bucket, Check, FileNode, FileTree, Gate, Layout, LogLine, Loop, Main, RepoRow, Roster, Theme, Turn, Usage, View, ViewMode } from '../types'
+import type { Activity, AgentCard, Architect, BgTask, Bucket, Check, FileEvent, FileNode, FileTree, Gate, Layout, LogLine, Loop, Main, RepoRow, Roster, Theme, Turn, Usage, View, ViewMode } from '../types'
 import {
   DEFAULT_ARCHITECT,
   DEFAULT_GATE,
@@ -65,6 +65,7 @@ import {
   stepLoop,
   startTask,
   endTask,
+  recordFiles,
   taskEnds,
 } from './fd-core'
 import type { Config, Panel } from './fd-core'
@@ -768,6 +769,7 @@ async function afterBash($: EngineInterface, jobs: Job[]): Promise<void> {
       ? await changedInRepo($, t.root, since, before, fresh.ignored)
       : { hits: since.os === 'win32' ? [] : await changedSince($, t.root, since, NO_REPO_DEPTH), gone: [] }
     const hits = found.hits.filter(x => inside(t.root, x) && !underAny(x, ignored, t.root)).slice(0, FIND_LIMIT)
+    if (showWrites) await recordTouched($, 'write', hits)
     await revealPaths($, hits)
     const loaded = await get($)
     const dirs = [...new Set([loaded.root, ...openDirs(loaded), ...hits.map(dirname), ...found.gone.map(dirname)])].filter(d => inside(loaded.root, d))
@@ -789,6 +791,7 @@ async function afterBash($: EngineInterface, jobs: Job[]): Promise<void> {
       if (r !== t.root && inside(t.root, r) && !underAny(r, ignored, t.root) && (await exists($, r))) found.push(r)
     }
     if (found.length) {
+      await recordTouched($, 'read', found)
       await revealPaths($, found)
       const shown = new Set((await get($)).nodes.map(n => n.id))
       for (const r of found) if (shown.has(r) && !tones[r]) tones[r] = 'purple'
@@ -799,6 +802,7 @@ async function afterBash($: EngineInterface, jobs: Job[]): Promise<void> {
     const committed = actions.some(a => a.verb === 'commit')
     if ((committed || actions.some(a => a.verb === 'add')) && final.top) {
       const paths = (await gitPaths($, final.root, final.prefix, committed)).filter(x => !underAny(x, ignored, final.root)).slice(0, READ_REVEAL_LIMIT)
+      await recordTouched($, 'git', paths, committed ? 'commit' : 'add')
       await revealPaths($, paths)
       const shown = new Set((await get($)).nodes.map(n => n.id))
       for (const x of paths) if (shown.has(x)) tones[x] = 'green'
@@ -829,12 +833,20 @@ function scheduleScan($: EngineInterface, job: Job): void {
   })
 }
 
+/** Tells the Flightdeck `files` panel what Claude touched; a no-op when the tab is off. */
+async function recordTouched($: EngineInterface, kind: FileEvent['kind'], paths: string[], verb = ''): Promise<void> {
+  if (!fdCfg || paths.length === 0) return
+  const at = await $.clock.now()
+  await update($, fdFiles, list => recordFiles(listOf<FileEvent>(list), paths.map(path => ({ path, kind, verb, at }))))
+}
+
 async function touched($: EngineInterface, paths: string[], tone: string, show: boolean): Promise<void> {
   if (await followCwd($)) return
   const t = await get($)
   if (!t.root) return
   const within = paths.map(posix).filter(p => inside(t.root, p))
   if (within.length === 0) return
+  if (show) await recordTouched($, tone === 'purple' ? 'read' : 'write', within)
   if (tone !== 'purple') {
     searchIndex = null
     await staleSizes($, within)
@@ -1468,6 +1480,7 @@ const fdGate = atom({ plugin: 'filetree', key: 'fdGate' } as const, DEFAULT_GATE
 const fdAgents = atom({ plugin: 'filetree', key: 'fdAgents' } as const, [])
 const fdLoops = atom({ plugin: 'filetree', key: 'fdLoops' } as const, [])
 const fdTasks = atom({ plugin: 'filetree', key: 'fdTasks' } as const, [])
+const fdFiles = atom({ plugin: 'filetree', key: 'fdFiles' } as const, [])
 const fdLog = atom({ plugin: 'filetree', key: 'fdLog' } as const, [])
 const fdTurn = atom({ plugin: 'filetree', key: 'fdTurn' } as const, DEFAULT_TURN)
 const fdReceipt = atom({ plugin: 'filetree', key: 'fdReceipt' } as const, null)
@@ -1498,6 +1511,9 @@ async function getLoops($: EngineInterface): Promise<Loop[]> {
 }
 async function getTasks($: EngineInterface): Promise<BgTask[]> {
   return listOf<BgTask>(await read($, fdTasks))
+}
+async function getFiles($: EngineInterface): Promise<FileEvent[]> {
+  return listOf<FileEvent>(await read($, fdFiles))
 }
 async function getLog($: EngineInterface): Promise<LogLine[]> {
   return normalizeLog(await read($, fdLog))
@@ -1587,6 +1603,7 @@ async function resetAll($: EngineInterface) {
   await update($, fdLoops, () => [])
   await update($, fdLog, () => [])
   await update($, fdTasks, () => [])
+  await update($, fdFiles, () => [])
   await update($, fdTurn, () => DEFAULT_TURN)
   await update($, fdReceipt, () => null)
   await update($, fdView, () => DEFAULT_VIEW)
@@ -1618,7 +1635,7 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
   const els = $.ui.resolve(e)
   const { Box, Text, Button } = els
   const hasClient = 'Client' in els
-  const [m, u, a, g, cards, lp, tasks, lines, t, r, v, now] = await Promise.all([
+  const [m, u, a, g, cards, lp, tasks, files, tree, lines, t, r, v, now] = await Promise.all([
     getMain($),
     getUsage($),
     getArchitect($),
@@ -1626,6 +1643,8 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
     getCards($),
     getLoops($),
     getTasks($),
+    getFiles($),
+    get($),
     getLog($),
     getTurn($),
     read($, fdReceipt),
@@ -1649,6 +1668,7 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
     gate: g.recent.length === 0 && gateSummary(g).total === 0,
     agents: cards.length === 0,
     loops: lp.length === 0,
+    files: files.length === 0,
     shell: tasks.length === 0,
     receipt: !m.isRunning && !r,
     log: false,
@@ -1980,6 +2000,36 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
     )
   }
 
+  // ---- files: what Claude read, wrote and committed, newest first
+  const filesPanel = (w: number) => {
+    const root = tree.root
+    const shown = files.slice(-6).reverse()
+    const color = (k: FileEvent['kind']) => (k === 'read' ? C.arch : k === 'write' ? C.amber : C.gate)
+    return (
+      <Box flexDirection="column" borderStyle="round" borderColor={C.amber} paddingX={1} width={w}>
+        <Box justifyContent="space-between">
+          <Text color={C.amber} bold>
+            files · claude
+          </Text>
+          <Text dimColor>{`${files.length} touched`}</Text>
+        </Box>
+        {shown.map(f => (
+          <Box>
+            <Box width={9} flexShrink={0}>
+              <Text color={C.faint}>{fmtClock(f.at)}</Text>
+            </Box>
+            <Box width={7} flexShrink={0}>
+              <Text color={color(f.kind)}>{f.kind === 'git' && f.verb ? f.verb : f.kind}</Text>
+            </Box>
+            <Text color={C.text} wrap="truncate-start">
+              {root && f.path.startsWith(`${root}/`) ? f.path.slice(root.length + 1) : shortPath(f.path)}
+            </Text>
+          </Box>
+        ))}
+      </Box>
+    )
+  }
+
   // ---- shell: background shells and monitors, running first
   const shellPanel = (w: number) => {
     const live = tasks.filter(x => x.endedAt === null)
@@ -2039,7 +2089,7 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
 
   // ---- log: whatever rows the other panels leave, 4 to 8
   // The main box's speed line and the gap above the log are a row each.
-  const used = 2 + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length > cfg.maxCards ? 3 + Math.min(6, cards.length) : 8) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + (tasks.length ? 3 + Math.min(6, tasks.length) : 0) + 3
+  const used = 2 + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length > cfg.maxCards ? 3 + Math.min(6, cards.length) : 8) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + (files.length ? 3 + Math.min(6, files.length) : 0) + (tasks.length ? 3 + Math.min(6, tasks.length) : 0) + 3
   const bodyRows = e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 40
   const nLog = logRows(bodyRows, used)
   const shownLines = (viewed ? lines.filter(l => l.agentId === viewed) : lines).slice(-nLog)
@@ -2078,8 +2128,10 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
             ? agentsPanel(w)
             : p === 'loops'
               ? loopsPanel(w)
-              : p === 'shell'
-                ? shellPanel(w)
+              : p === 'files'
+                ? filesPanel(w)
+                : p === 'shell'
+                  ? shellPanel(w)
                 : p === 'receipt'
                   ? receiptPanel(w)
                   : logPanel(w)
@@ -2090,7 +2142,7 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
       {ps.map((p, i) => {
         const prev = ps[i - 1]
         const link =
-          i === 0 || p === 'agents' || prev === 'agents' || p === 'log' || p === 'loops' || prev === 'loops' || p === 'shell' || prev === 'shell'
+          i === 0 || p === 'agents' || prev === 'agents' || p === 'log' || p === 'loops' || prev === 'loops' || p === 'files' || prev === 'files' || p === 'shell' || prev === 'shell'
             ? null
             : rail(`link-${p}`, p === 'architect' ? advising : m.isRunning, p === 'architect' ? C.arch : C.main, w)
         return (
@@ -2207,7 +2259,7 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
     <Box flexDirection="column">
       <Box columnGap={2}>
         {column(panels.filter(p => p === 'main' || p === 'architect' || p === 'gate'), colW)}
-        {column(panels.filter(p => p === 'agents' || p === 'loops' || p === 'shell' || p === 'receipt'), colW)}
+        {column(panels.filter(p => p === 'agents' || p === 'loops' || p === 'files' || p === 'shell' || p === 'receipt'), colW)}
       </Box>
       {panels.includes('log') ? logPanel(W) : null}
     </Box>

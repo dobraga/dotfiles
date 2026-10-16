@@ -132,6 +132,14 @@ export type BgTask = {
   status: string
 }
 
+/** A file Claude read, wrote or touched with git, as the Flightdeck `files` panel lists it. `verb` is the git verb for kind 'git'. */
+export type FileEvent = {
+  path: string
+  kind: 'read' | 'write' | 'git'
+  verb: string
+  at: number
+}
+
 export type ToolNote = { tool: string; text: string; isError: boolean }
 
 export type AgentCard = {
@@ -219,6 +227,7 @@ declare module 'claude-code' {
       fdAgents: AgentCard[]
       fdLoops: Loop[]
       fdTasks: BgTask[]
+      fdFiles: FileEvent[]
       fdLog: LogLine[]
       fdTurn: Turn
       fdReceipt: Receipt | null

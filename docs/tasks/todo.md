@@ -184,9 +184,9 @@ Runs BEFORE the tooling/split plan below. Goal: the tree never moves by itself b
 - `activity` config keeps its values; `none` makes the panel not record. `follow` is documented as cwd-follow only.
 
 ## Tasks
-- [ ] 0. Vet this plan with user
-- [ ] 1. `FileEvent` type, `recordFiles` reducer + tests (dedupe, cap, ordering) in `fd-core.ts`; `fdFiles` atom + `PluginState`; reset with the other fd atoms
-- [ ] 2. `afterBash`/`touched` publish to `fdFiles` (keep behaviour otherwise); panel `files` renders them; verify live that rows appear for Read, Edit, Bash writes, and git actions. Tree still flashes at this step (safe checkpoint, commit)
+- [x] 0. Vet this plan with user
+- [x] 1. `FileEvent` type, `recordFiles` reducer + tests (dedupe, cap, ordering) in `fd-core.ts`; `fdFiles` atom + `PluginState`; reset with the other fd atoms
+- [x] 2. `afterBash`/`touched` publish to `fdFiles` (keep behaviour otherwise); panel `files` renders them; verify live that rows appear for Read, Edit, Bash writes, and git actions. Tree still flashes at this step (safe checkpoint, commit)
 - [ ] 3. Remove (b)+(c): `revealPaths` calls from `touched`/`afterBash`, `flash()` + state + timer, render-time focus/pinning/lit colouring, branch flash. Keep `reveal()` for mentions/search/click
 - [ ] 4. Click handler on panel rows; `follow` option text updated in `plugin.json` + README; `activity` description updated
 - [ ] 5. Tests: `recordFiles`; `bun test` + `claude plugin validate`; scratch tsc error count before/after
@@ -200,6 +200,8 @@ Runs BEFORE the tooling/split plan below. Goal: the tree never moves by itself b
 - Pivot rule: if removing (b) breaks tree correctness (stale dirs, missing git colours), stop and re-split (a) from (b) before deleting.
 
 ---
+
+- Step 1-2 done: `recordFiles` tested, `files` panel reads `fdFiles`, fed from `touched`/`afterBash` from `hits`/`found`/`paths` (before any tree filtering, so step 3 can remove `revealPaths` without losing rows). Tree still flashes. Live check pending.
 
 # Plan: mod tooling (tsconfig + tests) and splitting register.tsx
 
