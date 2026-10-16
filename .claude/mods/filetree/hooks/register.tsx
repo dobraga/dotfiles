@@ -791,6 +791,14 @@ async function reveal($: EngineInterface, paths: string[]): Promise<void> {
   })
 }
 
+/** A click on a Flightdeck `files` row: show the file in the tree and open it in the viewer (a diff for what Claude changed, the file for what it read). */
+async function showFile($: EngineInterface, f: FileEvent): Promise<void> {
+  await reveal($, [f.path])
+  await patch($, () => ({ selected: f.path }))
+  await update($, mode, () => (f.kind === 'read' ? 'file' : 'diff'))
+  await show($)
+}
+
 async function walk($: EngineInterface, root: string, depth: number, limit: number): Promise<string[]> {
   const out: string[] = []
   let level = [root]
@@ -1942,9 +1950,12 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
             <Box width={7} flexShrink={0}>
               <Text color={color(f.kind)}>{f.kind === 'git' && f.verb ? f.verb : f.kind}</Text>
             </Box>
-            <Text color={C.text} wrap="truncate-start">
-              {root && f.path.startsWith(`${root}/`) ? f.path.slice(root.length + 1) : shortPath(f.path)}
-            </Text>
+            <Button
+              key={`file-${f.kind}-${f.path}`}
+              plain
+              label={shorten(root && f.path.startsWith(`${root}/`) ? f.path.slice(root.length + 1) : shortPath(f.path), Math.max(8, w - 22))}
+              onPress={() => void showFile($, f)}
+            />
           </Box>
         ))}
       </Box>
