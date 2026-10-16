@@ -187,7 +187,7 @@ export type Receipt = {
 
 export type Layout = 'auto' | 'compact' | 'wide' | 'mini'
 
-export type View = { expanded: string | null; gateOpen: Bucket | null; layout: Layout | null }
+export type View = { expanded: string | null; gateOpen: Bucket | null; filesOpen: FileEvent['kind'] | null; layout: Layout | null }
 
 export type Roster = { architectTypes: string[] }
 

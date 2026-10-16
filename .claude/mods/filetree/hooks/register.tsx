@@ -1932,10 +1932,12 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
   // ---- files: what Claude read, wrote and committed, newest first
   const filesPanel = (w: number) => {
     const root = tree.root
-    const shown = files.slice(-6).reverse()
+    const open = v.filesOpen
     const strip = files.slice(-Math.max(8, w - 4))
     const count = (k: FileEvent['kind']) => files.filter(f => f.kind === k).length
+    const shown = open ? files.filter(f => f.kind === open).slice(-6).reverse() : []
     const color = (k: FileEvent['kind']) => (k === 'read' ? C.arch : k === 'write' ? C.amber : C.gate)
+    const toggle = (k: FileEvent['kind']) => update($, fdView, x => ({ ...normalize(DEFAULT_VIEW, x), filesOpen: normalize(DEFAULT_VIEW, x).filesOpen === k ? null : k }))
     return (
       <Box flexDirection="column" borderStyle="round" borderColor={C.amber} paddingX={1} width={w}>
         <Box justifyContent="space-between">
@@ -1949,22 +1951,24 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
             <Text color={color(f.kind)}>■</Text>
           ))}
         </Box>
-        <Text wrap="truncate">
-          <Text color={C.arch}>■</Text>
-          <Text dimColor>{` ${count('read')} read  `}</Text>
-          <Text color={C.amber}>■</Text>
-          <Text dimColor>{` ${count('write')} written  `}</Text>
-          <Text color={C.gate}>■</Text>
-          <Text dimColor>{` ${count('git')} git`}</Text>
-        </Text>
+        <Box columnGap={2}>
+          {(['read', 'write', 'git'] as const).map(k => (
+            <Box>
+              <Text color={color(k)}>■ </Text>
+              <Button key={`files-${k}`} plain label={`${k === 'write' ? 'written' : k} ${count(k)}${open === k ? ' ▾' : ''}`} dimColor={count(k) === 0} onPress={() => toggle(k)} />
+            </Box>
+          ))}
+        </Box>
         {shown.map(f => (
           <Box>
             <Box width={9} flexShrink={0}>
               <Text color={C.faint}>{fmtClock(f.at)}</Text>
             </Box>
-            <Box width={7} flexShrink={0}>
-              <Text color={color(f.kind)}>{f.kind === 'git' && f.verb ? f.verb : f.kind}</Text>
-            </Box>
+            {f.kind === 'git' && f.verb ? (
+              <Box width={8} flexShrink={0}>
+                <Text color={color(f.kind)}>{f.verb}</Text>
+              </Box>
+            ) : null}
             <Button
               key={`file-${f.kind}-${f.path}`}
               plain
@@ -2036,7 +2040,7 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
 
   // ---- log: whatever rows the other panels leave, 4 to 8
   // The main box's speed line and the gap above the log are a row each.
-  const used = 2 + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length > cfg.maxCards ? 3 + Math.min(6, cards.length) : 8) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + (files.length ? 5 + Math.min(6, files.length) : 0) + (tasks.length ? 3 + Math.min(6, tasks.length) : 0) + 3
+  const used = 2 + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length > cfg.maxCards ? 3 + Math.min(6, cards.length) : 8) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + (files.length ? 5 + (v.filesOpen ? Math.min(6, files.filter(f => f.kind === v.filesOpen).length) : 0) : 0) + (tasks.length ? 3 + Math.min(6, tasks.length) : 0) + 3
   const bodyRows = e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 40
   const nLog = logRows(bodyRows, used)
   const shownLines = (viewed ? lines.filter(l => l.agentId === viewed) : lines).slice(-nLog)
