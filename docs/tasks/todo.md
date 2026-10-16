@@ -234,4 +234,5 @@ Runs BEFORE the tooling/split plan below. Goal: the tree never moves by itself b
 - Circular imports between `atoms.ts`, `fd-state.ts`, `viewer.tsx`: keep atoms leaf-level.
 - Live UI cannot be verified by me; B3/B4 need the user's check.
 
+- B4a done: `media.ts` (media helpers + playback atoms, 197 l) moved out; register.tsx now ~2300 lines.
 - B1-B3 done: `pure.ts` (+7 tests), `fd-state.ts` (atoms, readers, writers, 201 l), `fd-view.tsx` (`renderFlightdeck`, 674 l); `register.tsx` 3395 -> 2487 lines. Validator rules found while moving: `$` crosses an import only into `function` declarations (not arrow consts), and `read/update` need the atom defined in the same file, so fd-state exports `updateFd*`/`get*` wrappers and fd-view gets file-tree access through a `FlightdeckHost` argument. Live check by the user pending.
