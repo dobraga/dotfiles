@@ -1933,6 +1933,8 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
   const filesPanel = (w: number) => {
     const root = tree.root
     const shown = files.slice(-6).reverse()
+    const strip = files.slice(-Math.max(8, w - 4))
+    const count = (k: FileEvent['kind']) => files.filter(f => f.kind === k).length
     const color = (k: FileEvent['kind']) => (k === 'read' ? C.arch : k === 'write' ? C.amber : C.gate)
     return (
       <Box flexDirection="column" borderStyle="round" borderColor={C.amber} paddingX={1} width={w}>
@@ -1942,6 +1944,19 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
           </Text>
           <Text dimColor>{`${files.length} touched`}</Text>
         </Box>
+        <Box>
+          {strip.map(f => (
+            <Text color={color(f.kind)}>■</Text>
+          ))}
+        </Box>
+        <Text wrap="truncate">
+          <Text color={C.arch}>■</Text>
+          <Text dimColor>{` ${count('read')} read  `}</Text>
+          <Text color={C.amber}>■</Text>
+          <Text dimColor>{` ${count('write')} written  `}</Text>
+          <Text color={C.gate}>■</Text>
+          <Text dimColor>{` ${count('git')} git`}</Text>
+        </Text>
         {shown.map(f => (
           <Box>
             <Box width={9} flexShrink={0}>
@@ -2021,7 +2036,7 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
 
   // ---- log: whatever rows the other panels leave, 4 to 8
   // The main box's speed line and the gap above the log are a row each.
-  const used = 2 + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length > cfg.maxCards ? 3 + Math.min(6, cards.length) : 8) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + (files.length ? 3 + Math.min(6, files.length) : 0) + (tasks.length ? 3 + Math.min(6, tasks.length) : 0) + 3
+  const used = 2 + 5 + (m.speed ? 1 : 0) + 1 + (showArchitect ? 6 : 0) + 6 + (v.gateOpen ? 5 : 0) + (cards.length > cfg.maxCards ? 3 + Math.min(6, cards.length) : 8) + (expandedCard ? 8 : 0) + (lp.length ? 1 : 0) + (files.length ? 5 + Math.min(6, files.length) : 0) + (tasks.length ? 3 + Math.min(6, tasks.length) : 0) + 3
   const bodyRows = e.props.scroll?.bodyRows ?? e.viewport?.rows ?? 40
   const nLog = logRows(bodyRows, used)
   const shownLines = (viewed ? lines.filter(l => l.agentId === viewed) : lines).slice(-nLog)
