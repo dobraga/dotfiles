@@ -105,6 +105,17 @@
         "on",
         "off"
       ]
+    },
+    "viewerLayout": {
+      "type": "string",
+      "title": "Viewer layout",
+      "description": "auto: the viewer's header buttons show only their hotkeys when the pane is narrower than 60 columns; wide: always full labels; narrow: always hotkeys only.",
+      "default": "auto",
+      "options": [
+        "auto",
+        "wide",
+        "narrow"
+      ]
     }
   },
   "license": "MIT"

@@ -153,10 +153,10 @@ Order matters: 1 enables safe refactors; 2/4 are small protections; 3/5/6/7 buil
 ## Tasks
 - [x] 0. Vet this plan with user (rule of three)
 - [x] 1. Extract `md.ts`, `cmd.ts`; write tests first; `bun test` + `claude plugin validate`
-- [ ] 2. Versioned persisted state + migration test
-- [ ] 3. Single `Header` component for the 3 button rows
+- [x] 2. Versioned persisted state + migration test
+- [x] 3. Single `Header` component for the 3 button rows
 - [ ] 4. `redact` on activity labels + test
-- [ ] 5. Adaptive viewer layout + `viewerLayout` config
+- [x] 5. Adaptive viewer layout + `viewerLayout` config
 - [ ] 6. Move flash/tick animation into a `Client` module (verify live; most visual risk, do last)
-- [ ] 7. Centralized, tested config parsing
+- [x] 7. Centralized, tested config parsing
 - [ ] 8. README, lessons.md, `graphify update .`; commit per task

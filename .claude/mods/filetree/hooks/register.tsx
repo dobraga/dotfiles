@@ -1,6 +1,7 @@
 import { atom, read, type BuiltinToolResults, type EngineInterface, type Register, type RenderNode, type Timer, update } from 'claude-code'
 import { deltaDiff, ensureDelta, parseAnsi, sliceSpans, stripAnsi } from './delta'
 import { openCommand } from './open'
+import { isCompact, parseOptions, type ViewerLayout } from './config'
 import { formatTable, splitBlocks, type Segment } from './md'
 
 type PaneEvent = Parameters<EngineInterface['ui']['resolve']>[0]
@@ -137,6 +138,7 @@ let generation = 0
 let lastPress = { key: '', at: 0 }
 let noNerd = false
 let glyphSetting = 'auto'
+let viewerLayout: ViewerLayout = 'auto'
 let follow = true
 let followClaude = true
 // One folder open at a time (setting: accordion)
@@ -1005,9 +1007,11 @@ type Btn = { label: string; hotkey?: string; onPress: () => void }
 type Els = ReturnType<EngineInterface['ui']['resolve']>
 
 // One row of buttons with a space between each; a `false` entry is a hidden button and leaves no gap.
-function buttons(els: Els, items: (Btn | false)[]) {
+function buttons(els: Els, items: (Btn | false)[], compact = false) {
   const { Button, Text } = els
-  return items.flatMap((b, i) => (b ? [i > 0 ? <Text> </Text> : null, <Button label={b.label} hotkey={b.hotkey} onPress={b.onPress} />] : []))
+  return items.flatMap((b, i) =>
+    b ? [i > 0 ? <Text> </Text> : null, <Button label={compact && b.hotkey ? `[${b.hotkey}]` : b.label} hotkey={b.hotkey} onPress={b.onPress} />] : [],
+  )
 }
 
 async function loadTheme($: EngineInterface): Promise<void> {
@@ -2856,7 +2860,7 @@ export const register: Register = (on, options) => {
             maxOffset > 0 && { label: '|◀', hotkey: '0', onPress: () => moveTo(0) },
             maxOffset > 0 && { label: '◀', hotkey: 'h', onPress: () => moveTo(offset - SCROLL_STEP) },
             maxOffset > 0 && { label: '▶', hotkey: 'l', onPress: () => moveTo(offset + SCROLL_STEP) },
-          ])}
+          ], isCompact(viewerLayout, width))}
           <Text dimColor> {name} · {note}{cut ? ' · truncated' : ''} · {Math.min(top + 1, total)}-{Math.min(top + budget, total)}/{total}{offset > 0 ? ` · col ${offset + 1}` : ''}</Text>
         </Box>
         <Text dimColor>{e.props.isFocused ? 'wheel/arrows scroll, w/s pages, h/l sideways' : 'click inside this pane to focus it'}</Text>
@@ -2868,15 +2872,16 @@ export const register: Register = (on, options) => {
     )
   })
 
-  glyphSetting = typeof options?.glyphs === 'string' ? options.glyphs : 'auto'
-  const activity = typeof options?.activity === 'string' ? options.activity : 'reads and writes'
-  showReads = activity.includes('reads')
-  showWrites = activity.includes('writes')
-  followClaude = options?.follow !== 'off'
-  accordion = options?.accordion !== 'off'
-  pinRoot = options?.root !== 'cwd'
-  showBranch = options?.branch === 'on'
-  sizeDefault = options?.column === 'size'
+  const opt = parseOptions(options)
+  glyphSetting = opt.glyphs
+  showReads = opt.showReads
+  showWrites = opt.showWrites
+  followClaude = opt.follow
+  accordion = opt.accordion
+  pinRoot = opt.pinRoot
+  showBranch = opt.showBranch
+  sizeDefault = opt.sizeDefault
+  viewerLayout = opt.viewerLayout
   on('session.start', async ($, e, next) => {
     if (fdCfg) {
       const cfg = fdCfg
