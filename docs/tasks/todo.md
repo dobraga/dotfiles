@@ -213,10 +213,11 @@ Runs BEFORE the tooling/split plan below. Goal: the tree never moves by itself b
 - Validator rule: one hooks module, no `on` in helpers; plain imports are fine (`fd-core.ts`, `md.ts`, `config.ts` already do this).
 
 ## Part A - tooling (do first)
-- [ ] A1. Commit `types/` stub strategy: `tsconfig.json` in the mod extending the engine's generated one when `.claude-plugin/types/tsconfig.json` exists, else falling back to `paths` to an env var path is not possible in JSON -> instead add `scripts/typecheck.sh`: finds the newest `claude-code.d.ts` under `/tmp/claude-*/bundled-skills/*/plugin-authoring/types/`, writes a temp tsconfig, runs `bunx -p typescript tsc`, and diffs the error list against `scripts/typecheck.baseline` (committed). Exit 1 only on NEW errors.
-- [ ] A2. `scripts/check.sh`: `bun test hooks` + `claude plugin validate .` + `typecheck.sh`; one command to run before every commit.
-- [ ] A3. Fix what is cheap in the baseline (duplicate `PaneEvent` import/declaration, `toBase64`/`fromBase64` lib typing) so the baseline shrinks; leave union-type noise in the baseline with a note.
-- [ ] A4. README "Contributing": document `scripts/check.sh`; lessons.md entry.
+- [x] A1. Commit `types/` stub strategy: `tsconfig.json` in the mod extending the engine's generated one when `.claude-plugin/types/tsconfig.json` exists, else falling back to `paths` to an env var path is not possible in JSON -> instead add `scripts/typecheck.sh`: finds the newest `claude-code.d.ts` under `/tmp/claude-*/bundled-skills/*/plugin-authoring/types/`, writes a temp tsconfig, runs `bunx -p typescript tsc`, and diffs the error list against `scripts/typecheck.baseline` (committed). Exit 1 only on NEW errors.
+- [x] A2. `scripts/check.sh`: `bun test hooks` + `claude plugin validate .` + `typecheck.sh`; one command to run before every commit.
+- [x] A3. Fix what is cheap in the baseline (duplicate `PaneEvent` import/declaration, `toBase64`/`fromBase64` lib typing) so the baseline shrinks; leave union-type noise in the baseline with a note.
+- [x] A4. README "Contributing": document `scripts/check.sh`; lessons.md entry.
+- Done: `scripts/typecheck.sh` (+ `--update`), `scripts/check.sh`, baseline 12 -> 8 (PaneEvent duplicate and base64 typing fixed; the rest are per-surface element types, kept in the baseline). Deliberate error made `typecheck.sh` exit 1, removed.
 - Verify: introduce a deliberate type error, confirm `check.sh` fails; remove it, confirm pass.
 
 ## Part B - split register.tsx (after A; each step = own commit, `check.sh` green, behaviour unchanged)

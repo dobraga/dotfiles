@@ -1351,7 +1351,8 @@ const pictureCells = async ($: EngineInterface, file: string, columns: number, r
     if (run.exitCode !== 0) return undefined
   }
   const { base64 } = await $.fs.read(raw, { as: 'bytes' })
-  const rgb = Uint8Array.fromBase64(base64)
+  // The engine's runtime has the base64 helpers; the TypeScript lib does not declare them yet.
+  const rgb = (Uint8Array as unknown as { fromBase64(s: string): Uint8Array }).fromBase64(base64)
   const cells = new Uint32Array(columns * rows * 3)
   const pack = (r: number, g: number, b: number): number => (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(b)
   for (let cy = 0; cy < rows; cy++) {
@@ -1388,11 +1389,10 @@ const pictureCells = async ($: EngineInterface, file: string, columns: number, r
     }
   }
 
-  return new Uint8Array(cells.buffer).toBase64()
+  return (new Uint8Array(cells.buffer) as unknown as { toBase64(): string }).toBase64()
 }
 
 // ---- Flightdeck (ported from scasella/claude-flightdeck, MIT) ----
-type PaneEvent = Parameters<EngineInterface['ui']['resolve']>[0]
 
 
 
