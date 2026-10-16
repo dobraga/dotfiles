@@ -208,11 +208,11 @@ function faint(hex: string): string {
 }
 
 async function get($: EngineInterface): Promise<FileTree> {
-  return { ...emptyTree(''), ...(await $.state.get(TREE)).value }
+  return normalize(emptyTree(''), (await $.state.get(TREE)).value)
 }
 
 async function put($: EngineInterface, fn: (t: FileTree) => FileTree): Promise<void> {
-  await update($, TREE, cur => fn({ ...emptyTree(''), ...cur }))
+  await update($, TREE, cur => fn(normalize(emptyTree(''), cur)))
 }
 
 function patch($: EngineInterface, fn: (t: FileTree) => Partial<FileTree>) {

@@ -45,9 +45,18 @@ export const DEFAULT_ROSTER: Roster = { architectTypes: [] }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 
-/** A stored object merged over its defaults, so a value saved under an older shape still reads. */
-export const normalize = <T extends object>(def: T, stored: unknown): T =>
-  isObject(stored) ? ({ ...def, ...stored } as T) : def
+const kindOf = (v: unknown): string => (Array.isArray(v) ? 'array' : v === null ? 'null' : typeof v)
+
+/** A stored object merged over its defaults: a key missing from an older shape takes the default, and so does a key whose stored type no longer matches it (a default of null accepts anything). */
+export const normalize = <T extends object>(def: T, stored: unknown): T => {
+  if (!isObject(stored)) return def
+  const out: Record<string, unknown> = { ...def }
+  for (const [k, v] of Object.entries(stored)) {
+    const want = kindOf((def as Record<string, unknown>)[k])
+    if (want === 'null' || want === 'undefined' || want === kindOf(v)) out[k] = v
+  }
+  return out as T
+}
 
 /** A stored list, or empty when what is stored is not a list. */
 export const listOf = <T>(stored: unknown): T[] => (Array.isArray(stored) ? (stored as T[]) : [])

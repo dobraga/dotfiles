@@ -27,3 +27,13 @@ test('trim keeps running tasks when the list overflows', () => {
   expect(t).toHaveLength(20)
   expect(t.some(x => x.id === 'run' && x.endedAt === null)).toBe(true)
 })
+
+import { normalize } from './fd-core'
+
+test('normalize fills missing keys and drops values of the wrong type', () => {
+  const def = { list: [] as string[], n: 0, name: '', any: null as string | null }
+  expect(normalize(def, { n: 3 })).toEqual({ list: [], n: 3, name: '', any: null })
+  expect(normalize(def, { list: 'x', n: '3', any: 'ok' })).toEqual({ list: [], n: 0, name: '', any: 'ok' })
+  expect(normalize(def, 'garbage')).toBe(def)
+  expect(normalize(def, { extra: 1 })).toMatchObject({ extra: 1 })
+})
