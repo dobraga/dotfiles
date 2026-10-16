@@ -155,8 +155,8 @@ Order matters: 1 enables safe refactors; 2/4 are small protections; 3/5/6/7 buil
 - [x] 1. Extract `md.ts`, `cmd.ts`; write tests first; `bun test` + `claude plugin validate`
 - [x] 2. Versioned persisted state + migration test
 - [x] 3. Single `Header` component for the 3 button rows
-- [ ] 4. `redact` on activity labels + test
+- [x] 4. ~~`redact` on activity labels~~ not needed: activity labels are fixed strings and a short sha; the only place a command is shown (`tool.check` detail) already goes through `describeInput` -> `redact`
 - [x] 5. Adaptive viewer layout + `viewerLayout` config
-- [ ] 6. Move flash/tick animation into a `Client` module (verify live; most visual risk, do last)
+- [x] 6. ~~Move animation into a `Client` module~~ skipped: filetree has no frame loop. The flash is one patch plus one `$.clock.after`, and `tick` only runs a 1 s timer while media plays. A `Client` module would add risk for no gain. Revisit if a profile shows redraw cost.
 - [x] 7. Centralized, tested config parsing
-- [ ] 8. README, lessons.md, `graphify update .`; commit per task
+- [x] 8. README, lessons.md, `graphify update .`; commit per task
