@@ -160,3 +160,34 @@ Order matters: 1 enables safe refactors; 2/4 are small protections; 3/5/6/7 buil
 - [x] 6. ~~Move animation into a `Client` module~~ skipped: filetree has no frame loop. The flash is one patch plus one `$.clock.after`, and `tick` only runs a 1 s timer while media plays. A `Client` module would add risk for no gain. Revisit if a profile shows redraw cost.
 - [x] 7. Centralized, tested config parsing
 - [x] 8. README, lessons.md, `graphify update .`; commit per task
+
+---
+
+# Plan: mod tooling (tsconfig + tests) and splitting register.tsx
+
+## Findings
+- No `tsconfig.json` in the mod; `claude plugin validate` does not typecheck. A scratch tsconfig (paths `claude-code` -> the skill's `claude-code.d.ts`) works but is not in the repo, and the baseline has ~12 noisy errors (surface-union types: `props`, `viewport`, `Raster`, `Image`, duplicate `PaneEvent`, `Uint8Array.toBase64`), so a new error is easy to miss.
+- The engine writes `.claude-plugin/types/` only after it loads the mod from a folder it owns; here it did not appear, so the types path cannot be assumed. The d.ts is also version-stamped per session (`/tmp/.../bundled-skills/<ver>/...`).
+- `register.tsx`: 3.3k lines. `$`-free or nearly: `clean`, `faint`, `shortPath`, `keepTop`, `openDirs`, `pruneArgs`, `broad`, `rootOfDisk`, `indexPaths`, `failAll`, `proven`, `cacheName`, `clock`. Flightdeck block (state atoms + getters 1480-1612, `renderFlightdeck` 1615-~2230) is ~750 lines with a clean seam: only `fd*` atoms and `fd-core`.
+- Validator rule: one hooks module, no `on` in helpers; plain imports are fine (`fd-core.ts`, `md.ts`, `config.ts` already do this).
+
+## Part A - tooling (do first)
+- [ ] A1. Commit `types/` stub strategy: `tsconfig.json` in the mod extending the engine's generated one when `.claude-plugin/types/tsconfig.json` exists, else falling back to `paths` to an env var path is not possible in JSON -> instead add `scripts/typecheck.sh`: finds the newest `claude-code.d.ts` under `/tmp/claude-*/bundled-skills/*/plugin-authoring/types/`, writes a temp tsconfig, runs `bunx -p typescript tsc`, and diffs the error list against `scripts/typecheck.baseline` (committed). Exit 1 only on NEW errors.
+- [ ] A2. `scripts/check.sh`: `bun test hooks` + `claude plugin validate .` + `typecheck.sh`; one command to run before every commit.
+- [ ] A3. Fix what is cheap in the baseline (duplicate `PaneEvent` import/declaration, `toBase64`/`fromBase64` lib typing) so the baseline shrinks; leave union-type noise in the baseline with a note.
+- [ ] A4. README "Contributing": document `scripts/check.sh`; lessons.md entry.
+- Verify: introduce a deliberate type error, confirm `check.sh` fails; remove it, confirm pass.
+
+## Part B - split register.tsx (after A; each step = own commit, `check.sh` green, behaviour unchanged)
+- [ ] B1. `hooks/pure.ts`: move the `$`-free helpers listed above; tests for `clean`, `shortPath`, `keepTop`, `openDirs`, `pruneArgs`, `broad`, `indexPaths`, `failAll`/`proven`.
+- [ ] B2. `hooks/fd-state.ts`: `fd*` atoms, `getX` readers, `migrate`, `say`, `refreshStatus` (takes `$`, no `on`). Export, import back into register.
+- [ ] B3. `hooks/fd-view.tsx`: `renderFlightdeck` + panels; imports `fd-state` + `fd-core`. register keeps only hook wiring for flightdeck.
+- [ ] B4. `hooks/viewer.tsx`: `reposView`, media (`imageFile`, `videoFrame`, `htmlFrame`, audio) and the pane body renderer; imports atoms from a small `hooks/atoms.ts` (tree, mode, row, col, ...), which B2 prepares.
+- [ ] B5. Measure: `wc -l register.tsx` before/after, `claude plugin validate`, live check by the user (tree, viewer, repos, flightdeck, media).
+- Order rationale: B1 is risk-free; B2 -> B3 is the biggest cut (~750 lines); B4 touches the most shared state, do last and stop if it needs more than imports to separate.
+- Pivot rule: if a move forces passing >5 closures or `on` handlers into the new module, stop and re-plan instead of forcing it.
+
+## Risks
+- The `claude-code` types file is per-session and version-stamped; `typecheck.sh` must degrade to "skipped, no types found" instead of failing in CI-less environments.
+- Circular imports between `atoms.ts`, `fd-state.ts`, `viewer.tsx`: keep atoms leaf-level.
+- Live UI cannot be verified by me; B3/B4 need the user's check.
