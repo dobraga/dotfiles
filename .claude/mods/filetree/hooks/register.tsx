@@ -2209,8 +2209,8 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
   const body = isWide ? (
     <Box flexDirection="column">
       <Box columnGap={2}>
-        {column(panels.filter(p => p === 'receipt' || p === 'main' || p === 'architect' || p === 'gate'), colW)}
-        {column(panels.filter(p => p === 'agents' || p === 'loops' || p === 'files' || p === 'shell'), colW)}
+        {column(panels.filter(p => p === 'receipt' || p === 'main' || p === 'architect' || p === 'gate' || p === 'files'), colW)}
+        {column(panels.filter(p => p === 'agents' || p === 'shell' || p === 'loops'), colW)}
       </Box>
       {panels.includes('log') ? logPanel(W) : null}
     </Box>
