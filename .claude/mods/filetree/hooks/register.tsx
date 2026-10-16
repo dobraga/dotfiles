@@ -1802,7 +1802,20 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
 
   const agentsPanel = (w: number) => {
     const shown = cards.slice(-6)
-    const wide = w >= 70
+    // Inner width after the border and padding. Fixed columns: glyph, type, clock; the detail and the title (hotkey hint "1: " included) share the rest.
+    const inner = w - 4
+    const clockW = 7
+    const typeW = Math.min(12, shown.reduce((n, c) => Math.max(n, c.type.length), 4) + 2)
+    const detailW = inner >= 62 ? Math.min(32, inner - 2 - typeW - clockW - 24) : 0
+    const titleW = inner - 2 - typeW - detailW - clockW
+    const detailOf = (c: AgentCard): { text: string; color: string } => {
+      if (c.lastStop === 'max_tokens') return { text: 'max_tokens', color: C.warn }
+      if (c.status === 'running') {
+        const t = c.tools[c.tools.length - 1]
+        return t ? { text: t.text, color: t.isError ? C.warn : C.text } : { text: 'starting…', color: C.faint }
+      }
+      return { text: c.steps > 0 ? `${kTokens(c.ctx)} ctx · ${kTokens(c.out)} out · ${plural(c.steps, 'step')}` : '', color: C.faint }
+    }
     return (
       <Box flexDirection="column" borderStyle="round" borderColor={C.agent} borderDimColor={running.length === 0} paddingX={1} width={w}>
         <Box justifyContent="space-between">
@@ -1814,28 +1827,31 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
         {cards.length > shown.length ? <Text color={C.faint}>{`+${cards.length - shown.length} earlier`}</Text> : null}
         {shown.map((c, i) => {
           const isViewed = viewed === c.id
-          const stats = c.lastStop === 'max_tokens' ? 'max_tokens' : c.steps > 0 ? `ctx ${kTokens(c.ctx)} · out ${kTokens(c.out)} · ${c.steps} st` : 'starting…'
+          const live = c.status === 'running'
+          const d = detailOf(c)
           return (
             <Box flexDirection="row" height={1} overflow="hidden">
               <Box width={2} flexShrink={0}>
                 <Text color={c.lastStop === 'max_tokens' ? C.warn : statusColor(c)} bold={isViewed}>{isViewed ? '▶' : glyph(c)}</Text>
               </Box>
-              <Box width={wide ? 22 : 16} flexShrink={0}>
-                <Button key={`card-${c.id}`} plain hotkey={String(i + 1)} label={shorten(cardTitle(c), wide ? 17 : 11)} onPress={expandOnPress(c.id)} />
+              <Box width={titleW} flexShrink={0}>
+                <Button key={`card-${c.id}`} plain hotkey={String(i + 1)} label={shorten(cardTitle(c), Math.max(4, titleW - 3))} onPress={expandOnPress(c.id)} />
               </Box>
-              <Box width={wide ? 18 : 12} flexShrink={0}>
-                <Text color={C.dim} wrap="truncate">
+              <Box width={typeW} flexShrink={0}>
+                <Text color={live ? C.agent : C.faint} wrap="truncate">
                   {c.type}
                 </Text>
               </Box>
-              {wide ? (
-                <Box flexGrow={1}>
-                  <Text dimColor wrap="truncate">
-                    {stats}
+              {detailW > 0 ? (
+                <Box width={detailW} flexShrink={0}>
+                  <Text color={d.color} wrap="truncate">
+                    {d.text}
                   </Text>
                 </Box>
               ) : null}
-              <Box flexShrink={0}>{clock(`card-clock-${c.id}`, c.spawnedAt, c.endedAt, C.dim)}</Box>
+              <Box width={clockW} flexShrink={0} justifyContent="flex-end">
+                {clock(`card-clock-${c.id}`, c.spawnedAt, c.endedAt, live ? C.text : C.faint)}
+              </Box>
             </Box>
           )
         })}
