@@ -103,7 +103,7 @@ export const normalizeLog = (stored: unknown): LogLine[] =>
 // ---------------------------------------------------------------- config
 
 export type Panel = 'main' | 'architect' | 'gate' | 'agents' | 'loops' | 'files' | 'shell' | 'receipt' | 'log'
-const PANELS: readonly Panel[] = ['main', 'architect', 'gate', 'agents', 'loops', 'files', 'shell', 'receipt', 'log']
+const PANELS: readonly Panel[] = ['receipt', 'main', 'architect', 'gate', 'agents', 'loops', 'files', 'shell', 'log']
 // The statusline already shows model, context, quota, cost and effort, so `main` is opt-in through `panels`.
 const DEFAULT_PANELS: readonly Panel[] = PANELS.filter(p => p !== 'main')
 

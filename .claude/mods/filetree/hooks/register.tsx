@@ -2093,7 +2093,7 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
       {ps.map((p, i) => {
         const prev = ps[i - 1]
         const link =
-          i === 0 || p === 'agents' || prev === 'agents' || p === 'log' || p === 'loops' || prev === 'loops' || p === 'files' || prev === 'files' || p === 'shell' || prev === 'shell'
+          i === 0 || p === 'agents' || prev === 'agents' || p === 'log' || p === 'loops' || prev === 'loops' || p === 'files' || prev === 'files' || p === 'shell' || prev === 'shell' || p === 'receipt' || prev === 'receipt'
             ? null
             : rail(`link-${p}`, p === 'architect' ? advising : m.isRunning, p === 'architect' ? C.arch : C.main, w)
         return (
@@ -2209,8 +2209,8 @@ export const renderFlightdeck = async ($: EngineInterface, e: PaneEvent, options
   const body = isWide ? (
     <Box flexDirection="column">
       <Box columnGap={2}>
-        {column(panels.filter(p => p === 'main' || p === 'architect' || p === 'gate'), colW)}
-        {column(panels.filter(p => p === 'agents' || p === 'loops' || p === 'files' || p === 'shell' || p === 'receipt'), colW)}
+        {column(panels.filter(p => p === 'receipt' || p === 'main' || p === 'architect' || p === 'gate'), colW)}
+        {column(panels.filter(p => p === 'agents' || p === 'loops' || p === 'files' || p === 'shell'), colW)}
       </Box>
       {panels.includes('log') ? logPanel(W) : null}
     </Box>
