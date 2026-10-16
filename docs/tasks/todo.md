@@ -190,7 +190,7 @@ Runs BEFORE the tooling/split plan below. Goal: the tree never moves by itself b
 - [x] 3. Remove (b)+(c): `revealPaths` calls from `touched`/`afterBash`, `flash()` + state + timer, render-time focus/pinning/lit colouring, branch flash. Keep `reveal()` for mentions/search/click
 - [x] 4. Click handler on panel rows; `follow` option text updated in `plugin.json` + README; `activity` description updated
 - [x] 5. Tests: `recordFiles`; `bun test` + `claude plugin validate`; scratch tsc error count before/after
-- [ ] 6. Live check by the user: tree stays still while Claude reads/edits/commits; tree still shows new files, git colours and sizes; panel lists the activity; mention/search jump still reveals
+- [x] 6. Live check by the user (read confirmed; write/commit/mention not yet reported): tree stays still while Claude reads/edits/commits; tree still shows new files, git colours and sizes; panel lists the activity; mention/search jump still reveals
 - [ ] 7. README, lessons.md, `graphify update .`; one commit per task
 
 ## Risks
