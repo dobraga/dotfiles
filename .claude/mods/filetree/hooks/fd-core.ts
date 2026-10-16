@@ -50,7 +50,7 @@ const kindOf = (v: unknown): string => (Array.isArray(v) ? 'array' : v === null 
 /** A stored object merged over its defaults: a key missing from an older shape takes the default, and so does a key whose stored type no longer matches it (a default of null accepts anything). */
 export const normalize = <T extends object>(def: T, stored: unknown): T => {
   if (!isObject(stored)) return def
-  const out: Record<string, unknown> = { ...def }
+  const out: Record<string, unknown> = { ...(def as Record<string, unknown>) }
   for (const [k, v] of Object.entries(stored)) {
     const want = kindOf((def as Record<string, unknown>)[k])
     if (want === 'null' || want === 'undefined' || want === kindOf(v)) out[k] = v

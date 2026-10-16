@@ -1001,6 +1001,15 @@ async function openNode($: EngineInterface, n: FileNode): Promise<void> {
   } else await openFile($, n.id)
 }
 
+type Btn = { label: string; hotkey?: string; onPress: () => void }
+type Els = ReturnType<EngineInterface['ui']['resolve']>
+
+// One row of buttons with a space between each; a `false` entry is a hidden button and leaves no gap.
+function buttons(els: Els, items: (Btn | false)[]) {
+  const { Button, Text } = els
+  return items.flatMap((b, i) => (b ? [i > 0 ? <Text> </Text> : null, <Button label={b.label} hotkey={b.hotkey} onPress={b.onPress} />] : []))
+}
+
 async function loadTheme($: EngineInterface): Promise<void> {
   const path = `${(await $.env.get('HOME')) ?? ''}/${THEME_FILE}`
   try {
@@ -1138,7 +1147,8 @@ const changedFiles = async ($: EngineInterface, repo: RepoRow): Promise<ChangedF
 
 // Repo list and, once one is picked, its changed files; `inViewer` adds the Diff/File buttons and the file-tree hint
 const reposView = async ($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0], path: string, inViewer: boolean): Promise<RenderNode> => {
-  const { Box, Text, Button } = $.ui.resolve(e)
+  const els = $.ui.resolve(e)
+  const { Box, Text, Button } = els
   const everyRepo = await read($, repos)
   const showAll = await read($, allRepos)
   const rows = showAll ? everyRepo : everyRepo.filter(r => r.dirty > 0)
@@ -1147,15 +1157,13 @@ const reposView = async ($: EngineInterface, e: Parameters<EngineInterface['ui']
   const picked = everyRepo.find(r => r.path === pickedPath)
   const header = (
     <Box>
-      {inViewer && path && <Button label="Diff" hotkey="d" onPress={() => void update($, mode, () => 'diff')} />}
-      {inViewer && path && <Text> </Text>}
-      {inViewer && path && <Button label="File" hotkey="f" onPress={() => void update($, mode, () => 'file')} />}
-      {inViewer && path && <Text> </Text>}
-      {inViewer && <Button label="Repos" hotkey="r" onPress={() => void update($, mode, () => 'repos')} />}
-      {inViewer && <Text> </Text>}
-      <Button label="Refresh" onPress={() => void refreshRepos($)} />
-      {!picked && <Text> </Text>}
-      {!picked && <Button label={showAll ? 'Changed only' : 'All'} hotkey="a" onPress={() => void update($, allRepos, current => !current)} />}
+      {buttons(els, [
+        !!(inViewer && path) && { label: 'Diff', hotkey: 'd', onPress: () => void update($, mode, () => 'diff') },
+        !!(inViewer && path) && { label: 'File', hotkey: 'f', onPress: () => void update($, mode, () => 'file') },
+        inViewer && { label: 'Repos', hotkey: 'r', onPress: () => void update($, mode, () => 'repos') },
+        { label: 'Refresh', onPress: () => void refreshRepos($) },
+        !picked && { label: showAll ? 'Changed only' : 'All', hotkey: 'a', onPress: () => void update($, allRepos, current => !current) },
+      ])}
       {!picked && <Text dimColor> {showAll ? `${everyRepo.length} repos` : `${rows.length} of ${everyRepo.length} repos with changes`}</Text>}
     </Box>
   )
@@ -2573,7 +2581,8 @@ export const register: Register = (on, options) => {
     const shown = files.slice(0, Math.max(0, budget - rows.length))
     const taken = rows.length + shown.length + (files.length > shown.length ? 1 : 0) + 1
     const inner = await next({ ...e, props: { ...e.props, scroll: { ...e.props.scroll, bodyRows: Math.max(5, e.props.scroll.bodyRows - taken) } } })
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const els = $.ui.resolve(e)
+    const { Box, Text, Button } = els
     const nameWidth = rows.reduce((n, r) => Math.max(n, r.name.length), 0)
     const base = picked?.path ?? ''
     const open = (file: ChangedFile) =>
@@ -2621,7 +2630,8 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: VIEWER_PANE }, async ($, e) => {
-    const { Box, Text, Button, Code, Markdown, Raster, Image } = $.ui.resolve(e)
+    const els = $.ui.resolve(e)
+    const { Box, Text, Button, Code, Markdown, Raster, Image } = els
     const t = await read($, TREE)
     const chosen = await read($, mode)
     const path = (await read($, target)) || (t?.selected ?? '')
@@ -2686,24 +2696,21 @@ export const register: Register = (on, options) => {
       return (
         <Box flexDirection="column">
           <Box>
-            {!still && !isPlaying && <Button label="▶ Play" hotkey="p" onPress={() => void startAudio($, path, duration)} />}
-            {!still && isPlaying && <Button label="■ Stop" hotkey="x" onPress={() => void stopAudio($)} />}
-            {!still && <Text> </Text>}
-            {mediaKind === 'video' && <Button label="◀ 5s" hotkey="h" onPress={() => seek(at - VIDEO_STEP)} />}
-            {mediaKind === 'video' && <Text> </Text>}
-            {mediaKind === 'video' && <Button label="5s ▶" hotkey="l" onPress={() => seek(at + VIDEO_STEP)} />}
-            {mediaKind === 'video' && <Text> </Text>}
-            {mediaKind === 'html' && <Button label="Diff" hotkey="d" onPress={() => void update($, mode, () => 'diff')} />}
-            {mediaKind === 'html' && <Text> </Text>}
-            {mediaKind === 'html' && <Button label="File" hotkey="f" onPress={() => void update($, mode, () => 'file')} />}
-            {mediaKind === 'html' && <Text> </Text>}
-            <Button label="Open" hotkey="o" onPress={() => void openFile($, path)} />
-            {mediaKind !== 'audio' && mediaKind !== 'html' && <Text> </Text>}
-            {mediaKind !== 'audio' && mediaKind !== 'html' && (
-              <Button label="Quick Look" hotkey="q" onPress={() => void $.process.run(['sh', '-c', 'qlmanage -p "$1" >/dev/null 2>&1 &', 'sh', path])} />
-            )}
-            <Text> </Text>
-            <Button label="Repos" hotkey="r" onPress={() => void update($, mode, () => 'repos')} />
+            {buttons(els, [
+              !still && !isPlaying && { label: '▶ Play', hotkey: 'p', onPress: () => void startAudio($, path, duration) },
+              !still && isPlaying && { label: '■ Stop', hotkey: 'x', onPress: () => void stopAudio($) },
+              mediaKind === 'video' && { label: '◀ 5s', hotkey: 'h', onPress: () => seek(at - VIDEO_STEP) },
+              mediaKind === 'video' && { label: '5s ▶', hotkey: 'l', onPress: () => seek(at + VIDEO_STEP) },
+              mediaKind === 'html' && { label: 'Diff', hotkey: 'd', onPress: () => void update($, mode, () => 'diff') },
+              mediaKind === 'html' && { label: 'File', hotkey: 'f', onPress: () => void update($, mode, () => 'file') },
+              { label: 'Open', hotkey: 'o', onPress: () => void openFile($, path) },
+              mediaKind !== 'audio' && mediaKind !== 'html' && {
+                label: 'Quick Look',
+                hotkey: 'q',
+                onPress: () => void $.process.run(['sh', '-c', 'qlmanage -p "$1" >/dev/null 2>&1 &', 'sh', path]),
+              },
+              { label: 'Repos', hotkey: 'r', onPress: () => void update($, mode, () => 'repos') },
+            ])}
             <Text dimColor>
               {' '}
               {name} · {mediaKind}
@@ -2838,29 +2845,18 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column">
         <Box>
-          <Button label="Diff" hotkey="d" onPress={() => void update($, mode, () => 'diff')} />
-          <Text> </Text>
-          <Button label="File" hotkey="f" onPress={() => void update($, mode, () => 'file')} />
-          {isRenderable && <Text> </Text>}
-          {isRenderable && <Button label="Preview" hotkey="p" onPress={() => void update($, mode, () => 'rendered')} />}
-          {isHtml && <Text> </Text>}
-          {isHtml && <Button label="Open" hotkey="o" onPress={() => void openFile($, path)} />}
-          <Text> </Text>
-          <Button label="Repos" hotkey="r" onPress={() => void update($, mode, () => 'repos')} />
-          <Text> </Text>
-          <Button label="▲" hotkey="w" onPress={() => moveRow(top - budget)} />
-          <Text> </Text>
-          <Button label="▼" hotkey="s" onPress={() => moveRow(top + budget)} />
-          {maxOffset > 0 && (
-            <Box>
-              <Text> </Text>
-              <Button label="|◀" hotkey="0" onPress={() => moveTo(0)} />
-              <Text> </Text>
-              <Button label="◀" hotkey="h" onPress={() => moveTo(offset - SCROLL_STEP)} />
-              <Text> </Text>
-              <Button label="▶" hotkey="l" onPress={() => moveTo(offset + SCROLL_STEP)} />
-            </Box>
-          )}
+          {buttons(els, [
+            { label: 'Diff', hotkey: 'd', onPress: () => void update($, mode, () => 'diff') },
+            { label: 'File', hotkey: 'f', onPress: () => void update($, mode, () => 'file') },
+            isRenderable && { label: 'Preview', hotkey: 'p', onPress: () => void update($, mode, () => 'rendered') },
+            isHtml && { label: 'Open', hotkey: 'o', onPress: () => void openFile($, path) },
+            { label: 'Repos', hotkey: 'r', onPress: () => void update($, mode, () => 'repos') },
+            { label: '▲', hotkey: 'w', onPress: () => moveRow(top - budget) },
+            { label: '▼', hotkey: 's', onPress: () => moveRow(top + budget) },
+            maxOffset > 0 && { label: '|◀', hotkey: '0', onPress: () => moveTo(0) },
+            maxOffset > 0 && { label: '◀', hotkey: 'h', onPress: () => moveTo(offset - SCROLL_STEP) },
+            maxOffset > 0 && { label: '▶', hotkey: 'l', onPress: () => moveTo(offset + SCROLL_STEP) },
+          ])}
           <Text dimColor> {name} · {note}{cut ? ' · truncated' : ''} · {Math.min(top + 1, total)}-{Math.min(top + budget, total)}/{total}{offset > 0 ? ` · col ${offset + 1}` : ''}</Text>
         </Box>
         <Text dimColor>{e.props.isFocused ? 'wheel/arrows scroll, w/s pages, h/l sideways' : 'click inside this pane to focus it'}</Text>
