@@ -127,7 +127,7 @@ Decision: reuse what exists (no w3m/chromium); add an "Open" button (`o`) for `.
 - [x] 5. `claude plugin validate`, reducer smoke test, manual check with a `sleep` job + a Monitor
 - [x] 6. README, lessons.md, `graphify update .`
 
-- Verified: `claude plugin validate` passes; `startTask`/`endTask` smoke-tested with bun (dedupe, redact, trim keeps running). Not verified: live panel, and `tool.call` result shape for Monitor (`taskId`) is read from the type file only; no tsc (no tsconfig until the mod loads).
+- Verified: `claude plugin validate` passes; `startTask`/`endTask` smoke-tested with bun (dedupe, redact, trim keeps running). Verified live by the user: shell + monitor rows, markdown preview spacing. No tsc (no tsconfig until the mod loads).
 
 ---
 
