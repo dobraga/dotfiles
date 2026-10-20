@@ -1597,6 +1597,14 @@ export const register: Register = (on, options) => {
       }
       if (!isDiff) body = await $.fs.read(path)
     } catch (err) {
+      // the file was moved or deleted: drop the stale selection so the viewer and tree recover instead of sticking on this error
+      if (!(await $.fs.exists(path))) {
+        await update($, target, () => '')
+        await patch($, () => ({ selected: '' }))
+
+        return reposView($, e, '', true)
+      }
+
       return <Text dimColor>Cannot show {path}: {String(err)}</Text>
     }
 
