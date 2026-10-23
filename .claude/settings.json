@@ -104,7 +104,8 @@
     "claude-mem@thedotmack": true,
     "code-review@claude-plugins-official": true,
     "prism@prism": true,
-    "filetree@claude-mods": true
+    "filetree@claude-mods": false,
+    "context-trim@claude-mods": true
   },
   "extraKnownMarketplaces": {
     "thedotmack": {

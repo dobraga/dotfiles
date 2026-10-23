@@ -8,6 +8,11 @@
       "name": "filetree",
       "source": "./filetree",
       "description": "Fork of claude-code-filetree with built-in file viewer, Repos tab and repo branches (pull/push)"
+    },
+    {
+      "name": "context-trim",
+      "source": "./context-trim",
+      "description": "Every N% of context fill, Haiku picks the transcript messages that no longer matter and the mod drops them"
     }
   ]
 }
