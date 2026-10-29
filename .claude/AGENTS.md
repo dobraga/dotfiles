@@ -4,7 +4,7 @@
 * **The "Rule of Three":** Any task requiring 3+ steps or architectural shifts triggers **Plan Mode**. Detailed specs must be committed to `docs/tasks/todo.md` before the first line of code is written.
 * **Verification Gate:** Implementation only begins after the plan is vetted by the user/lead.
 * **The Pivot Rule:** If a strategy encounters friction or "code smell," **STOP**. Re-plan and document the shift immediately. Do not sink cost into a failing path.
-* **Living Documentation:** * **Registry:** Track granular progress in `docs/tasks/todo.md`.
+* **Living Documentation:** * **Registry:** Track granular progress in `docs/tasks/todo.md`. On completion, move the plan to `docs/tasks/archive/YYYY-MM-<slug>.md`; `todo.md` holds only open work.
     * **The Post-Mortem:** Maintain `docs/tasks/lessons.md`. Every bug or correction must be distilled into a reusable rule to prevent recurrence.
 
 ### 2. Execution & Quality Control

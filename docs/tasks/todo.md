@@ -1,209 +1,3 @@
-# Plan: Migrate Shared Agent Configuration, Separate Statuslines & Consolidate Setup
-
-## Context
-Claude Code and Antigravity (Agy) now both support universal standards (`AGENTS.md`).
-1. `agents/`, `skills/`, and `rules/` are stored at root level as a single shared source of truth.
-2. Legacy tool-specific files (`CLAUDE.md`, `GEMINI.md`, `GEMINI_USAGE.md`) have been removed since both tools read `AGENTS.md`.
-3. Claude Code and Agy have dedicated statusline scripts: Claude Code uses `.claude/statusline.py`, and Agy uses `.gemini/statusline.py`.
-4. `install_claude_code.sh` consolidated into unified `install_agents.sh` (with `setup_agents.sh` alias).
-5. Removed redundant project-level symlinks (`.gemini/{agents,skills,rules}` and `.claude/{agents,skills,rules}`) since global `~/.gemini` and `~/.claude` symlinks cover all projects.
-6. Automated `bun` runtime check and `claude-mem` marketplace/plugin installation in `install_agents.sh`, plus dynamic version-agnostic launcher in `~/.local/bin/claude-mem`.
-
----
-
-## Tasks Status
-
-### 1. Separate Statuslines for Claude Code and Antigravity
-- [x] Preserve Antigravity statusline script as `.gemini/statusline.py` (executable).
-- [x] Restore `.claude/statusline.py` from git (`git checkout HEAD -- .claude/statusline.py`) for Claude Code.
-- [x] Link `~/.local/bin/agy-statusline.py` to `.gemini/statusline.py`.
-- [x] Link `~/.gemini/statusline.py` to `.gemini/statusline.py`.
-- [x] Link `~/.claude/statusline.py` to `.claude/statusline.py`.
-
-### 2. Promote Shared Directories to Root
-- [x] Move `.claude/agents` -> `agents/`
-- [x] Move `.claude/skills` -> `skills/`
-- [x] Move `.claude/rules` -> `rules/`
-
-### 3. Remove Redundant Project-Level Symlinks
-- [x] Removed project-level `.claude/{agents,skills,rules}` and `.gemini/{agents,skills,rules}`.
-- [x] Maintained single source of truth with global `~/.gemini` and `~/.claude` symlinks.
-
-### 4. Remove Legacy Tool-Specific Files & Obsolete Skills
-- [x] Remove root `CLAUDE.md`, `.claude/CLAUDE.md`, and `~/.claude/CLAUDE.md`
-- [x] Remove root `GEMINI.md`, `~/.gemini/GEMINI.md`, and `~/.gemini/AGENT.md`
-- [x] Remove obsolete `GEMINI_USAGE.md`
-- [x] Remove obsolete `skills/impeccable`
-
-### 5. Consolidate into Unified `install_agents.sh`
-- [x] Merge `install_claude_code.sh` into `install_agents.sh`
-- [x] Remove `install_claude_code.sh`
-- [x] Create alias symlink `setup_agents.sh` -> `install_agents.sh`
-- [x] Remove redundant project-level symlink creation logic from script
-- [x] Update references in `readme.md`
-
-### 6. Automate Bun & `claude-mem`
-- [x] Automated Bun installation check & symlink `~/.local/bin/bun` in `install_agents.sh`.
-- [x] Added `claude-mem` marketplace registration and plugin install to `install_agents.sh`.
-- [x] Generated dynamic launcher script `~/.local/bin/claude-mem` that auto-detects installed plugin version.
-- [x] Updated `.zshrc` to use dynamic launcher with proper PATH export.
-
----
-
-## Verification
-- [x] Statuslines verified with mock payloads (Claude Code and Antigravity).
-- [x] Clean directory structure verified: root `agents/`, `skills/`, `rules/` without local mirror symlinks.
-- [x] Universal `AGENTS.md` active as the single instruction standard.
-- [x] Global symlinks in `~/.claude` and `~/.gemini` verified and resolving.
-- [x] `claude-mem` launcher tested and operational.
-- [x] All-in-one installer script tested cleanly.
-
-### 4. Kitty Terminal
-- [x] Image preview in filetree: already supported (kitty detected, ffmpeg fallback for non-PNG).
-- [x] Add `kitty/kitty.conf` (FiraCode Nerd Font Mono, shell integration, scrollback, copy_on_select).
-- [x] Link `~/.config/kitty` to `kitty/` in `install_agents.sh` (backs up an existing real dir).
-- [x] Validate with `kitty --debug-config`.
-- [x] Adopt monoira/kitty-tabs (Catppuccin theme, Firefox-style tabs) in `kitty/{theme,tabs}.conf`; new tabs/windows start in `~` (`launch --cwd=~`, `startup.session`). Verified by launching kitty with `--cwd=~`.
-
-### 7. HTML "Open" button in filetree viewer
-Decision: reuse what exists (no w3m/chromium); add an "Open" button (`o`) for `.html/.htm` that calls the mod's `openFile()` (detached launcher + error toast) in the default browser.
-- [x] `isHtml` + Open button in the text viewer (`register.tsx`).
-- [x] Lesson: raw `$.process.run(['xdg-open', …])` hangs/fails for GUI browsers; use `openFile()` (setsid launcher in `open.ts`).
-- [x] HTML preview: `.html/.htm` now has Preview (`p`) → `htmlFrame()` renders via headless brave/chromium/chrome/firefox into the existing `Image` path; Diff/File/Open buttons in that view. Gotcha: `--user-data-dir=<fresh>` makes headless Brave hang; omit it.
-- [x] Media Open button now uses `openFile()` too.
-- [x] Search bug: index used `git ls-files -co --exclude-standard`, which skips gitignored files the tree still shows (e.g. `*.html` ignored in ml-research). Index now adds `ls-files -oi` (minus PRUNE dirs).
-- [x] Repos tab empty inside a repo subfolder: `refreshRepos` only checked `<root>/.git`; now pins `git rev-parse --show-toplevel` of the root.
-- [x] Renamed `install_agents.sh` -> `install_dotfiles.sh` (it links agents and the kitty config); `kitty` package install lives in `install_packages.sh`. Older entries above keep the old name.
-- [x] Theme switched from Catppuccin to Alucard (dexpota/kitty-themes) in `kitty/alucard.conf`; `theme.conf` removed. Tab/border colors are our own additions.
-- [x] filetree marketplace no longer hard-codes the dotfiles path: installer links `~/.claude/mods` and registers it from there; dropped `claude-mods` from settings.json `extraKnownMarketplaces`.
-
----
-
-# Plan: Flightdeck tab in filetree (port of scasella/claude-flightdeck)
-
-## Findings
-- filetree "tabs" are viewer modes: `mode` atom (`diff|file|repos|...`) in `.claude/mods/filetree/hooks/register.tsx:965`, switched by `<Button label=... hotkey=...>` in 3 header rows (~1085, ~1677, ~1815).
-- flightdeck (MIT) is event-driven: `hooks/core.ts` (pure reducers, 526 l), `register.tsx` (1129 l, hooks `turn.*`, `tool.*`, `agent.spawn`, `session.*` + `$.session.usage()`), `rail.tsx`, `elapsed.tsx`. Standalone pane today.
-- Config pattern: `userConfig` in `.claude-plugin/plugin.json` (e.g. `follow: on|off`).
-
-## Design
-- New config `flightdeck: on|off` (default `on`; `off` = no Flightdeck button, no event hooks registered, no state kept, `/flightdeck` command not registered).
-- New modules in filetree/hooks: `flightdeck/core.ts` (copied, unchanged), `flightdeck/panel.tsx` (the panels rendered inside the viewer body), `flightdeck/events.ts` (hook wiring, gated by config). Atoms namespaced `plugin: 'filetree'`, key prefix `fd`.
-- `ViewMode` gains `'flightdeck'`; header button "Flightdeck" (hotkey `k`) only when enabled.
-- Keep MIT attribution: add to `ACKNOWLEDGEMENTS.md` + LICENSE note.
-- Drop standalone flightdeck pane/layout/`openOnStart` (the tab replaces it); keep panels config reduced to `fdPanels`.
-
-## Tasks
-- [x] 1. Confirm design choices with user (below)
-- [x] 2. Copy core.ts/rail.tsx/elapsed.tsx + types into filetree; adapt imports
-- [x] 3. Wire event hooks in register.tsx behind `config.flightdeck === 'on'`
-- [x] 4. Render panels in viewer body as `mode === 'flightdeck'`; add button in 3 header rows
-- [x] 5. Add `userConfig.flightdeck` (+ optional `fdPanels`) to plugin.json; bump version
-- [x] 6. Tests: run core.ts reducers tests from upstream; `claude plugin validate`; manual: on/off in `/config`
-- [x] 7. ACKNOWLEDGEMENTS, README section, lessons.md entry, `graphify update .`
-
-- Deviation: the validator allows one hooks module, no `on` passed to helpers and no duplicate matcher-less `on(event)`, so the port lives inside `register.tsx` and its session.start/tool.call/turn.complete bodies are merged into filetree's handlers. Upstream tests need `claude-code/testing` (not installed here), so only `plugin validate` + an fd-core smoke import ran; the live tab is untested.
-
----
-
-# Plan: Shells & monitors panel in Flightdeck
-
-## Findings
-- No API lists live background shells/monitors. `$.agent.list()` covers subagents only; `background_tasks` exists only on the Stop *shell-hook* input, not on the mod `on(...)` events.
-- Start signals (tool results): `Bash` with `run_in_background` -> `backgroundTaskId`; `Monitor` -> `taskId`, `timeoutMs`, `persistent`. Tool inputs give `command` / `description`.
-- End signals: `<task-notification>` blocks (`<task-id>`, `<status>`) already parsed by `taskEnds` in `register.tsx:660`; also `TaskStop` calls.
-- Limit: a shell/monitor started before the mod (re)loads is invisible; state is rebuilt only from events seen.
-
-## Design
-- One panel `shell` (added to `Panel`/`PANELS` in `fd-core.ts:94`, shown in `fdPanels` config), listing active + recently ended tasks: kind (shell|monitor), description/command (via `redact`), elapsed (`fmtDuration`), status. Hidden when empty.
-- State: `fdTasks` atom (list of `{id, kind, label, startedAt, endedAt?, status}`), reducers in `fd-core.ts` (`startTask`, `endTask`, `trimTasks`), same pattern as `recordCheck`/`settleCheck`.
-- Wire in existing `tool.call`/`tool.result` and the `settleBackground` path; no new hooks module.
-
-## Tasks
-- [x] 1. Vet this plan with user
-- [x] 2. Add `Task` type + reducers to `fd-core.ts`; extend `PluginState` in `types/index.d.ts`
-- [x] 3. Feed `fdTasks` from Bash/Monitor `tool.result`, `<task-notification>` and `TaskStop`
-- [x] 4. Render the `shell` panel; add to `PANELS` and `fdPanels` config
-- [x] 5. `claude plugin validate`, reducer smoke test, manual check with a `sleep` job + a Monitor
-- [x] 6. README, lessons.md, `graphify update .`
-
-- Verified: `claude plugin validate` passes; `startTask`/`endTask` smoke-tested with bun (dedupe, redact, trim keeps running). Verified live by the user: shell + monitor rows, markdown preview spacing. No tsc (no tsconfig until the mod loads).
-
----
-
-# Plan: filetree improvements learned from flightdeck
-
-## Findings
-- `hooks/register.tsx` is 3552 lines / 153 KB with ~109 top-level functions; pure pieces (`splitBlocks`, `formatTable`, `taskEnds`, git-command parsing, `readOnly`, `readTargets`) are mixed with `$`-calling code. Only `fd-core.ts` is `$`-free and testable.
-- Persisted atoms (`tree`, `repos`, `theme`, `mode`, ...) are read raw; only `fd*` go through `normalize`/`SCHEMA_VERSION`.
-- Activity labels/commands shown by the tree are not passed through `redact`.
-- The viewer ignores width except for scroll math; header button rows are hand-repeated 3x (25 `Button label=`).
-- Constraint: the validator allows one hooks module, so extracted modules must be plain imports (no `on` inside them), like `fd-core.ts`.
-
-## Design
-Order matters: 1 enables safe refactors; 2/4 are small protections; 3/5/6/7 build on 1.
-1. **Pure core + tests.** Move `$`-free helpers into `hooks/md.ts` (splitBlocks, formatTable), `hooks/cmd.ts` (gitActions, readOnly, readTargets, taskEnds) and keep `fd-core.ts`. Add `hooks/*.test.ts` run with `bun test` (the `claude plugin test` kit is not installed). Behaviour unchanged; each move verified by tests written first on current outputs.
-2. **Versioned persisted state.** Generalize `SCHEMA_VERSION`/`migrate`/`normalize` to the filetree atoms that persist across sessions (`theme`, `mode`, `auto`, `single`); bad shapes fall back to defaults instead of throwing.
-3. **Header buttons from data.** One `headerButtons(mode, file)` list rendered by a single `Header` component replacing the 3 hand-repeated rows; hidden buttons simply absent.
-4. **Redact activity labels.** Run `redact` (exported from `fd-core.ts`) on `Activity.label/detail` where they are created.
-5. **Adaptive viewer.** `wide|mini|auto` choice from `bodyColumns` for the viewer: narrow = header buttons collapse to icons/hotkeys only, tables fall back to scroll; config `viewerLayout`.
-6. **Cheaper animation.** Move flash/tick redraws into a `Client` module (`surface.every`) like `fd-rail.tsx`, so only the changing region redraws; keep `tick` atom only for non-terminal surfaces.
-7. **Validated config.** Route all `userConfig` reads through one `parseConfig`-style function with safe fallbacks (invalid values, bad regex) and tests.
-
-## Tasks
-- [x] 0. Vet this plan with user (rule of three)
-- [x] 1. Extract `md.ts`, `cmd.ts`; write tests first; `bun test` + `claude plugin validate`
-- [x] 2. Versioned persisted state + migration test
-- [x] 3. Single `Header` component for the 3 button rows
-- [x] 4. ~~`redact` on activity labels~~ not needed: activity labels are fixed strings and a short sha; the only place a command is shown (`tool.check` detail) already goes through `describeInput` -> `redact`
-- [x] 5. Adaptive viewer layout + `viewerLayout` config
-- [x] 6. ~~Move animation into a `Client` module~~ skipped: filetree has no frame loop. The flash is one patch plus one `$.clock.after`, and `tick` only runs a 1 s timer while media plays. A `Client` module would add risk for no gain. Revisit if a profile shows redraw cost.
-- [x] 7. Centralized, tested config parsing
-- [x] 8. README, lessons.md, `graphify update .`; commit per task
-
----
-
-# Plan: move Claude's file activity from the tree to Flightdeck
-
-Runs BEFORE the tooling/split plan below. Goal: the tree never moves by itself because of what Claude reads or writes; the activity shows in a Flightdeck `files` panel instead.
-
-## Findings
-- Two callers feed it: `touched()` (`register.tsx:832`, from Edit/Write at ~2998 and Read at ~3072) and `afterBash()` (744, via `scheduleScan` from Bash and background-task ends).
-- Both do three different things: (a) **keep the tree correct**: `loadDirs`, `refreshGit`, `staleSizes`, `searchIndex = null`, `detectRepo`; (b) **move the tree**: `revealPaths` (opens ancestors), `keepTop`/`scroll`, and the render-time focus/pinning of lit rows (`followClaude && t.flashOn`, ~3220-3235); (c) **flash**: `flash()` sets `flash/flashDim/flashOn/flashTones` and a 2.7 s timer, plus the branch-row flash after git actions.
-- Only (a) must stay. (b) and (c) are the "moves by itself" behaviour.
-- `afterBash` already computes exactly what a files panel needs: `hits` (written files, via `changedInRepo`/`changedSince`), `reads` (`readTargets`), `gitPaths` (staged/committed), and `actions` (verb + tone). Today it throws that away into `tones`.
-- `follow` currently means two things: follow `cd` (`followCwd`) and follow Claude's flashes in the viewport. Only the first is wanted to stay.
-- Config `activity: reads and writes|writes|reads|none` gates (c) today; it becomes the filter for what the panel records.
-- Interim, no code: `Claude activity: none` in `/config` silences the colours but not the reveal/scroll on writes.
-
-## Design
-- New atom `fdFiles: FileEvent[]` (`{ path, kind: 'read'|'write'|'git', verb?: string, at }`, newest last, capped at 50, deduped by path+kind within a few seconds). Pure reducer `recordFiles` in `fd-core.ts` (tested).
-- `touched()` and `afterBash()` keep (a), drop (b)/(c), and call `recordFiles` with what they found. `reveal()` (the `@mention` and search jump) stays: it is the user's own action.
-- Tree rendering: delete the focus/pinning-by-flash code and the `isLit`/`bright`/`dimmed` colouring; keep git colours and the branch label. Remove `flash*` from `FileTree` (`types`, `emptyTree`), `flash()`, `FLASH_MS`, `blink`, `generation`, `BRANCH_ROW` flash (the branch row stays, only unlit).
-- Flightdeck panel `files` (added to `Panel`/`PANELS`, hidden when empty, same pattern as `shell`): rows `HH:MM:SS  read|write|git  relative/path`, coloured purple/orange/green like the old flash, newest first, max 6 rows. Click a row = `reveal()` + open in viewer (user's own action, so moving the tree is fine there).
-- `activity` config keeps its values; `none` makes the panel not record. `follow` is documented as cwd-follow only.
-
-## Tasks
-- [x] 0. Vet this plan with user
-- [x] 1. `FileEvent` type, `recordFiles` reducer + tests (dedupe, cap, ordering) in `fd-core.ts`; `fdFiles` atom + `PluginState`; reset with the other fd atoms
-- [x] 2. `afterBash`/`touched` publish to `fdFiles` (keep behaviour otherwise); panel `files` renders them; verify live that rows appear for Read, Edit, Bash writes, and git actions. Tree still flashes at this step (safe checkpoint, commit)
-- [x] 3. Remove (b)+(c): `revealPaths` calls from `touched`/`afterBash`, `flash()` + state + timer, render-time focus/pinning/lit colouring, branch flash. Keep `reveal()` for mentions/search/click
-- [x] 4. Click handler on panel rows; `follow` option text updated in `plugin.json` + README; `activity` description updated
-- [x] 5. Tests: `recordFiles`; `bun test` + `claude plugin validate`; scratch tsc error count before/after
-- [x] 6. Live check by the user (read confirmed; write/commit/mention not yet reported): tree stays still while Claude reads/edits/commits; tree still shows new files, git colours and sizes; panel lists the activity; mention/search jump still reveals
-- [x] 7. README, lessons.md, `graphify update .` (graphify runs from the commit hook)
-
-## Risks
-- Step 3 deletes a lot (flash, parts of `afterBash`, render focus code): do it only after step 2 is verified, as its own commit so it can be reverted alone.
-- Without reveal, a file Claude creates in a collapsed folder is not visible in the tree until you open the folder; the panel is the discovery path. Say so in the README.
-- `changedInRepo`/`changedSince` scans still run on every Bash write (cost unchanged); if that matters later, gate them on `activity !== 'none'` plus the panel being on.
-- Pivot rule: if removing (b) breaks tree correctness (stale dirs, missing git colours), stop and re-split (a) from (b) before deleting.
-
----
-
-- Step 1-2 done: `recordFiles` tested, `files` panel reads `fdFiles`, fed from `touched`/`afterBash` from `hits`/`found`/`paths` (before any tree filtering, so step 3 can remove `revealPaths` without losing rows). Tree still flashes. Live check done by the user: the Flightdeck comes to the front, Run it runs the command once, Send to prompt fills the composer with command, output and exit code.
-
-- Steps 3-5 done: removed `flash()` + `flash*` state/timer, render-time focus/pinning/lit colours and the branch flash; `touched`/`afterBash` keep only tree correctness (`loadDirs`, `refreshGit`, `staleSizes`, search index) and publish to `fdFiles`. `reveal()` kept for @mentions/search. The `follow` option (it only drove the flash focus; cwd-follow is the `/filetree` toggle) was removed from `userConfig`/`parseOptions`. Dropped: branch-row flash after push/pull (no `files` row for it). Click-a-row-to-reveal was added afterwards (`showFile`), and the panel got a strip plus per-kind lists. Live checks done by the user: read, write, click, per-kind lists.
 # Plan: mod tooling (tsconfig + tests) and splitting register.tsx
 
 ## Findings
@@ -259,3 +53,41 @@ Decisions from the user: Authorize makes the mod answer `allow` to the engine's 
 
 - Revision after the live test: Authorize through `tool.check` did not work because an explicit settings deny rule is enforced again after the hook (the engine's own safety), and the auto-mode classifier's refusals never reach `tool.check`. The hook override was removed. New flow: a Bash `tool.call` that comes back refused (`ran.deny`) is held in `fdBlocked` (`holdBlocked`), the Flightdeck opens, the panel `blocked` shows the full command and reason, **Run it** (`y`) runs it once via `sh -c` in the session cwd (120 s timeout) and shows the output, **Send to prompt** (`p`) appends command + output to the composer, **Dismiss** (`n`). Core in `blocked-core.ts` (6 tests); actions in `blocked.ts`. Live check done by the user: the Flightdeck comes to the front, Run it runs the command once, Send to prompt fills the composer with command, output and exit code.
 - Simplified after use: no prompt hand-off and no output display. The box is Deny (default, `n`) / Approve and run (`y`): approve runs the command once and shows a toast with the exit code, both close the box (and the Flightdeck tab if holding the command opened it).
+
+---
+
+# Plan: context-trim mod (Haiku prunes the transcript every N% of context)
+
+Decision from the user: default step is 10% (configurable via `userConfig`).
+
+## Design
+- Mod `context-trim` in the dev-mods folder, one hooks module + `types/index.d.ts` (`$.state.contextTrim.lastBucket`).
+- `turn.complete`: `bucket = floor((await $.session.usage()).context.percent / step)`; if `bucket > lastBucket`, store it and call `$.session.compact({ trigger: 'plugin' })`. A bucket that falls (after a compact) resets `lastBucket`.
+- `session.compact` matcher `{ trigger: 'plugin' }`: build a numbered digest of `e.messages` (handle, role, 200-char preview, est. tokens); `$.model.complete({ model: 'haiku', effort: 'low' })` returns JSON `{ drop: handle[] }`; validate it (only known handles, never the first message nor the last `keepRecent` = 8, drop a `tool_use` and its `tool_result` together); `next({ ...e, messages: kept })`.
+- Fail open: any model, parse or validation error -> `next(e)` untouched, one toast with the reason. Status line shows tokens saved.
+- Config: `step` (10), `keepRecent` (8), `model` (haiku), `enabled` (true).
+
+## Known limits
+- Rewriting history invalidates the prompt cache; this is why the default is 10%, not 5%.
+- Granularity is the message / tool-result block, not the line.
+- API has no standalone prune: the trim goes through a compaction, which adds a summary message. To verify in task 2 whether `next({ ...e, messages })` with no summarization is possible.
+
+## Tasks
+- [x] 1. Pure core `trim-core.ts`: digest, parse/validate drop list, pair-safe filter + tests
+- [x] 2. Spike (from the API types; live proof is task 5): see Spike findings
+- [ ] 3. Hooks: `turn.complete` trigger, `session.compact` rewrite, config, status line
+- [ ] 4. `claude plugin validate`, `claude plugin test`, `tsc -p`
+- [ ] 5. Live check by the user
+
+## Spike findings (task 2) and re-plan
+- A `session.compact` hook that answers `{ messages }` without calling `next(e)` installs those messages as the transcript: no summarizer call, no summary message. Messages kept from `e.messages` carry the engine's `handle`, so they stand whole. This is the prune we want.
+- **Design change:** `$.session.compact()` runs through every hook *except the calling plugin's own*. The planned single mod (trigger + rewrite hook) would never run its own rewrite. Split in two plugins: `context-trim` (the `session.compact` hook, matcher `{ trigger: 'plugin' }`, calls Haiku inside the hook from `e.messages`, answers `{ messages: kept }`) and `context-trim-trigger` (`turn.complete` watching `$.session.usage()` and calling `$.session.compact()`). No shared state needed.
+- `$.session.compact` rejects while a turn runs and `turn.complete` fires at the turn's end: defer the call with `$.clock.after(0, ...)` and catch the rejection (retry on the next `turn.complete`).
+- Fail open stays: on any model/parse error the rewrite hook calls `next(e)`... which would run the engine's summarizer, so instead it answers `{ skip: reason }` (compaction vetoed, transcript untouched).
+- Task 3 becomes: 3a rewrite hook in `context-trim`, 3b `context-trim-trigger`.
+
+## Re-plan 2: one plugin (user decision)
+- Everything lives in the single plugin `.claude/mods/context-trim`: `register.ts` holds the `session.compact` rewrite hook and the `turn.complete` trigger; `config.ts` and `trim-core.ts` are the tested helpers. Supersedes the two-plugin split above.
+- Risk: the docs say `$.session.compact()` skips the calling plugin's hooks. If so, the trigger's call runs a normal summary compaction once; `register.ts` detects that (`hasHookRun` false), turns the mod off and toasts. Fallback is then the two-plugin split. Settled at the live check (task 5).
+- [x] 3a/3b written in `register.ts`; `claude plugin validate` passes (license/icon warnings only); 9 bun tests pass.
+- [ ] 4. `tsc -p` once the engine has loaded the mod, `claude plugin test` with a hook-level test
