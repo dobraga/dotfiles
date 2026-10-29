@@ -1,9 +1,39 @@
-## graphify
+## Part I: Workflow & Strategic Execution
 
-This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+### 1. The Planning Lifecycle
+* **The "Rule of Three":** Any task requiring 3+ steps or architectural shifts triggers **Plan Mode**. Detailed specs must be committed to `docs/tasks/todo.md` before the first line of code is written.
+* **Verification Gate:** Implementation only begins after the plan is vetted by the user/lead.
+* **The Pivot Rule:** If a strategy encounters friction or "code smell," **STOP**. Re-plan and document the shift immediately. Do not sink cost into a failing path.
+* **Living Documentation:** * **Registry:** Track granular progress in `docs/tasks/todo.md`. On completion, move the plan to `docs/tasks/archive/YYYY-MM-<slug>.md`; `todo.md` holds only open work.
+    * **The Post-Mortem:** Maintain `docs/tasks/lessons.md`. Every bug or correction must be distilled into a reusable rule to prevent recurrence.
 
-Rules:
-- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
-- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
-- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
-- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+### 2. Execution & Quality Control
+* **Subagent Orchestration:** Delegate research and parallel analysis to subagents to keep the primary context window focused and "lean."
+* **Autonomous Resolution:** Debugging is driven by logs and failing tests. Resolve issues at the root without requiring manual hand-holding.
+* **The Staff Engineer Standard:** Before marking a task complete, provide empirical proof (tests/logs/diffs). Ask: *"Is this solution elegant and maintainable, or just functional?"*
+
+## Part II: Architecture & Code Design
+
+Python standards (typing, logging, pathlib, Pydantic, file structure) are enforced via `.claude/rules/python.md`.
+
+## Part III: Tool Usage
+
+* **Prefer Bash over Read/Grep/Glob for file operations.**
+
+## Part IV: Core Values
+
+* **Radical Simplicity:** Change as little as possible to achieve the maximum result.
+* **Root Cause Obsession:** No "band-aid" fixes. If a bug appears, find the architectural weakness that allowed it.
+* **Explicit > Implicit:** Consistency and scannability always trump "clever" one-liners.
+
+## Part V: Session Discipline
+
+* Think before acting. Read existing files before writing code.
+* Be concise in output but thorough in reasoning.
+* Do not re-read files already read unless the file may have changed.
+* Recommend starting a new session when switching to an unrelated task.
+* No sycophantic openers or closing fluff.
+
+# graphify
+- **graphify** (`~/.claude/skills/graphify/SKILL.md`) - any input to knowledge graph. Trigger: `/graphify`
+When the user types `/graphify`, invoke the Skill tool with `skill: "graphify"` before doing anything else.

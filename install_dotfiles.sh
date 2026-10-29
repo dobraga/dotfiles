@@ -136,8 +136,8 @@ ln -sf "${CLAUDE_DIR}/hooks" "${GEMINI_HOME}/hooks"
 echo "  - Linked ~/.gemini/hooks -> ${CLAUDE_DIR}/hooks"
 
 # Core Prompt / Instructions (Universal AGENTS.md standard)
-ln -sf "${CLAUDE_DIR}/AGENTS.md" "${GEMINI_HOME}/AGENTS.md"
-ln -sf "${CLAUDE_DIR}/AGENTS.md" "${CLAUDE_HOME}/AGENTS.md"
+ln -sf "${DOTFILES_DIR}/AGENTS.md" "${GEMINI_HOME}/AGENTS.md"
+ln -sf "${DOTFILES_DIR}/AGENTS.md" "${CLAUDE_HOME}/AGENTS.md"
 # Clean up redundant legacy files (CLAUDE.md, GEMINI.md, AGENT.md)
 rm -f "${CLAUDE_HOME}/CLAUDE.md" "${DOTFILES_DIR}/CLAUDE.md" "${CLAUDE_DIR}/CLAUDE.md"
 rm -f "${GEMINI_HOME}/GEMINI.md" "${DOTFILES_DIR}/GEMINI.md" "${GEMINI_HOME}/AGENT.md" "${DOTFILES_DIR}/GEMINI_USAGE.md"
