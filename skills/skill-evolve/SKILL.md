@@ -32,6 +32,8 @@ Read the session (the user's messages, corrections, the skills that were loaded,
 | A preference of the user or a fact about them | Memory |
 | A one-off | Nowhere |
 
+Write a `docs/tasks/lessons.md` lesson straight away (low risk, and the Post-Mortem rule requires it) and report it; every other home waits for the user's yes. Before adding a lesson, merge it into a similar one, and delete lessons that a hook or validator now enforces.
+
 If a candidate fits two rows, pick the narrower home. Ask whether it is generic (any project) or specific to this repository; a project-specific rule goes in the project's `.claude/`, a generic one in `~/.claude/skills/`.
 
 ## 3. Propose small changes
@@ -59,7 +61,7 @@ Tell the user which rules are new, so the next time the skill is used they can s
 
 ## Guardrails
 
-- Never edit or create a skill without the user's yes for that item.
+- Never edit or create a skill, or edit `AGENTS.md`, without the user's yes for that item.
 - Never copy secrets, credentials, personal data or client data into a skill.
 - Do not turn one correction into a general rule without a second sign of it, unless the user says it is a rule.
 - Do not rewrite a skill because it could be better; change it because a use showed a gap.
