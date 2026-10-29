@@ -28,10 +28,9 @@ case "$file_path" in
     REPO_DIR=$(git -C "$(dirname "$file_path")" rev-parse --show-toplevel 2>/dev/null)
 
     # New/untracked file — format entirely
-    if [ -z "$REPO_DIR" ] || ! git -C "$REPO_DIR" ls-files --error-unmatch "$file_path" 2>/dev/null; then
+    if [ -z "$REPO_DIR" ] || ! git -C "$REPO_DIR" ls-files --error-unmatch "$file_path" >/dev/null 2>&1; then
       uvx ruff format "$file_path" >/dev/null 2>&1
-      exit 0
-    fi
+    else
 
     # Existing file — format only changed line ranges
     while IFS= read -r range; do
@@ -44,6 +43,23 @@ case "$file_path" in
           count = (NF > 1 ? $2 + 0 : 1)
           if (count > 0) print start ":1-" (start + count) ":1"
         }')
+    fi
+
+    # Lint: dropped imports (F401, F811) and syntax errors (E9); surface failures to Claude
+    case "$file_path" in
+      *.py)
+        errors=$(uvx ruff check --fix --select F401,F811,E9 "$file_path" 2>&1)
+        status=$?
+        if [ $status -eq 0 ]; then
+          errors=$(python3 -m py_compile "$file_path" 2>&1)
+          status=$?
+        fi
+        if [ $status -ne 0 ]; then
+          echo "$errors" >&2
+          exit 2
+        fi
+        ;;
+    esac
     ;;
 esac
 
