@@ -2,6 +2,7 @@
 
 ### 1. The Planning Lifecycle
 * **The "Rule of Three":** Any task requiring 3+ steps or architectural shifts triggers **Plan Mode**. Detailed specs must be committed to `docs/tasks/todo.md` before the first line of code is written. Skip the plan for single-file or easily reversible changes.
+* **Scope Restatement:** Before multi-step edits, state the repo, branch and scope you will touch; ask if unsure.
 * **Verification Gate:** Implementation only begins after the plan is vetted by the user/lead.
 * **The Pivot Rule:** If a strategy encounters friction or "code smell," **STOP**. Re-plan and document the shift immediately. Do not sink cost into a failing path.
 * **Living Documentation:**
@@ -10,27 +11,10 @@
 
 ### 2. Execution & Quality Control
 * **Subagent Orchestration:** Delegate research and parallel analysis to subagents to keep the primary context window focused and "lean."
-* **Autonomous Resolution:** Debugging is driven by logs and failing tests. Resolve issues at the root without requiring manual hand-holding.
-* **The Staff Engineer Standard:** Before marking a task complete, provide empirical proof (tests/logs/diffs). Ask: *"Is this solution elegant and maintainable, or just functional?"*
-
-## Part II: Architecture & Code Design
-
-Python standards (typing, logging, pathlib, Pydantic, file structure) are enforced via `.claude/rules/python.md`.
+* **Verification:** Never report a change as working unless it was exercised; back it with tests, logs or diffs. For UI and plugin changes, say "validated by build/tests only, NOT tested live" and list the steps for me to check. Re-read a file fully before claiming it lacks content.
 
 ## Part III: Core Values
 
 * **Radical Simplicity:** Change as little as possible to achieve the maximum result.
 * **Root Cause Obsession:** No "band-aid" fixes. If a bug appears, find the architectural weakness that allowed it.
-* **Explicit > Implicit:** Consistency and scannability always trump "clever" one-liners.
-
-## Part IV: Session Discipline
-
-* Think before acting. Read existing files before writing code.
-* Be concise in output but thorough in reasoning.
-* Do not re-read files already read unless the file may have changed.
 * Recommend starting a new session when switching to an unrelated task.
-* No sycophantic openers or closing fluff.
-
-# graphify
-- **graphify** (`~/.claude/skills/graphify/SKILL.md`) - any input to knowledge graph. Trigger: `/graphify`
-When the user types `/graphify`, invoke the Skill tool with `skill: "graphify"` before doing anything else.
