@@ -67,19 +67,11 @@ fi
 # 2. Configure user-scoped MCP servers and plugins for Claude Code
 if command -v claude &>/dev/null; then
   echo "[+] Ensuring Claude Code user MCP servers and plugins are configured..."
-  claude mcp add --transport http atlassian https://mcp.atlassian.com/v1/mcp --scope user 2>/dev/null || true
 
   # claude-mem plugin
   echo "  - Registering and installing claude-mem plugin..."
   claude plugin marketplace add thedotmack/claude-mem 2>/dev/null || true
   claude plugin install claude-mem@thedotmack 2>/dev/null || true
-
-  # filetree mod (local marketplace versioned in this repo), registered through ~/.claude/mods so no machine path is stored
-  echo "  - Registering and installing filetree mod..."
-  mkdir -p "${CLAUDE_HOME}"
-  ln -sfn "${CLAUDE_DIR}/mods" "${CLAUDE_HOME}/mods"
-  claude plugin marketplace add "${CLAUDE_HOME}/mods" 2>/dev/null || true
-  claude plugin install filetree@claude-mods --scope user 2>/dev/null || true
 fi
 
 # Create dynamic launcher for claude-mem background worker
