@@ -1,12 +1,12 @@
 ## Part I: Workflow & Strategic Execution
 
 ### 1. The Planning Lifecycle
-* **The "Rule of Three":** Any task requiring 3+ steps or architectural shifts triggers **Plan Mode**. Detailed specs must be committed to `docs/tasks/todo.md` before the first line of code is written. Skip the plan for single-file or easily reversible changes.
+* **The "Rule of Three":** Any task requiring 3+ steps or architectural shifts triggers **Plan Mode**. Detailed specs must be committed to `docs/tasks/plan-<slug>.md` before the first line of code is written. Skip the plan for single-file or easily reversible changes.
 * **Scope Restatement:** Before multi-step edits, state the repo, branch and scope you will touch; ask if unsure.
 * **Verification Gate:** Implementation only begins after the plan is vetted by the user/lead.
 * **The Pivot Rule:** If a strategy encounters friction or "code smell," **STOP**. Re-plan and document the shift immediately. Do not sink cost into a failing path.
 * **Living Documentation:**
-    * **Registry:** Track granular progress in `docs/tasks/todo.md`. On completion, move the plan to `docs/tasks/archive/YYYY-MM-<slug>.md`; `todo.md` holds only open work.
+    * **Registry:** One file per plan, `docs/tasks/plan-<slug>.md`, holding the spec and its own todo checklist. When every item is checked and its PRs are merged, move it to `docs/tasks/archive/YYYY-MM-<slug>.md` in the same PR; the top level of `docs/tasks/` holds only open plans.
     * **The Post-Mortem:** Maintain `docs/tasks/lessons.md`. Every bug or correction must be distilled into a reusable rule to prevent recurrence. After a task with corrections, run `/skill-evolve` to route each lesson.
 
 ### 2. Execution & Quality Control
