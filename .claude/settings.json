@@ -175,5 +175,6 @@
       "Bash(aws s3 rm:*) in sagemaker-us-east-1-597776846813 or other non-gcm-gemini-models buckets — prod-adjacent data deletion",
       "Bash(snowsql:*) statements that DROP or TRUNCATE"
     ]
-  }
+  },
+  "attribution": false
 }
