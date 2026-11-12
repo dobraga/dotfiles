@@ -142,39 +142,5 @@
       }
     }
   },
-  "autoMode": {
-    "environment": [
-      "### Org-wide",
-      "**Organization**: Tricura (bitbucket.org/tricura) — inferred from this repo's remote (bitbucket.org:tricura/ml-research.git)",
-      "**Cloud provider(s)**: AWS (Bedrock labeling client, SageMaker bucket seen in usage) and Cloudflare (account/auth token vars in .env.example)",
-      "**Repository visibility**: assume private — origin is bitbucket.org:tricura/ml-research.git; visibility not queryable via gh (non-GitHub host), no evidence of public hosting",
-      "**Internal sharing / snippet hosting**: None configured — treat public paste/gist services as outside the trust boundary",
-      "**Secrets management**: .env-based local config (EXTRACTION_ prefix vars), secrets excluded via .gitignore (`.env`); OPENROUTER_API_KEY, MISC_TAB_SCALEDOWN_API_KEY, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_AUTH_TOKEN are example-only keys in .env.example",
-      "**Default / protected branches**: main (default branch per repo facts); protection/rulesets not queryable (non-GitHub host) — do not assume unprotected",
-      "**CI/CD deploy targets**: None configured",
-      "**Network posture**: None configured",
-      "**Host containment**: None configured — assume Claude Code runs on an ordinary developer machine with open internet",
-      "**Source control**: bitbucket.org/tricura/ml-research (this repo and its origin remote) only — no additional orgs configured",
-      "**Trusted internal domains**: None configured",
-      "**Trusted cloud buckets**: gcm-gemini-models (config-derived — not a confirmed upload destination; uploads of local data still require confirmation)",
-      "**Key internal services**: None configured",
-      "**Internal package registry**: None configured",
-      "**Sensitive data locations & audiences**: .env, .env.example, docs/misc_tab/02-classification-labeling-rules.md, docs/misc_tab/03-classification-boundaries.md, and clinical/catheter gold-label data under gold/catheter_surfaces/ — share only with audiences cleared for clinical/PII-adjacent data",
-      "**Data retention / declassification**: None configured",
-      "**Sensitive remote targets**: any namespace, host, or container whose name carries `prod` or `production` as a whole word or name segment",
-      "**Protected deployment namespaces / environments**: None configured — fall back to the Sensitive remote targets heuristic",
-      "**Protected IaC scopes**: IAM, RBAC, networking, quota, and node-pool resources; anything whose name or tag carries `prod` or `production` as a whole word or name segment",
-      "### User-specific",
-      "**Primary use of Claude Code**: software development (ML extraction pipeline work on clinical documents, this repo)",
-      "**Trusted repo**: /home/dobraga/src/ml-research/extraction/v1 (bitbucket.org:tricura/ml-research.git) and its configured remote(s)",
-      "**Org-specific CLIs**: aws, uv, snowsql — seen in routine use in this project",
-      "routine under dobraga/ prefix: none observed beyond this repo's own path"
-    ],
-    "soft_deny": [
-      "$defaults",
-      "Bash(aws s3 rm:*) in sagemaker-us-east-1-597776846813 or other non-gcm-gemini-models buckets — prod-adjacent data deletion",
-      "Bash(snowsql:*) statements that DROP or TRUNCATE"
-    ]
-  },
   "attribution": false
 }
