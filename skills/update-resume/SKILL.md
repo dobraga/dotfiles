@@ -21,7 +21,10 @@ The note feeds job applications, performance reviews, and a portfolio, so it hol
 </relevance>
 
 <prerequisite>
-Load the `obsidian-cli` skill first (`skills/obsidian-cli/SKILL.md`) for general `obsidian` command usage. This skill only adds the résumé-specific workflow on top.
+Load both skills first, with the Skill tool, before any command:
+- `obsidian-cli` (`skills/obsidian-cli/SKILL.md`) for general `obsidian` command usage.
+- `claude-mem:mem-search` for memory lookups (search → timeline → get_observations, filter before fetching).
+This skill only adds the résumé-specific workflow on top.
 </prerequisite>
 
 <constants>
@@ -44,7 +47,7 @@ For long content, write the file into the vault folder directly, then run `obsid
 `obsidian property:read` is not available, so read `last_updated` from the newest year note's frontmatter. If absent, use the most recent date in the note's headings.
 
 ## Step 3 — Pull new work from memory
-Load the claude-mem tools with ToolSearch, then:
+Follow the `claude-mem:mem-search` skill's 3-layer workflow (load its tools with ToolSearch if deferred), then:
 1. `search` with `dateStart=<last_updated>`, `type=observations`, `orderBy=date_asc`, `limit=100`. Run it with queries `project` and `completed results metrics` to catch both file edits and result logs.
 2. Group observations by project, then apply the `<relevance>` test per project, not per observation. Projects that fail go in a "Not included" list with a one-line reason.
 3. `get_observations` in batches of about 10, because large batches overflow context. For more than about 20 observations, delegate the extraction to a subagent. Ask it to return every concrete number verbatim with observation ID and date.
