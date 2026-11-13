@@ -4,7 +4,7 @@ description: Update the running project résumé (numbers per project) in the Ob
 ---
 
 <overview>
-Keeps one note per year in `vault/publish/1 - Rough Notes/Project Resume/` (`2026.md`, `2027.md`, ...) in the `obsidian_vault` vault current. Work is filed in the note of the year it happened. New work comes from claude-mem observations since the note's `last_updated` property. Every claim carries a number from memory, never an invented one.
+Keeps one note per year in `vault/publish/1 - Areas/Work/Project Resume/` (`2026.md`, `2027.md`, ...) in the `obsidian_vault` vault current. Work is filed in the note of the year it happened. New work comes from claude-mem observations since the note's `last_updated` property. Every claim carries a number from memory, never an invented one.
 </overview>
 
 <relevance>
@@ -26,13 +26,13 @@ Load the `obsidian-cli` skill first (`skills/obsidian-cli/SKILL.md`) for general
 
 <constants>
 - vault: `obsidian_vault` (`/home/dobraga/Documents/obsidian_vault`)
-- folder: `vault/publish/1 - Rough Notes/Project Resume/`; note path: `<folder>/<year>.md`, where `<year>` is the year of the work being added
+- folder: `vault/publish/1 - Areas/Work/Project Resume/`; note path: `<folder>/<year>.md`, where `<year>` is the year of the work being added
 - CLI syntax: `obsidian <cmd> vault=obsidian_vault path=... ` — `\n` is a newline in `content=`; quote values with spaces. The CLI prints Electron/dbus warnings on stderr, so append `2>/dev/null`.
 </constants>
 
 <workflow>
 ## Step 1 — Locate the note
-`obsidian read vault=obsidian_vault path="vault/publish/1 - Rough Notes/Project Resume/<year>.md" 2>/dev/null`
+`obsidian read vault=obsidian_vault path="vault/publish/1 - Areas/Work/Project Resume/<year>.md" 2>/dev/null`
 
 Use the newest year file present (`obsidian files folder=...`) as the cutoff source.
 
