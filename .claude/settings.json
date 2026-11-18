@@ -57,7 +57,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/hooks/format-code.sh"
+            "command": "~/.claude/hooks/check-code.sh"
           }
         ]
       }
@@ -78,6 +78,14 @@
           {
             "type": "command",
             "command": "~/.claude/hooks/notify.py Stop"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/stop-check.sh"
           }
         ]
       }

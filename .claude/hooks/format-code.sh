@@ -1,7 +1,12 @@
 #!/bin/bash
 
 # Claude Code Auto-Formatting Hook
-# Automatically formats source code files after Claude edits them
+# After Claude edits a file: format + lint, exit 2 on findings.
+#   .py        ruff format (changed ranges) + ruff check
+#   .ipynb     ruff format + ruff check
+#   .sh/.bash  shellcheck
+#   .yaml/.yml yamllint
+# Dockerfile/SQL are left to CI (need a binary / are slow).
 
 # Read JSON input from stdin
 json_input=$(cat)
@@ -54,12 +59,41 @@ case "$file_path" in
           errors=$(python3 -m py_compile "$file_path" 2>&1)
           status=$?
         fi
+        if [ $status -eq 0 ]; then
+          # Wider lint: safe autofix, report the rest.
+          errors=$(uvx ruff check --fix --output-format concise --extend-select B,SIM,UP,C4,PIE,RET,S --ignore S101 "$file_path" 2>&1)
+          status=$?
+        fi
         if [ $status -ne 0 ]; then
-          echo "$errors" >&2
+          echo "$errors" | grep -vE 'fixable with|unsafe fix' >&2
+          exit 2
+        fi
+        ;;
+      *.ipynb)
+        # Notebooks: same wider lint, E402 off (imports mid-notebook are normal)
+        if ! errors=$(uvx ruff check --fix --output-format concise --extend-select B,SIM,UP,C4,PIE,RET,S --ignore S101,E402 "$file_path" 2>&1); then
+          echo "$errors" | grep -vE 'fixable with|unsafe fix' >&2
           exit 2
         fi
         ;;
     esac
+    ;;
+  *.sh|*.bash)
+    command -v uvx &> /dev/null || exit 0
+    if ! errors=$(uvx --from shellcheck-py shellcheck -S warning -f gcc "$file_path" 2>&1); then
+      echo "$errors" >&2
+      exit 2
+    fi
+    ;;
+  *.yaml|*.yml)
+    command -v uvx &> /dev/null || exit 0
+    REPO_DIR=$(git -C "$(dirname "$file_path")" rev-parse --show-toplevel 2>/dev/null || dirname "$file_path")
+    cfg=(-d "{extends: relaxed, rules: {line-length: disable}}")
+    compgen -G "$REPO_DIR/.yamllint*" > /dev/null && cfg=()   # respect the project's own config
+    if ! errors=$(uvx yamllint "${cfg[@]}" --no-warnings -f parsable "$file_path" 2>&1); then
+      echo "$errors" >&2
+      exit 2
+    fi
     ;;
 esac
 
