@@ -6,3 +6,5 @@ gpui-kit.d.ts
 jsconfig.json
 *.error
 *.pyc
+*.bak
+skills/.trash/
