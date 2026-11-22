@@ -195,7 +195,26 @@ if [ -d "${HERDR_SRC}" ]; then
   for mod in "${HERDR_SRC}/mods/"*/; do
     [ -d "$mod" ] && link_herdr "${mod%/}" "${HERDR_HOME}/mods/$(basename "${mod%/}")"
   done
+  if [ -f "${HERDR_SRC}/data/herdr-chat/keys.json" ]; then
+    link_herdr "${HERDR_SRC}/data/herdr-chat/keys.json" "${HERDR_HOME}/data/herdr-chat/keys.json"
+  fi
   echo "  - Linked Herdr config, layouts, and mods -> ${HERDR_SRC}"
+
+  # herdr-chat fork (Antigravity ACP provider + unified Ctrl+T launcher)
+  HERDR_CHAT_REPO="https://github.com/dobraga/herdr-chat.git"
+  HERDR_CHAT_DIR="${HOME}/src/herdr-chat"
+  if command -v herdr-app &>/dev/null && command -v hc &>/dev/null && command -v node &>/dev/null; then
+    if [ ! -d "${HERDR_CHAT_DIR}/.git" ]; then
+      echo "  - Cloning dobraga/herdr-chat -> ${HERDR_CHAT_DIR}..."
+      mkdir -p "$(dirname "${HERDR_CHAT_DIR}")"
+      git clone "${HERDR_CHAT_REPO}" "${HERDR_CHAT_DIR}" || true
+    else
+      echo "  [✓] herdr-chat repo present at ${HERDR_CHAT_DIR}"
+    fi
+    if [ -x "${HERDR_CHAT_DIR}/install.sh" ] && [ -d "${HERDR_HOME}" ]; then
+      "${HERDR_CHAT_DIR}/install.sh" --only-chat --no-subagents || true
+    fi
+  fi
 fi
 
 # 6. Clean up any redundant project-level symlinks in dotfiles

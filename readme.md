@@ -35,6 +35,7 @@ This will install:
 - Starship prompt
 - Oh My Zsh with plugins
 - Claude Code CLI, RTK, Graphify, and user MCP servers
+- Herdr config, custom mods, and [`dobraga/herdr-chat`](https://github.com/dobraga/herdr-chat) (native chat UI for Antigravity, Claude Code, and Codex with unified `Ctrl+T` launcher)
 - Symlinks (`ln`) for `.zshrc`, `.gitconfig`, `starship.toml`, `kitty`, and shared Claude Code & Antigravity config (`agents/`, `skills/`, `rules/`, `hooks/`, `AGENTS.md`, `statusline.py`, `.claude/settings.json`)
 
 ### 3. Local environment secrets
