@@ -2,11 +2,14 @@
 
 # Claude Code Auto-Formatting Hook
 # After Claude edits a file: format + lint, exit 2 on findings.
-#   .py        ruff format (changed ranges) + ruff check
+#   .py        ruff format (changed ranges) + ruff check (new code only)
 #   .ipynb     ruff format + ruff check
 #   .sh/.bash  shellcheck
 #   .yaml/.yml yamllint
 # Dockerfile/SQL are left to CI (need a binary / are slow).
+
+# shellcheck source=_newcode.sh
+source "$(dirname "$0")/_newcode.sh"
 
 # Read JSON input from stdin
 json_input=$(cat)
@@ -60,9 +63,11 @@ case "$file_path" in
           status=$?
         fi
         if [ $status -eq 0 ]; then
-          # Wider lint: safe autofix, report the rest.
-          errors=$(uvx ruff check --fix --output-format concise --extend-select B,SIM,UP,C4,PIE,RET,S --ignore S101 "$file_path" 2>&1)
-          status=$?
+          # Report-only, restricted to lines the agent changed this session: other code is neither flagged nor rewritten.
+          root=$(git -C "$(dirname "$file_path")" rev-parse --show-toplevel 2>/dev/null)
+          ref=""; [ -n "$root" ] && ref=$(baseline_ref "$json_input" "$root")
+          errors=$(uvx ruff check --no-fix --output-format concise --extend-select B,SIM,UP,C4,PIE,RET,S --ignore S101 "$file_path" 2>&1 | newcode_filter "$file_path" "$ref")
+          [ -n "$errors" ] && status=1
         fi
         if [ $status -ne 0 ]; then
           echo "$errors" | grep -vE 'fixable with|unsafe fix' >&2
