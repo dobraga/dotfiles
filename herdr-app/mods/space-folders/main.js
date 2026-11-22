@@ -11,7 +11,7 @@
 // another machine too, with its header and spaces, when a rule matches the
 // machine's name or the folder one of its spaces works in.
 
-import { View, div, svg } from "gpui-kit";
+import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { spaces, agents, machines, panes, run, openOverlay, closeOverlay, props, exec, hc, theme, shared, setShared, watchFolder, window, layout, pickFolder, home, nextCommand } from "herdr";
 
@@ -954,11 +954,14 @@ export default class Spaces extends View {
   // Only what's unusual, after the name: "herdr \u00b7 spike \u21912 \u21931". The repo or
   // branch goes when the name already says it (a worktree is named after its branch),
   // and master/main go: nearly every space is on one.
-  gitTail(g, tree, name, t) {
-    const raw = g.branch ?? "detached";
-    const same = (a) => a.toLowerCase() === name.toLowerCase();
-    const branch = same(raw) || raw === "master" || raw === "main" ? "" : raw;
-    const repo = tree || same(g.name) ? "" : g.name;
+  gitTail(g, tree, w, t, folderName = "") {
+    const raw = g?.branch ?? "detached";
+    const same = (a) =>
+      a.toLowerCase() === w.name.toLowerCase() ||
+      (folderName && a.toLowerCase() === folderName.toLowerCase());
+    const branch = g ? (same(raw) || raw === "master" || raw === "main" ? "" : raw) : "";
+    const customName = tree || w.named ? w.name : "";
+    const repo = customName || (g && !tree && !same(g.name) ? g.name : "");
     const where = [repo, branch].filter(Boolean).join(" \u00b7 ");
     return h_flex()
       .flex_1()
@@ -969,17 +972,70 @@ export default class Spaces extends View {
       .text_size(11.5)
       .text_color(t.dim)
       .when(Boolean(where), (el) => el.child(div().min_w(0).truncate().child(where)))
-      .when(g.ahead > 0, (el) => el.child(div().flex_none().text_color(t.ansi2).child(`\u2191${g.ahead}`)))
-      .when(g.behind > 0, (el) => el.child(div().flex_none().text_color(t.ansi1).child(`\u2193${g.behind}`)));
+      .when(Boolean(g && g.ahead > 0), (el) => el.child(div().flex_none().text_color(t.ansi2).child(`\u2191${g.ahead}`)))
+      .when(Boolean(g && g.behind > 0), (el) => el.child(div().flex_none().text_color(t.ansi1).child(`\u2193${g.behind}`)));
+  }
+
+  openTabsStrip(w, t) {
+    const tabs = w.tabs ?? [];
+    if (!tabs.length) return null;
+    const ps = this.panes ?? [];
+    const maxShown = 4;
+    const shown = tabs.slice(0, maxShown);
+    const extra = tabs.length - shown.length;
+    const items = shown.map((tab) => {
+      const lead = ps.find((p) => p.tab === tab.id && p.program?.agent) ?? ps.find((p) => p.tab === tab.id);
+      const prog = lead?.program;
+      const isFile = lead?.mod === "file-view";
+      const iconEl = isFile
+        ? svg("mods/files/file.svg").size(11).flex_none().text_color(t.muted)
+        : prog?.icon
+          ? (prog.tint
+              ? svg(prog.icon).size(11).flex_none().text_color(w.active && tab.active ? t.foreground : t.muted)
+              : image(prog.icon).size(11).flex_none())
+          : div().size(6).rounded(3).bg(t.dim);
+      const stColor = tab.status === "blocked" ? t.blocked : tab.status === "done" ? t.done : tab.status === "working" ? t.working : null;
+      const tip = prog?.name ? (tab.named ? `${tab.name} (${prog.name})` : prog.name) : tab.name;
+      return h_flex()
+        .id(`space-tab-${tab.id}`)
+        .relative()
+        .size(17)
+        .flex_none()
+        .rounded(4)
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .when(w.active && tab.active, (el) => el.bg(t.raised).border_1().border_color(t.border))
+        .when(!(w.active && tab.active), (el) => el.hover((s) => s.bg(t.hover)))
+        .tooltip(tip)
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => {
+          cx.stop_propagation();
+          if (!w.active) run("space.select", { id: w.id });
+          if (!tab.active) run("tab.select", { id: tab.id });
+        })
+        .child(iconEl)
+        .when(Boolean(stColor), (el) =>
+          el.child(div().absolute().right(0).bottom(0).size(5).rounded(3).bg(stColor)),
+        );
+    });
+    return h_flex()
+      .flex_none()
+      .gap(2)
+      .items_center()
+      .children(items)
+      .when(extra > 0, (el) =>
+        el.child(div().px(2).text_size(10).text_color(t.dim).child(`+${extra}`)),
+      );
   }
 
   row({ w, i, g, tree, folder, nested }, t) {
     const on = w.active;
-    const colors = shared("space.colors") ?? {};
-    const color = colors[w.id] ?? "ansi6";
-    const fill = color.startsWith("#") ? color : (MARK[color] ?? t[color]);
     const blockedCount = this.blocked?.get(w.id) ?? (w.status === "blocked" ? 1 : 0);
     const doneCount = this.done?.get(w.id) ?? (w.status === "done" ? 1 : 0);
+    const tabs = w.tabs ?? [];
+    const folderName = folder ? (folders(w.machine ?? null).list.find((x) => x.id === folder)?.name ?? "") : "";
+    const showLeftName = (!folder && !tree && !w.named) || tabs.length === 0;
     return v_flex()
       .relative()
       .id(`space-${w.id}`)
@@ -1028,9 +1084,9 @@ export default class Spaces extends View {
           .gap(9)
           .items_center()
           .when(Boolean(tree), el => el.pl(22).child(svg("mods/workspace-chrome/branch.svg").size(13).text_color(t.dim)))
-          .when(!tree, el => el.child(h_flex().size(18).flex_none().rounded(5).bg(fill).items_center().justify_center().text_size(10.5).font_bold().text_color("#ffffff").child([...w.name][0]?.toUpperCase() ?? "?")))
-          .child(div().flex_shrink(0).max_w(150).truncate().text_color(t.foreground).child(w.name))
-          .child(g ? this.gitTail(g, tree, w.name, t) : div().flex_1())
+          .when(showLeftName, el => el.child(div().flex_shrink(0).max_w(130).truncate().text_color(t.foreground).child(w.name)))
+          .when(Boolean(tabs.length), (el) => el.child(this.openTabsStrip(w, t)))
+          .child(g || tree || w.named ? this.gitTail(g, tree, w, t, folderName) : div().flex_1())
           .when(blockedCount > 0, (el) => el.child(blockedBadge(t, blockedCount)))
           .when(doneCount > 0, (el) => el.child(doneBadge(t, doneCount)))
           .when(blockedCount === 0 && doneCount === 0 && w.status === "working", (el) => el.child(svg("mods/workspace-chrome/spinner.svg").size(11).flex_none().text_color(t.working).spin(900))),
@@ -1076,6 +1132,7 @@ export default class Spaces extends View {
     const palette = ["ansi6", "ansi3", "ansi4", "ansi5", "ansi2", "ansi1"];
     const sp = spaces();
     const ps = panes();
+    this.panes = ps;
     const blocked = new Map();
     const done = new Map();
     for (const a of agents()) {

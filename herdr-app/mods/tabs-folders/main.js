@@ -94,6 +94,7 @@ export default class TabsFolders extends View {
   init(_props, cx) {
     this.pressed = null;
     this.scroll = ScrollHandle.new();
+    this.groupFolder = localStorage.getItem("tabs-folders.groupFolder") !== "false";
     try { this.panels = JSON.parse(localStorage.getItem("panels") ?? "{}"); } catch { this.panels = {}; }
     if (!this.panels || typeof this.panels !== "object" || Array.isArray(this.panels)) this.panels = {};
     this.swipe = { acc: 0, steps: 0, at: 0, last: 0 };
@@ -114,7 +115,7 @@ export default class TabsFolders extends View {
     if (!activeSpace) return { activeSpace: null, allSpaces, ps: [], groupSpaces: [], shown: [] };
     const ps = panes();
     const folderData = shared("space-folders")?.[folderKey(activeSpace.machine)] ?? { list: [], of: {} };
-    const activeFolder = folderOf(activeSpace, folderData, ps);
+    const activeFolder = this.groupFolder ? folderOf(activeSpace, folderData, ps) : null;
     const groupSpaces = activeFolder
       ? allSpaces.filter((s) => (s.machine ?? null) === (activeSpace.machine ?? null) && folderOf(s, folderData, ps) === activeFolder)
       : [activeSpace];
@@ -294,6 +295,34 @@ export default class TabsFolders extends View {
         .on_size_change((_size, cx) => { if (active >= 0) { this.scroll.scroll_to_item(active); cx.notify(); } })
         .children(shown.map(item)))
       .child(button("tab-new", "+", () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 })))
+      .child(
+        h_flex()
+          .id("tab-scope-toggle")
+          .h(26)
+          .px(7)
+          .gap(4)
+          .flex_none()
+          .items_center()
+          .rounded(6)
+          .cursor_pointer()
+          .text_size(11.5)
+          .bg(this.groupFolder ? t.selected : t.chrome)
+          .text_color(this.groupFolder ? t.foreground : t.dim)
+          .hover((s) => s.bg(t.hover).text_color(t.foreground))
+          .tooltip(
+            this.groupFolder
+              ? "Tab bar: All spaces in folder (click for active space only)"
+              : "Tab bar: Active space only (click for all spaces in folder)",
+          )
+          .on_mouse_down("left", stop)
+          .on_click((_e, cx) => {
+            this.groupFolder = !this.groupFolder;
+            localStorage.setItem("tabs-folders.groupFolder", String(this.groupFolder));
+            cx.notify();
+          })
+          .child(svg(this.groupFolder ? "mods/workspace-chrome/folder.svg" : "mods/workspace-chrome/layers.svg").size(12))
+          .child(this.groupFolder ? "Folder" : "Space"),
+      )
       .when(enabled.includes("files"), el => el.child(panelButton("files", "Files", "mods/files/file.svg")))
       .when(enabled.includes("changes"), el => el.child(panelButton("changes", "Changes", "mods/changes/changes.svg")))
       .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/tabs-folders/win-min.svg").size(16) : "−", () => run("window.minimize")))
