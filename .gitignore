@@ -2,3 +2,7 @@
 *.log
 skills/synced
 graphify-out/
+gpui-kit.d.ts
+jsconfig.json
+*.error
+*.pyc

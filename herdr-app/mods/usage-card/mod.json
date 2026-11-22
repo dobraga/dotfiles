@@ -1,0 +1,9 @@
+{
+  "place": "none",
+  "title": "Subscription Usage",
+  "overlay": {
+    "kind": "window",
+    "frame": "none",
+    "width": 356
+  }
+}

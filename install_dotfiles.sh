@@ -155,6 +155,34 @@ link_path "${DOTFILES_DIR}/starship.toml" "${HOME}/.config/starship.toml"
 link_path "${DOTFILES_DIR}/kitty" "${HOME}/.config/kitty"
 echo "  - Linked .zshrc, .gitconfig, starship.toml, and kitty"
 
+# Herdr app personal config, layout, and custom/cloned mods
+HERDR_SRC="${DOTFILES_DIR}/herdr-app"
+HERDR_HOME="${HOME}/.config/herdr-app"
+if [ -d "${HERDR_SRC}" ]; then
+  link_herdr() {
+    local src="$1" dst="$2" rel bak
+    mkdir -p "$(dirname "$dst")"
+    if [ -e "$dst" ] && [ ! -L "$dst" ]; then
+      rel="${dst#${HERDR_HOME}/}"
+      bak="${HERDR_HOME}/.backups/${rel}.$(date +%Y%m%d%H%M%S)"
+      mkdir -p "$(dirname "$bak")"
+      mv "$dst" "$bak"
+      echo "  - Backed up existing ${dst} -> ${bak}"
+    fi
+    ln -sfn "$src" "$dst"
+  }
+  for f in keys.json settings.json; do
+    [ -f "${HERDR_SRC}/${f}" ] && link_herdr "${HERDR_SRC}/${f}" "${HERDR_HOME}/${f}"
+  done
+  for layout in "${HERDR_SRC}/layouts/"*.json; do
+    [ -f "$layout" ] && link_herdr "$layout" "${HERDR_HOME}/layouts/$(basename "$layout")"
+  done
+  for mod in "${HERDR_SRC}/mods/"*/; do
+    [ -d "$mod" ] && link_herdr "${mod%/}" "${HERDR_HOME}/mods/$(basename "${mod%/}")"
+  done
+  echo "  - Linked Herdr config, layouts, and mods -> ${HERDR_SRC}"
+fi
+
 # 6. Clean up any redundant project-level symlinks in dotfiles
 rm -f "${DOTFILES_DIR}/.claude/skills" "${DOTFILES_DIR}/.claude/agents" "${DOTFILES_DIR}/.claude/rules"
 rm -f "${DOTFILES_DIR}/.gemini/skills" "${DOTFILES_DIR}/.gemini/agents" "${DOTFILES_DIR}/.gemini/rules"
