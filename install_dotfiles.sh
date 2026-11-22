@@ -148,6 +148,21 @@ link_path "${GEMINI_DIR}/statusline.py" "${GEMINI_HOME}/statusline.py"
 link_path "${GEMINI_DIR}/statusline.py" "${HOME}/.local/bin/agy-statusline.py"
 echo "  - Configured separate statusline scripts for Claude Code and Antigravity"
 
+# Revu (local browser review CLI + Claude/AGY hooks + MCP)
+if [ -f "${DOTFILES_DIR}/tools/revu/bin/revu" ]; then
+  chmod +x "${DOTFILES_DIR}/tools/revu/bin/revu"
+  link_path "${DOTFILES_DIR}/tools/revu/bin/revu" "${HOME}/.local/bin/revu"
+  BUN_BIN="${HOME}/.bun/bin/bun"
+  [ ! -x "${BUN_BIN}" ] && BUN_BIN="$(command -v bun || true)"
+  if [ -n "${BUN_BIN}" ] && [ -x "${BUN_BIN}" ]; then
+    "${BUN_BIN}" run "${DOTFILES_DIR}/tools/revu/scripts/merge-configs.ts" --revu-bin "${HOME}/.local/bin/revu" || true
+  fi
+  if command -v claude &>/dev/null; then
+    claude mcp add -s user revu -- "${HOME}/.local/bin/revu" mcp 2>/dev/null || true
+  fi
+  echo "  - Configured revu CLI, hooks, and MCP server"
+fi
+
 # Shell, Git, Starship, and Kitty terminal configs
 link_path "${DOTFILES_DIR}/.zshrc" "${HOME}/.zshrc"
 link_path "${DOTFILES_DIR}/.gitconfig" "${HOME}/.gitconfig"

@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Revu — Review</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-left">
+        <span class="brand">revu</span>
+        <span id="mode-badge" class="pill pill-mode">…</span>
+        <span id="round-badge" class="pill pill-round">Round 1</span>
+        <span id="review-title" class="title">Loading…</span>
+      </div>
+      <div class="topbar-right">
+        <button id="btn-refresh" class="btn btn-ghost" title="Reload from disk">↻ Refresh</button>
+        <button id="btn-theme" class="btn btn-ghost" title="Toggle theme">◐</button>
+        <button id="btn-help" class="btn btn-ghost" title="Keyboard shortcuts (?)">?</button>
+        <span class="divider"></span>
+        <span id="comment-count" class="comment-counter">0 comments</span>
+        <button id="btn-request-changes" class="btn btn-danger">Request Changes</button>
+        <button id="btn-approve" class="btn btn-primary">Approve</button>
+        <button id="btn-approve-proceed" class="btn btn-accent hidden">Approve &amp; Proceed</button>
+      </div>
+    </header>
+
+    <div id="decision-banner" class="decision-banner hidden"></div>
+
+    <main id="workspace" class="workspace">
+      <section id="main-pane" class="main-pane">
+        <div id="view-toolbar" class="view-toolbar"></div>
+        <div id="view-body" class="view-body"></div>
+      </section>
+
+      <aside id="sidebar" class="sidebar">
+        <div class="sidebar-header">
+          <span>Annotations</span>
+          <label class="toggle-inline">
+            <input type="checkbox" id="chk-show-resolved" />
+            Show resolved
+          </label>
+        </div>
+
+        <div class="general-note-box">
+          <label for="general-note">General note</label>
+          <textarea
+            id="general-note"
+            rows="3"
+            placeholder="Overall feedback or approval note…"
+          ></textarea>
+        </div>
+
+        <div id="comments-list" class="comments-list"></div>
+      </aside>
+    </main>
+
+    <!-- Floating selection popover for Markdown rendered view -->
+    <div id="selection-popover" class="selection-popover hidden">
+      <button data-kind="comment" class="pop-btn pop-comment">Comment</button>
+      <button data-kind="replace" class="pop-btn pop-replace">Replace</button>
+      <button data-kind="delete" class="pop-btn pop-delete">Delete</button>
+    </div>
+
+    <!-- Modal composer (for Markdown selections & Live DOM pins) -->
+    <div id="composer-modal" class="modal-backdrop hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <span id="composer-title">Add annotation</span>
+          <button id="composer-close" class="btn btn-ghost btn-sm">✕</button>
+        </div>
+        <div id="composer-context" class="composer-context"></div>
+        <div class="modal-body">
+          <label class="field-label" for="composer-body">Comment</label>
+          <textarea id="composer-body" rows="4" placeholder="Write your feedback… (Ctrl/Cmd+Enter to save)"></textarea>
+
+          <div id="composer-suggestion-wrap" class="hidden">
+            <label class="field-label" for="composer-suggestion">Suggested replacement</label>
+            <textarea id="composer-suggestion" rows="4" class="mono" placeholder="Proposed replacement text…"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="composer-cancel" class="btn btn-ghost">Cancel</button>
+          <button id="composer-submit" class="btn btn-primary">Save annotation</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Keyboard shortcuts modal -->
+    <div id="help-modal" class="modal-backdrop hidden">
+      <div class="modal-card modal-sm">
+        <div class="modal-header">
+          <span>Keyboard Shortcuts</span>
+          <button id="help-close" class="btn btn-ghost btn-sm">✕</button>
+        </div>
+        <div class="modal-body shortcuts-grid">
+          <kbd>j</kbd><span>Next file / annotation</span>
+          <kbd>k</kbd><span>Previous file / annotation</span>
+          <kbd>d</kbd><span>Toggle Split / Unified diff</span>
+          <kbd>r</kbd><span>Toggle Round-to-Round diff</span>
+          <kbd>p</kbd><span>Toggle Pin / Interact (Live mode)</span>
+          <kbd>Ctrl/⌘ + Enter</kbd><span>Submit open comment form</span>
+          <kbd>Esc</kbd><span>Close popover / modal</span>
+          <kbd>?</kbd><span>Show this help</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="/static/vendor/marked.min.js"></script>
+    <script type="module" src="/static/app.js"></script>
+  </body>
+</html>
