@@ -101,54 +101,59 @@ chmod +x "${CLAUDE_DIR}/hooks/"* "${CLAUDE_DIR}/statusline.py" "${GEMINI_DIR}/st
 echo "[+] Ensuring global directory structures..."
 mkdir -p "${GEMINI_HOME}" "${CLAUDE_HOME}" "${HOME}/.local/bin"
 
-# 5. Create global symlinks pointing to shared configuration
-echo "[+] Creating global symlinks in ~/.gemini and ~/.claude..."
+# 5. Create symlinks pointing to shared configuration
+echo "[+] Creating symlinks for AI agents, shell, git, and terminal..."
 
-# Shared Skills
-rm -rf "${GEMINI_HOME}/skills" "${CLAUDE_HOME}/skills"
-ln -sf "${SKILLS_DIR}" "${GEMINI_HOME}/skills"
-ln -sf "${SKILLS_DIR}" "${CLAUDE_HOME}/skills"
-echo "  - Linked skills -> ${SKILLS_DIR}"
+link_path() {
+  local src="$1" dst="$2" bak
+  mkdir -p "$(dirname "$dst")"
+  if [ -e "$dst" ] && [ ! -L "$dst" ]; then
+    if [ -d "$dst" ] && rmdir "$dst" 2>/dev/null; then
+      :
+    else
+      bak="${dst}.bak"
+      [ -e "$bak" ] && bak="${dst}.bak.$(date +%Y%m%d%H%M%S)"
+      mv "$dst" "$bak"
+      echo "  - Backed up existing ${dst} -> ${bak}"
+    fi
+  fi
+  ln -sfn "$src" "$dst"
+}
 
-# Shared Agents
-rm -rf "${GEMINI_HOME}/agents" "${CLAUDE_HOME}/agents"
-ln -sf "${AGENTS_DIR}" "${GEMINI_HOME}/agents"
-ln -sf "${AGENTS_DIR}" "${CLAUDE_HOME}/agents"
-echo "  - Linked agents -> ${AGENTS_DIR}"
+# Shared AI agent assets (Claude Code & Antigravity)
+for name in skills agents rules; do
+  src="${DOTFILES_DIR}/${name}"
+  link_path "${src}" "${GEMINI_HOME}/${name}"
+  link_path "${src}" "${CLAUDE_HOME}/${name}"
+  echo "  - Linked ${name} -> ${src}"
+done
 
-# Shared Rules
-rm -rf "${GEMINI_HOME}/rules" "${CLAUDE_HOME}/rules"
-ln -sf "${RULES_DIR}" "${GEMINI_HOME}/rules"
-ln -sf "${RULES_DIR}" "${CLAUDE_HOME}/rules"
-echo "  - Linked rules -> ${RULES_DIR}"
-
-# Hooks
-rm -rf "${GEMINI_HOME}/hooks"
-ln -sf "${CLAUDE_DIR}/hooks" "${GEMINI_HOME}/hooks"
-echo "  - Linked ~/.gemini/hooks -> ${CLAUDE_DIR}/hooks"
+# Hooks & Claude Code settings
+link_path "${CLAUDE_DIR}/hooks" "${GEMINI_HOME}/hooks"
+link_path "${CLAUDE_DIR}/hooks" "${CLAUDE_HOME}/hooks"
+link_path "${CLAUDE_DIR}/settings.json" "${CLAUDE_HOME}/settings.json"
+echo "  - Linked hooks & settings.json -> ${CLAUDE_DIR}"
 
 # Core Prompt / Instructions (Universal AGENTS.md standard)
-ln -sf "${DOTFILES_DIR}/AGENTS.md" "${GEMINI_HOME}/AGENTS.md"
-ln -sf "${DOTFILES_DIR}/AGENTS.md" "${CLAUDE_HOME}/AGENTS.md"
+link_path "${DOTFILES_DIR}/AGENTS.md" "${GEMINI_HOME}/AGENTS.md"
+link_path "${DOTFILES_DIR}/AGENTS.md" "${CLAUDE_HOME}/AGENTS.md"
 # Clean up redundant legacy files (CLAUDE.md, GEMINI.md, AGENT.md)
 rm -f "${CLAUDE_HOME}/CLAUDE.md" "${DOTFILES_DIR}/CLAUDE.md" "${CLAUDE_DIR}/CLAUDE.md"
 rm -f "${GEMINI_HOME}/GEMINI.md" "${DOTFILES_DIR}/GEMINI.md" "${GEMINI_HOME}/AGENT.md" "${DOTFILES_DIR}/GEMINI_USAGE.md"
 echo "  - Linked universal AGENTS.md and removed legacy CLAUDE.md / GEMINI.md"
 
 # Statuslines (Claude Code uses original statusline, Antigravity uses agy statusline)
-ln -sf "${CLAUDE_DIR}/statusline.py" "${CLAUDE_HOME}/statusline.py"
-ln -sf "${GEMINI_DIR}/statusline.py" "${GEMINI_HOME}/statusline.py"
-ln -sf "${GEMINI_DIR}/statusline.py" "${HOME}/.local/bin/agy-statusline.py"
+link_path "${CLAUDE_DIR}/statusline.py" "${CLAUDE_HOME}/statusline.py"
+link_path "${GEMINI_DIR}/statusline.py" "${GEMINI_HOME}/statusline.py"
+link_path "${GEMINI_DIR}/statusline.py" "${HOME}/.local/bin/agy-statusline.py"
 echo "  - Configured separate statusline scripts for Claude Code and Antigravity"
 
-# Kitty terminal config (back up an existing real directory first)
-rmdir "${HOME}/.config/kitty" 2>/dev/null || true
-if [ -d "${HOME}/.config/kitty" ] && [ ! -L "${HOME}/.config/kitty" ]; then
-  mv "${HOME}/.config/kitty" "${HOME}/.config/kitty.bak"
-fi
-mkdir -p "${HOME}/.config"
-ln -sfn "${DOTFILES_DIR}/kitty" "${HOME}/.config/kitty"
-echo "  - Linked kitty config"
+# Shell, Git, Starship, and Kitty terminal configs
+link_path "${DOTFILES_DIR}/.zshrc" "${HOME}/.zshrc"
+link_path "${DOTFILES_DIR}/.gitconfig" "${HOME}/.gitconfig"
+link_path "${DOTFILES_DIR}/starship.toml" "${HOME}/.config/starship.toml"
+link_path "${DOTFILES_DIR}/kitty" "${HOME}/.config/kitty"
+echo "  - Linked .zshrc, .gitconfig, starship.toml, and kitty"
 
 # 6. Clean up any redundant project-level symlinks in dotfiles
 rm -f "${DOTFILES_DIR}/.claude/skills" "${DOTFILES_DIR}/.claude/agents" "${DOTFILES_DIR}/.claude/rules"

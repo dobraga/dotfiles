@@ -35,21 +35,14 @@ This will install:
 - Starship prompt
 - Oh My Zsh with plugins
 - Claude Code CLI, RTK, Graphify, and user MCP servers
-- The `filetree` mod (fork with a file viewer and Repos tab) from `.claude/mods/`, installed as a local marketplace
-- Shared AI Agents, Skills, Rules, and statusline symlinks for Claude Code & Antigravity
+- Symlinks (`ln`) for `.zshrc`, `.gitconfig`, `starship.toml`, `kitty`, and shared Claude Code & Antigravity config (`agents/`, `skills/`, `rules/`, `hooks/`, `AGENTS.md`, `statusline.py`, `.claude/settings.json`)
 
-### 3. Symlink configuration files
+### 3. Local environment secrets
+
+Create or link your private `.env` (not tracked in Git) if needed:
 
 ```sh
-rm -f ~/.zshrc
-ln -s ~/src/dotfiles/.zshrc ~/.zshrc
 ln -s ~/src/dotfiles/.env ~/.env
-
-rm -f ~/.gitconfig
-ln -s ~/src/dotfiles/.gitconfig ~/.gitconfig
-
-# Claude Code & Antigravity Setup
-bash install_dotfiles.sh
 ```
 
 ## Configuration
