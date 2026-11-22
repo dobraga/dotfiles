@@ -116,9 +116,7 @@
   "enabledPlugins": {
     "claude-mem@thedotmack": true,
     "code-review@claude-plugins-official": false,
-    "prism@prism": true,
-    "filetree@claude-mods": false,
-    "context-trim@claude-mods": false
+    "prism@prism": true
   },
   "extraKnownMarketplaces": {
     "thedotmack": {
@@ -143,20 +141,5 @@
   "remoteControlAtStartup": true,
   "agentPushNotifEnabled": true,
   "skipAutoPermissionPrompt": true,
-  "pluginConfigs": {
-    "filetree@claude-mods": {
-      "options": {
-        "activity": "reads and writes",
-        "glyphs": "nerd",
-        "follow": "on",
-        "column": "date",
-        "accordion": "on",
-        "root": "launch",
-        "branch": "off",
-        "flightdeck": "on",
-        "flightdeckStart": "on"
-      }
-    }
-  },
   "attribution": false
 }
