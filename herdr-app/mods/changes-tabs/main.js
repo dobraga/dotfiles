@@ -284,7 +284,8 @@ export default class ChangesTabs extends View {
   render(cx) {
     const t = theme();
     if (this.contextMenu) {
-      const { path, fullPath, overlay } = this.contextMenu;
+      const { path, fullPath, overlay, spaceId, root, on, name } = this.contextMenu;
+      const canOpenWith = !on && Boolean(spaceId && root && path);
       const item = (id, label, value) =>
         div()
           .id(id)
@@ -308,6 +309,24 @@ export default class ChangesTabs extends View {
         .bg(t.popover)
         .text_color(t.foreground)
         .text_size(12.5)
+        .when(canOpenWith, (el) =>
+          el.child(
+            div()
+              .id("changes-ctx-open-with")
+              .h(30)
+              .px(10)
+              .flex()
+              .items_center()
+              .rounded(6)
+              .cursor_pointer()
+              .hover((s) => s.bg(t.hover))
+              .on_click(() => {
+                closeOverlay(overlay);
+                openFileTab({ spaceId, kind: "open-with", path, root, on, name, pin: false });
+              })
+              .child("Open with…"),
+          ),
+        )
         .child(item("changes-ctx-rel", "Copy relative path", path))
         .child(item("changes-ctx-abs", "Copy full path", fullPath));
     }
@@ -414,8 +433,17 @@ export default class ChangesTabs extends View {
                         mod: "changes-tabs",
                         kind: "popup",
                         width: 190,
-                        height: 76,
-                        props: { contextMenu: { path: f.path, fullPath: joinPath(this.root, f.path) } },
+                        height: !this.on ? 108 : 76,
+                        props: {
+                          contextMenu: {
+                            path: f.path,
+                            fullPath: joinPath(this.root, f.path),
+                            spaceId: this.spaceId ?? spaces().find((s) => s.active)?.id,
+                            root: this.root,
+                            on: this.on,
+                            name,
+                          },
+                        },
                       });
                     })
                     .child(div().w(14).text_size(11).text_color(f.status === "A" ? t.ansi2 : f.status === "D" ? t.ansi1 : f.status === "U" ? t.ansi1 : t.blocked).child(f.status))

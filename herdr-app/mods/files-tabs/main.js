@@ -256,8 +256,18 @@ export default class FilesTabs extends View {
               mod: "files-tabs",
               kind: "popup",
               width: 190,
-              height: 76,
-              props: { contextMenu: { path, fullPath: joinPath(this.root, path) } },
+              height: !entry.dir && !this.on ? 108 : 76,
+              props: {
+                contextMenu: {
+                  path,
+                  fullPath: joinPath(this.root, path),
+                  spaceId: this.spaceId ?? spaces().find((s) => s.active)?.id,
+                  root: this.root,
+                  on: this.on,
+                  name: entry.name,
+                  isDir: entry.dir,
+                },
+              },
             });
           })
           .child(entry.dir ? svg(`mods/files-tabs/chevron-${open ? "down" : "right"}.svg`).size(12).flex_none().text_color(t.dim) : div().w(12).flex_none())
@@ -314,7 +324,8 @@ export default class FilesTabs extends View {
   render(cx) {
     const t = theme();
     if (this.contextMenu) {
-      const { path, fullPath, overlay } = this.contextMenu;
+      const { path, fullPath, overlay, spaceId, root, on, name, isDir } = this.contextMenu;
+      const canOpenWith = !isDir && !on && Boolean(spaceId && root && path);
       const item = (id, label, value) =>
         div()
           .id(id)
@@ -338,6 +349,24 @@ export default class FilesTabs extends View {
         .bg(t.popover)
         .text_color(t.foreground)
         .text_size(12.5)
+        .when(canOpenWith, (el) =>
+          el.child(
+            div()
+              .id("files-ctx-open-with")
+              .h(30)
+              .px(10)
+              .flex()
+              .items_center()
+              .rounded(6)
+              .cursor_pointer()
+              .hover((s) => s.bg(t.hover))
+              .on_click(() => {
+                closeOverlay(overlay);
+                openFileTab({ spaceId, kind: "open-with", path, root, on, name, pin: false });
+              })
+              .child("Open with…"),
+          ),
+        )
         .child(item("files-ctx-rel", "Copy relative path", path))
         .child(item("files-ctx-abs", "Copy full path", fullPath));
     }

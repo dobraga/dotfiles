@@ -1,13 +1,35 @@
-// Fast file editor and git diff viewer for main tabs.
+// Fast file editor, media previewer (image/SVG/audio/video), git diff viewer, and inline Open With screen.
 import { View, div, svg } from "gpui-kit";
-import { v_flex, h_flex, Editor, EditorState, TextView, Scrollbar, v_virtual_list } from "gpui-base";
-import { props, shared, setShared, spaces, panes, focused, run, exec, readTextFile, writeTextFile, watchFolder, theme, settings, home, checking } from "herdr";
+import { v_flex, h_flex, Editor, EditorState, TextView, Scrollbar, v_virtual_list, InputState, SliderState } from "gpui-base";
+import { props, shared, setShared, spaces, panes, focused, run, exec, readTextFile, writeTextFile, watchFolder, theme, settings, home, checking, notify } from "herdr";
+import { inspectFile, launchApp, setDefaultApp, revealInFolder, visibleApps, renderOpenWithScreen } from "./open-with-ui.js";
+import {
+  AUDIO_RATES,
+  loadImagePreview,
+  loadAudioPreview,
+  loadVideoPreview,
+  extractVideoFrame,
+  startAudioDaemon,
+  audioRequest,
+  loadPdfPreview,
+  loadPdfPage,
+  loadPdfText,
+  renderImageView,
+  renderAudioView,
+  renderVideoView,
+  renderPdfView,
+} from "./media-ui.js";
 
 const LANG = {
   ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", cjs: "js",
   toml: "yaml", yml: "yaml", jsonc: "json", svelte: "html", vue: "html",
   mdx: "markdown", sh: "bash", zsh: "bash", fish: "bash",
 };
+const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp", "ico", "tiff", "tif", "avif", "heic", "heif"]);
+const AUDIO_EXTS = new Set(["mp3", "wav", "flac", "ogg", "oga", "opus", "m4a", "aac", "wma", "aiff", "aif"]);
+const VIDEO_EXTS = new Set(["mp4", "mkv", "webm", "mov", "avi", "m4v", "wmv", "flv", "mpeg", "mpg", "ogv"]);
+const PDF_EXTS = new Set(["pdf"]);
+const UNSUPPORTED_ERR_RE = /utf-?8|invalid data|binary|too large|exceeds/i;
 const READ = ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "diff.autoRefreshIndex=false"];
 const MAX_CHARS = 400000;
 const MAX_DIFF_LINE_CHARS = 1200;
@@ -61,8 +83,10 @@ export default class FileView extends View {
         : null;
     this.tabId = null;
     this.paneId = null;
-    this.mode = null; // "file" | "diff"
+    this.mode = null; // "file" | "diff" | "open-with"
     this.mdPreview = null;
+    this.svgPreview = null;
+    this.isSvgFile = false;
     this.code = null;
     this.markdownText = null;
     this.diskText = null;
@@ -79,6 +103,153 @@ export default class FileView extends View {
     this.watched = null;
     this.targetKey = null;
     this.loadSeq = 0;
+    this.copySeq = 0;
+    this.updatingSliders = false;
+
+    // Open With state
+    this.unsupported = null;
+    this.openWithManual = false;
+    this.openWithData = null;
+    this.openWithLoading = false;
+    this.openWithError = null;
+    this.openWithQuery = "";
+    this.openWithShowAll = false;
+    this.openWithAt = 0;
+    this.openWithCopied = false;
+    this.openWithLaunching = false;
+    this.openWithNotice = null;
+    this.openWithSeq = 0;
+
+    // Media preview state
+    this.mediaMode = null; // "image" | "audio" | "video" | "pdf"
+    this.mediaData = null;
+    this.mediaLoading = false;
+    this.mediaError = null;
+    this.imgFit = true;
+    this.imgZoom = 1;
+    this.viewportSize = null;
+    this.audioDaemon = null;
+    this.audioStatus = null;
+    this.audioStarting = false;
+    this.audioError = null;
+    this.audioScrubPos = null;
+    this.audioVolume = 1;
+    this.audioMuted = false;
+    this.audioRate = 1;
+    this.audioPolling = false;
+    this.videoFrame = null;
+    this.videoSeeking = false;
+    this.videoScrubPos = null;
+    this.videoSeekSeq = 0;
+
+    // PDF viewer state
+    this.pdfPage = 1;
+    this.pdfDpi = 150;
+    this.pdfFitMode = "width"; // "width" | "page" | "manual"
+    this.pdfZoom = 1;
+    this.pdfPageData = null;
+    this.pdfPageCache = new Map();
+    this.pdfPageLoading = false;
+    this.pdfPageSeq = 0;
+    this.pdfScrubPage = null;
+    this.pdfTextMode = false;
+    this.pdfPagesText = null;
+    this.pdfTextLoading = false;
+    this.pdfTextCode = null;
+    this.pdfTextCopied = false;
+    this.pdfCopySeq = 0;
+    this.pdfSearchOpen = false;
+    this.pdfSearchQuery = "";
+    this.pdfMatches = [];
+    this.pdfMatchIdx = 0;
+
+    // Retained UI states
+    this.focusHandle = cx.focus_handle();
+    this.openWithInput = InputState.new({ placeholder: "Filter or search all installed apps…" });
+    this.audioSeekSlider = SliderState.new({ min: 0, max: 1000, step: 1, value: 0 });
+    this.audioVolSlider = SliderState.new({ min: 0, max: 100, step: 1, value: 100 });
+    this.videoSeekSlider = SliderState.new({ min: 0, max: 1000, step: 1, value: 0 });
+    this.pdfSearchInput = InputState.new({ placeholder: "Search text in PDF…" });
+    this.pdfPageSlider = SliderState.new({ min: 1, max: 1000, step: 1, value: 1 });
+
+    this.openWithInput.on("change", (_e, cx) => {
+      this.openWithQuery = this.openWithInput.value();
+      this.openWithAt = 0;
+      cx.notify();
+    });
+    this.openWithInput.on("submit", (_e, cx) => {
+      if (this.isShowingOpenWith()) this.launchHighlightedApp(cx);
+    });
+
+    this.pdfSearchInput.on("change", (_e, cx) => {
+      this.pdfSearchQuery = this.pdfSearchInput.value();
+      this.recomputePdfMatches(cx, { jump: true });
+      cx.notify();
+    });
+    this.pdfSearchInput.on("submit", (e, cx) => {
+      if (this.mediaMode === "pdf" && this.pdfSearchOpen) {
+        this.stepPdfMatch(e?.shift || e?.modifiers?.shift ? -1 : 1, cx);
+      }
+    });
+
+    this.pdfPageSlider.on("change", (val, cx) => {
+      if (this.updatingSliders || this.mediaMode !== "pdf") return;
+      const pages = this.mediaData?.pages || 1;
+      if (pages > 1) {
+        this.pdfScrubPage = Math.max(1, Math.min(pages, Math.round(((Number(val) - 1) / 999) * (pages - 1)) + 1));
+        cx.notify();
+      }
+    });
+    this.pdfPageSlider.on("release", (val, cx) => {
+      if (this.updatingSliders || this.mediaMode !== "pdf") return;
+      const pages = this.mediaData?.pages || 1;
+      const target =
+        pages > 1 ? Math.max(1, Math.min(pages, Math.round(((Number(val) - 1) / 999) * (pages - 1)) + 1)) : 1;
+      this.pdfScrubPage = null;
+      this.goToPdfPage(target, cx);
+    });
+
+    this.audioSeekSlider.on("change", (val, cx) => {
+      if (this.updatingSliders || this.mediaMode !== "audio") return;
+      const dur = this.audioDuration();
+      if (dur > 0) {
+        this.audioScrubPos = (Number(val) / 1000) * dur;
+        cx.notify();
+      }
+    });
+    this.audioSeekSlider.on("release", (val, cx) => {
+      if (this.updatingSliders || this.mediaMode !== "audio") return;
+      const dur = this.audioDuration();
+      this.audioScrubPos = null;
+      if (dur > 0) this.seekAudio((Number(val) / 1000) * dur, cx);
+      else cx.notify();
+    });
+
+    this.audioVolSlider.on("change", (val, cx) => {
+      if (this.updatingSliders || this.mediaMode !== "audio") return;
+      this.audioVolume = Math.max(0, Math.min(1, Number(val) / 100));
+      cx.notify();
+    });
+    this.audioVolSlider.on("release", (val, cx) => {
+      if (this.updatingSliders || this.mediaMode !== "audio") return;
+      this.setAudioVolume(Number(val) / 100, false, cx);
+    });
+
+    this.videoSeekSlider.on("change", (val, cx) => {
+      if (this.updatingSliders || this.mediaMode !== "video") return;
+      const dur = this.mediaData?.duration || 0;
+      if (dur > 0) {
+        this.videoScrubPos = (Number(val) / 1000) * dur;
+        cx.notify();
+      }
+    });
+    this.videoSeekSlider.on("release", (val, cx) => {
+      if (this.updatingSliders || this.mediaMode !== "video") return;
+      const dur = this.mediaData?.duration || 0;
+      this.videoScrubPos = null;
+      if (dur > 0) this.seekVideoFrame((Number(val) / 1000) * dur, cx);
+      else cx.notify();
+    });
 
     if (checking()) return;
     this.claimTab();
@@ -146,6 +317,92 @@ export default class FileView extends View {
     if (slot.name) run("tab.rename", { id: match.tab, name: slot.name });
   }
 
+  setSliderValue(slider, val) {
+    if (!slider) return;
+    this.updatingSliders = true;
+    try {
+      slider.set_value(val);
+    } finally {
+      this.updatingSliders = false;
+    }
+  }
+
+  resetTransientStates() {
+    this.unsupported = null;
+    this.openWithManual = false;
+    this.openWithData = null;
+    this.openWithLoading = false;
+    this.openWithError = null;
+    this.openWithQuery = "";
+    this.openWithShowAll = false;
+    this.openWithAt = 0;
+    this.openWithCopied = false;
+    this.openWithLaunching = false;
+    this.openWithNotice = null;
+    this.mediaMode = null;
+    this.mediaData = null;
+    this.mediaLoading = false;
+    this.mediaError = null;
+    this.isSvgFile = false;
+    this.svgPreview = null;
+    this.imgFit = true;
+    this.imgZoom = 1;
+    this.audioStatus = null;
+    this.audioStarting = false;
+    this.audioError = null;
+    this.audioScrubPos = null;
+    this.audioPolling = false;
+    this.videoFrame = null;
+    this.videoSeeking = false;
+    this.videoScrubPos = null;
+    this.pdfPage = 1;
+    this.pdfDpi = 150;
+    this.pdfFitMode = "width";
+    this.pdfZoom = 1;
+    this.pdfPageData = null;
+    this.pdfPageCache = new Map();
+    this.pdfPageLoading = false;
+    this.pdfScrubPage = null;
+    this.pdfTextMode = false;
+    this.pdfPagesText = null;
+    this.pdfTextLoading = false;
+    this.pdfTextCode?.release();
+    this.pdfTextCode = null;
+    this.pdfTextCopied = false;
+    this.pdfSearchOpen = false;
+    this.pdfSearchQuery = "";
+    this.pdfMatches = [];
+    this.pdfMatchIdx = 0;
+  }
+
+  hasNativeView() {
+    const slot = this.slot();
+    const mode = this.effectiveMode(slot);
+    if (mode === "diff") return this.rows.length > 0;
+    if (mode === "open-with") return false;
+    return Boolean(this.code || this.markdownText || (this.mediaMode && !this.unsupported));
+  }
+
+  isShowingOpenWith() {
+    const slot = this.slot();
+    const mode = this.effectiveMode(slot);
+    return mode === "open-with" || Boolean(this.unsupported) || this.openWithManual;
+  }
+
+  audioDuration() {
+    return this.audioStatus?.duration > 0 ? this.audioStatus.duration : this.mediaData?.duration || 0;
+  }
+
+  async stopAudio({ wait = false } = {}) {
+    const daemon = this.audioDaemon;
+    this.audioDaemon = null;
+    this.audioPolling = false;
+    this.audioStarting = false;
+    if (!daemon) return;
+    const req = audioRequest(daemon, "POST", "/quit").catch(() => null);
+    if (wait) await req;
+  }
+
   watch(root, on, cx) {
     if (on || !root || this.watched === root) return;
     this.watched = root;
@@ -156,7 +413,18 @@ export default class FileView extends View {
           await watchFolder(watchedRoot);
           if (this.watched !== watchedRoot) break;
           const slot = this.slot();
-          if (slot && slot.root === watchedRoot && !this.dirty && !this.saving) this.load(slot, cx);
+          if (
+            slot &&
+            slot.root === watchedRoot &&
+            !this.dirty &&
+            !this.saving &&
+            !this.openWithManual &&
+            slot.kind !== "open-with" &&
+            !this.unsupported &&
+            !this.mediaMode
+          ) {
+            this.load(slot, cx);
+          }
         }
       } catch {
         if (this.watched === watchedRoot) this.watched = null;
@@ -175,6 +443,158 @@ export default class FileView extends View {
     this.diffWidth = Math.min(MAX_DIFF_WIDTH, rawWidth);
   }
 
+  fetchOpenWithData(fullPath, seq, cx, { focusInput = false } = {}) {
+    const owSeq = ++this.openWithSeq;
+    this.openWithLoading = true;
+    this.openWithError = null;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      try {
+        const info = await inspectFile(fullPath);
+        if (seq !== this.loadSeq || owSeq !== this.openWithSeq) return;
+        this.openWithData = info;
+        if (focusInput && this.isShowingOpenWith()) this.openWithInput.focus();
+      } catch (e) {
+        if (seq === this.loadSeq && owSeq === this.openWithSeq) {
+          this.openWithError = String(e?.message || e || "Failed to inspect file");
+        }
+      } finally {
+        if (seq === this.loadSeq && owSeq === this.openWithSeq) {
+          this.openWithLoading = false;
+          cx.notify();
+        }
+      }
+    });
+  }
+
+  enterUnsupported(reason, detail, fullPath, seq, cx, preloadedInfo = null) {
+    this.code?.release();
+    this.code = null;
+    this.markdownText = null;
+    this.diskText = null;
+    this.loadedFilePath = null;
+    this.dirty = false;
+    this.editable = false;
+    this.isSvgFile = false;
+    this.mediaMode = null;
+    this.mediaData = null;
+    this.mediaLoading = false;
+    this.mediaError = null;
+    this.error = null;
+    this.unsupported = { reason, detail };
+    if (preloadedInfo) {
+      this.openWithData = preloadedInfo;
+      this.openWithLoading = false;
+      if (!this.slot()?.on) this.openWithInput.focus();
+    } else if (!this.slot()?.on) {
+      this.fetchOpenWithData(fullPath, seq, cx, { focusInput: true });
+    }
+  }
+
+  async loadMediaKind(kind, fullPath, seq, cx) {
+    this.code?.release();
+    this.code = null;
+    this.markdownText = null;
+    this.diskText = null;
+    this.loadedFilePath = fullPath;
+    this.dirty = false;
+    this.editable = false;
+    this.isSvgFile = false;
+    this.unsupported = null;
+    this.error = null;
+    this.mediaMode = kind;
+    this.mediaData = null;
+    this.mediaLoading = true;
+    this.mediaError = null;
+    this.videoFrame = null;
+    this.videoSeeking = false;
+    this.videoScrubPos = null;
+    this.pdfPage = 1;
+    this.pdfDpi = 150;
+    this.pdfFitMode = "width";
+    this.pdfZoom = 1;
+    this.pdfPageData = null;
+    this.pdfPageCache = new Map();
+    this.pdfPageLoading = false;
+    this.pdfScrubPage = null;
+    this.pdfTextMode = false;
+    this.pdfPagesText = null;
+    this.pdfTextLoading = false;
+    this.pdfTextCode?.release();
+    this.pdfTextCode = null;
+    this.pdfTextCopied = false;
+    this.pdfSearchOpen = false;
+    this.pdfSearchQuery = "";
+    this.pdfMatches = [];
+    this.pdfMatchIdx = 0;
+    this.audioStatus = null;
+    this.audioError = null;
+    this.audioScrubPos = null;
+    this.setSliderValue(this.audioSeekSlider, 0);
+    this.setSliderValue(this.videoSeekSlider, 0);
+    this.setSliderValue(this.pdfPageSlider, 1);
+    cx.notify();
+
+    try {
+      const data =
+        kind === "image"
+          ? await loadImagePreview(fullPath)
+          : kind === "audio"
+            ? await loadAudioPreview(fullPath)
+            : kind === "pdf"
+              ? await loadPdfPreview(fullPath)
+              : await loadVideoPreview(fullPath);
+      if (seq !== this.loadSeq) return;
+      this.mediaData = data;
+      if (kind === "video" && data?.duration > 0 && data?.posterTime != null) {
+        this.setSliderValue(this.videoSeekSlider, Math.round((data.posterTime / data.duration) * 1000));
+      }
+      if (kind === "pdf") {
+        this.pdfPage = 1;
+        this.pdfDpi = data.dpi || 150;
+        this.pdfPageData = data;
+        this.cachePdfPage(1, this.pdfDpi, data);
+        this.setSliderValue(this.pdfPageSlider, 1);
+        this.focusHandle.focus();
+        this.prefetchPdfNeighbors(fullPath, 1, this.pdfDpi, seq, cx);
+      }
+      if (kind === "audio") {
+        this.focusHandle.focus();
+      }
+    } catch (e) {
+      if (seq !== this.loadSeq) return;
+      const info = await inspectFile(fullPath).catch(() => null);
+      if (seq !== this.loadSeq) return;
+      if (info && !info.exists) {
+        this.mediaMode = null;
+        this.error = info.brokenSymlink ? "Broken symlink · target does not exist" : "This file is no longer available";
+        return;
+      }
+      if (info?.isDir) {
+        this.mediaMode = null;
+        this.error = "Path is a directory";
+        return;
+      }
+      // Fallback gracefully to Open With if ffmpeg/PIL/Poppler cannot decode this media file.
+      const errMsg = String(e?.message || e || "Media preview failed");
+      const isEncryptedPdf = kind === "pdf" && /password|encrypt/i.test(errMsg);
+      this.enterUnsupported(
+        isEncryptedPdf ? "encrypted-pdf" : "binary",
+        isEncryptedPdf ? "Password-protected PDF" : kind === "pdf" ? "Cannot preview PDF" : "Cannot decode media preview",
+        fullPath,
+        seq,
+        cx,
+        info,
+      );
+      if (!isEncryptedPdf) this.openWithError = errMsg;
+    } finally {
+      if (seq === this.loadSeq) {
+        this.mediaLoading = false;
+        cx.notify();
+      }
+    }
+  }
+
   load(slot, cx, { force = false } = {}) {
     if (!slot?.path || !slot?.root) return;
     const mode = this.effectiveMode(slot);
@@ -188,10 +608,36 @@ export default class FileView extends View {
 
     cx.spawn(async (cx) => {
       try {
+        if (force || this.loadedFilePath !== fullPath || mode !== "file") {
+          this.stopAudio();
+        }
+        if (mode === "open-with") {
+          this.code?.release();
+          this.code = null;
+          this.markdownText = null;
+          this.setLines([]);
+          this.mediaMode = null;
+          this.mediaData = null;
+          this.unsupported = null;
+          this.openWithManual = true;
+          this.openWithQuery = "";
+          this.openWithAt = 0;
+          this.openWithNotice = null;
+          this.openWithInput.set_value("");
+          if (!on) {
+            this.fetchOpenWithData(fullPath, seq, cx, { focusInput: true });
+          }
+          return;
+        }
+
         if (mode === "diff") {
           this.code?.release();
           this.code = null;
           this.markdownText = null;
+          this.mediaMode = null;
+          this.mediaData = null;
+          this.unsupported = null;
+          this.openWithManual = false;
           const top = await exec("git", ["rev-parse", "--show-toplevel"], { cwd: slot.root, on }).catch(() => null);
           if (seq !== this.loadSeq) return;
           if (!top || top.code !== 0) {
@@ -238,67 +684,186 @@ export default class FileView extends View {
               .map((line) => (line.length > MAX_DIFF_LINE_CHARS ? line.slice(0, MAX_DIFF_LINE_CHARS) + "… (line truncated)" : line)),
           );
           if (this.rows.length === 0) this.error = "No uncommitted changes for this file";
-        } else {
-          this.setLines([]);
-          const text = await readTextFile(fullPath, { on });
+          return;
+        }
+
+        // mode === "file"
+        this.setLines([]);
+        this.openWithQuery = "";
+        this.openWithAt = 0;
+        this.openWithNotice = null;
+        this.openWithError = null;
+        this.openWithInput.set_value("");
+        this.pdfSearchInput.set_value("");
+        this.setSliderValue(this.pdfPageSlider, 1);
+
+        const ext = slot.path.includes(".") ? slot.path.split(".").pop().toLowerCase() : "txt";
+        if (!on) {
+          if (IMAGE_EXTS.has(ext)) {
+            await this.loadMediaKind("image", fullPath, seq, cx);
+            return;
+          }
+          if (AUDIO_EXTS.has(ext)) {
+            await this.loadMediaKind("audio", fullPath, seq, cx);
+            return;
+          }
+          if (VIDEO_EXTS.has(ext)) {
+            await this.loadMediaKind("video", fullPath, seq, cx);
+            return;
+          }
+          if (PDF_EXTS.has(ext)) {
+            await this.loadMediaKind("pdf", fullPath, seq, cx);
+            return;
+          }
+        }
+
+        let text;
+        try {
+          text = await readTextFile(fullPath, { on });
+        } catch (readErr) {
           if (seq !== this.loadSeq) return;
-          if (!force && this.code && !this.dirty && this.loadedFilePath === fullPath && text === this.diskText) {
+          const msg = String(readErr || "");
+          if (UNSUPPORTED_ERR_RE.test(msg)) {
+            if (!on) {
+              const info = await inspectFile(fullPath).catch(() => null);
+              if (seq !== this.loadSeq) return;
+              if (info && !info.exists) {
+                this.error = info.brokenSymlink ? "Broken symlink · target does not exist" : "This file is no longer available";
+                return;
+              }
+              if (info?.isDir) {
+                this.error = "Path is a directory";
+                return;
+              }
+              if (info?.mediaKind && (info.mediaKind !== "image" || ext !== "svg")) {
+                await this.loadMediaKind(info.mediaKind, fullPath, seq, cx);
+                return;
+              }
+              this.enterUnsupported("non-utf8", "Not UTF-8 text", fullPath, seq, cx, info);
+              return;
+            }
+            this.enterUnsupported("non-utf8", "Remote non-UTF-8 file", fullPath, seq, cx);
             return;
           }
-          this.code?.release();
-          this.code = null;
-          this.markdownText = null;
-          this.diskText = null;
-          this.loadedFilePath = null;
-          this.dirty = false;
-          this.editable = false;
-          this.saveError = null;
-          if (text === null) {
-            this.error = "This file is no longer available (or exceeds 1 MiB)";
+          throw readErr;
+        }
+
+        if (seq !== this.loadSeq) return;
+        if (!force && this.code && !this.dirty && this.loadedFilePath === fullPath && text === this.diskText) {
+          return;
+        }
+
+        this.code?.release();
+        this.code = null;
+        this.markdownText = null;
+        this.diskText = null;
+        this.loadedFilePath = null;
+        this.dirty = false;
+        this.editable = false;
+        this.saveError = null;
+        this.unsupported = null;
+        this.mediaMode = null;
+        this.mediaData = null;
+        this.mediaError = null;
+        this.isSvgFile = false;
+
+        if (text === null) {
+          if (!on) {
+            const info = await inspectFile(fullPath).catch(() => null);
+            if (seq !== this.loadSeq) return;
+            if (!info || !info.exists) {
+              this.error = info?.brokenSymlink ? "Broken symlink · target does not exist" : "This file is no longer available";
+              return;
+            }
+            if (info.isDir) {
+              this.error = "Path is a directory";
+              return;
+            }
+            if (info.mediaKind) {
+              await this.loadMediaKind(info.mediaKind, fullPath, seq, cx);
+              return;
+            }
+            this.enterUnsupported("too-large", "Exceeds 1 MiB preview limit", fullPath, seq, cx, info);
             return;
           }
-          if (text.includes("\0")) {
-            this.error = "Binary file · no text preview";
+          this.error = "This file is no longer available (or exceeds 1 MiB)";
+          return;
+        }
+
+        if (text.includes("\0")) {
+          if (!on) {
+            const info = await inspectFile(fullPath).catch(() => null);
+            if (seq !== this.loadSeq) return;
+            if (info?.mediaKind) {
+              await this.loadMediaKind(info.mediaKind, fullPath, seq, cx);
+              return;
+            }
+            this.enterUnsupported("binary", "Binary file", fullPath, seq, cx, info);
             return;
           }
-          const t = theme();
-          const ext = slot.path.includes(".") ? slot.path.split(".").pop().toLowerCase() : "txt";
-          const isTruncated = text.length > MAX_CHARS;
-          const canEdit = !on && !isTruncated;
-          const value = isTruncated ? text.slice(0, MAX_CHARS) + "\n… (file truncated)" : text;
-          const isMdFile = ext === "md" || ext === "markdown";
-          this.diskText = text;
-          this.loadedFilePath = fullPath;
-          this.editable = canEdit;
-          this.markdownText = isMdFile ? value : null;
-          if (this.mdPreview === null) this.mdPreview = isMdFile;
-          this.code = EditorState.new({
-            language: LANG[ext] ?? ext,
-            readonly: !canEdit,
-            value,
-            font_family: settings().font_family,
-            font_size: 13,
-            syntax: {
-              keyword: t.ansi5,
-              string: t.ansi2,
-              comment: t.dim,
-              function: t.ansi4,
-              type: t.ansi3,
-              number: t.ansi1,
-              constant: t.ansi6,
-            },
+          this.enterUnsupported("binary", "Remote binary file", fullPath, seq, cx);
+          return;
+        }
+
+        const t = theme();
+        const isTruncated = text.length > MAX_CHARS;
+        const canEdit = !on && !isTruncated;
+        const value = isTruncated ? text.slice(0, MAX_CHARS) + "\n… (file truncated)" : text;
+        const isMdFile = ext === "md" || ext === "markdown";
+        const isSvgFile = ext === "svg" && !on;
+        this.diskText = text;
+        this.loadedFilePath = fullPath;
+        this.editable = canEdit;
+        this.markdownText = isMdFile ? value : null;
+        this.isSvgFile = isSvgFile;
+        if (this.mdPreview === null) this.mdPreview = isMdFile;
+        if (this.svgPreview === null) this.svgPreview = isSvgFile;
+
+        this.code = EditorState.new({
+          language: LANG[ext] ?? ext,
+          readonly: !canEdit,
+          value,
+          font_family: settings().font_family,
+          font_size: 13,
+          syntax: {
+            keyword: t.ansi5,
+            string: t.ansi2,
+            comment: t.dim,
+            function: t.ansi4,
+            type: t.ansi3,
+            number: t.ansi1,
+            constant: t.ansi6,
+          },
+        });
+        if (canEdit) {
+          this.code.on("change", (_e, cx) => {
+            const current = this.code?.value() ?? "";
+            const wasDirty = this.dirty;
+            this.dirty = current !== this.diskText;
+            if (this.markdownText !== null) this.markdownText = current;
+            if (this.saveError) this.saveError = null;
+            if (this.dirty && this.slot()?.preview) this.pin();
+            if (wasDirty !== this.dirty || this.markdownText !== null) cx.notify();
           });
-          if (canEdit) {
-            this.code.on("change", (_e, cx) => {
-              const current = this.code?.value() ?? "";
-              const wasDirty = this.dirty;
-              this.dirty = current !== this.diskText;
-              if (this.markdownText !== null) this.markdownText = current;
-              if (this.saveError) this.saveError = null;
-              if (this.dirty && this.slot()?.preview) this.pin();
-              if (wasDirty !== this.dirty || this.markdownText !== null) cx.notify();
-            });
-          }
+        }
+
+        if (isSvgFile) {
+          this.mediaLoading = true;
+          cx.spawn(async (cx) => {
+            try {
+              const svgInfo = await loadImagePreview(fullPath);
+              if (seq !== this.loadSeq) return;
+              this.mediaData = svgInfo;
+            } catch (svgErr) {
+              if (seq !== this.loadSeq) return;
+              this.mediaError = String(svgErr?.message || svgErr || "SVG preview failed");
+            } finally {
+              if (seq === this.loadSeq) {
+                this.mediaLoading = false;
+                cx.notify();
+              }
+            }
+          });
         }
       } catch (e) {
         if (seq === this.loadSeq) this.error = String(e || "Cannot load file");
@@ -361,16 +926,596 @@ export default class FileView extends View {
     if (!slot || this.effectiveMode(slot) === nextMode) return;
     this.mode = nextMode;
     this.mdPreview = null;
+    this.svgPreview = null;
+    this.openWithManual = false;
     this.dirty = false;
     this.saveError = null;
     this.load(slot, cx, { force: true });
     cx.notify();
   }
 
+  openExternalPicker(cx) {
+    const slot = this.slot();
+    if (!slot || slot.on) return;
+    if (this.audioStatus?.state === "playing" && this.audioDaemon) {
+      audioRequest(this.audioDaemon, "POST", "/pause")
+        .then((st) => {
+          this.audioStatus = st;
+        })
+        .catch(() => null);
+    }
+    this.openWithManual = true;
+    this.openWithError = null;
+    this.openWithNotice = null;
+    if (!this.openWithData && !this.openWithLoading) {
+      this.fetchOpenWithData(joinPath(slot.root, slot.path), this.loadSeq, cx, { focusInput: true });
+    } else {
+      this.openWithInput.focus();
+    }
+    cx.notify();
+  }
+
+  copyFilePath(fullPath, cx) {
+    cx.write_to_clipboard(fullPath);
+    this.openWithCopied = true;
+    const seq = ++this.copySeq;
+    cx.notify();
+    cx.timer.after(1500, (cx) => {
+      if (this.copySeq === seq) {
+        this.openWithCopied = false;
+        cx.notify();
+      }
+    });
+  }
+
+  revealCurrentFile(fullPath, cx) {
+    cx.spawn(async (cx) => {
+      try {
+        await revealInFolder(fullPath);
+      } catch (e) {
+        this.openWithError = String(e?.message || e || "Failed to reveal file");
+        cx.notify();
+      }
+    });
+  }
+
+  setAppDefault(app, cx) {
+    const slot = this.slot();
+    const mime = this.openWithData?.mime;
+    if (!slot || !app?.id || !mime) return;
+    const fullPath = joinPath(slot.root, slot.path);
+    const seq = this.loadSeq;
+    cx.spawn(async (cx) => {
+      try {
+        await setDefaultApp(mime, app.id);
+        if (seq !== this.loadSeq) return;
+        this.openWithNotice = `Default for ${this.openWithData?.mimeDescription || mime} set to ${app.name}`;
+        this.openWithError = null;
+        notify({ title: "Default application updated", body: `${app.name} (${mime})`, level: "success", timeout: 2500 });
+        this.fetchOpenWithData(fullPath, seq, cx);
+      } catch (e) {
+        if (seq === this.loadSeq) {
+          this.openWithError = String(e?.message || e || "Failed to update default application");
+          cx.notify();
+        }
+      }
+    });
+  }
+
+  launchHighlightedApp(cx) {
+    const { flat } = visibleApps(this.openWithData, this.openWithQuery, this.openWithShowAll);
+    const target = flat[this.openWithAt] ?? flat[0] ?? null;
+    if (!target && (this.openWithQuery ?? "").trim()) return;
+    this.launchExternal(target, cx);
+  }
+
+  launchExternal(app, cx) {
+    const slot = this.slot();
+    if (!slot || slot.on || this.openWithLaunching) return;
+    const fullPath = joinPath(slot.root, slot.path);
+    const seq = this.loadSeq;
+    this.openWithLaunching = true;
+    this.openWithError = null;
+    cx.notify();
+
+    cx.spawn(async (cx) => {
+      try {
+        const res = await launchApp(app?.id || "--default", fullPath);
+        if (seq !== this.loadSeq) return;
+        const appLabel = res.app || app?.name || "System Default";
+        notify({ title: `Opened ${slot.name || slot.path}`, body: appLabel, level: "info", timeout: 2500 });
+
+        const shouldClose = (Boolean(this.unsupported) || slot.kind === "open-with") && !this.dirty;
+        if (shouldClose) {
+          if (!this.tabId) this.claimTab();
+          const space = spaces().find(
+            (s) => s.id === slot.spaceId || (s.tabs ?? []).some((t) => t.id === this.tabId),
+          );
+          if (this.tabId && (space?.tabs?.length ?? 0) > 1) {
+            const slots = { ...(shared("file-view.slots") ?? {}) };
+            if (this.slotId && slots[this.slotId]) {
+              delete slots[this.slotId];
+              setShared("file-view.slots", slots);
+            }
+            run("tab.close", { id: this.tabId });
+            return;
+          }
+          this.openWithNotice = `Opened with ${appLabel}`;
+        } else if (this.openWithManual && this.hasNativeView()) {
+          this.openWithManual = false;
+        }
+      } catch (e) {
+        if (seq === this.loadSeq) {
+          this.openWithError = String(e?.message || e || "Failed to launch application");
+        }
+      } finally {
+        if (seq === this.loadSeq) {
+          this.openWithLaunching = false;
+          cx.notify();
+        }
+      }
+    });
+  }
+
+  startAudioPolling(seq, cx) {
+    if (this.audioPolling) return;
+    this.audioPolling = true;
+    cx.spawn(async (cx) => {
+      try {
+        while (this.audioDaemon && seq === this.loadSeq && this.audioStatus?.state === "playing") {
+          await cx.sleep(250);
+          if (!this.audioDaemon || seq !== this.loadSeq) break;
+          const st = await audioRequest(this.audioDaemon, "GET", "/status");
+          if (!this.audioDaemon || seq !== this.loadSeq) break;
+          this.audioStatus = st;
+          if (this.audioScrubPos === null && st.duration > 0) {
+            this.setSliderValue(this.audioSeekSlider, Math.round((st.position / st.duration) * 1000));
+          }
+          cx.notify();
+          if (st.state !== "playing") break;
+        }
+      } catch {
+        // Daemon exited or unreachable.
+      } finally {
+        this.audioPolling = false;
+        cx.notify();
+      }
+    });
+  }
+
+  async ensureAudioDaemon(fullPath, seq) {
+    if (this.audioDaemon) return this.audioDaemon;
+    this.audioStarting = true;
+    this.audioError = null;
+    try {
+      const daemon = await startAudioDaemon(fullPath);
+      if (seq !== this.loadSeq) {
+        audioRequest(daemon, "POST", "/quit").catch(() => null);
+        return null;
+      }
+      this.audioDaemon = daemon;
+      if (this.audioVolume !== 1 || this.audioMuted) {
+        await audioRequest(daemon, "POST", "/volume", {
+          volume: this.audioVolume,
+          muted: this.audioMuted,
+        }).catch(() => null);
+      }
+      if (this.audioRate !== 1) {
+        await audioRequest(daemon, "POST", "/rate", { rate: this.audioRate }).catch(() => null);
+      }
+      return daemon;
+    } finally {
+      this.audioStarting = false;
+    }
+  }
+
+  toggleAudioPlay(cx) {
+    const slot = this.slot();
+    if (!slot || slot.on || this.mediaMode !== "audio" || this.audioStarting) return;
+    const fullPath = joinPath(slot.root, slot.path);
+    const seq = this.loadSeq;
+    const wasPlaying = this.audioStatus?.state === "playing";
+    cx.notify();
+
+    cx.spawn(async (cx) => {
+      try {
+        const daemon = await this.ensureAudioDaemon(fullPath, seq);
+        if (!daemon || seq !== this.loadSeq) return;
+        const st = await audioRequest(daemon, "POST", wasPlaying ? "/pause" : "/play");
+        if (seq !== this.loadSeq) return;
+        this.audioStatus = st;
+        if (st.duration > 0) {
+          this.setSliderValue(this.audioSeekSlider, Math.round((st.position / st.duration) * 1000));
+        }
+        if (st.state === "playing") this.startAudioPolling(seq, cx);
+      } catch (e) {
+        if (seq === this.loadSeq) {
+          this.audioError = String(e?.message || e || "Audio playback failed");
+        }
+      } finally {
+        if (seq === this.loadSeq) cx.notify();
+      }
+    });
+  }
+
+  seekAudio(targetSec, cx) {
+    const slot = this.slot();
+    if (!slot || slot.on || this.mediaMode !== "audio") return;
+    const fullPath = joinPath(slot.root, slot.path);
+    const seq = this.loadSeq;
+    const clamped = Math.max(0, Number(targetSec) || 0);
+    const dur = this.audioDuration();
+    if (dur > 0) {
+      this.setSliderValue(this.audioSeekSlider, Math.round((Math.min(dur, clamped) / dur) * 1000));
+    }
+    cx.notify();
+
+    cx.spawn(async (cx) => {
+      try {
+        const daemon = await this.ensureAudioDaemon(fullPath, seq);
+        if (!daemon || seq !== this.loadSeq) return;
+        const st = await audioRequest(daemon, "POST", "/seek", { position: clamped });
+        if (seq !== this.loadSeq) return;
+        this.audioStatus = st;
+        if (st.duration > 0) {
+          this.setSliderValue(this.audioSeekSlider, Math.round((st.position / st.duration) * 1000));
+        }
+      } catch (e) {
+        if (seq === this.loadSeq) this.audioError = String(e?.message || e || "Seek failed");
+      } finally {
+        if (seq === this.loadSeq) cx.notify();
+      }
+    });
+  }
+
+  setAudioVolume(volume, muted, cx) {
+    this.audioVolume = Math.max(0, Math.min(1, Number(volume)));
+    this.audioMuted = Boolean(muted);
+    this.setSliderValue(this.audioVolSlider, Math.round(this.audioVolume * 100));
+    cx.notify();
+    if (!this.audioDaemon) return;
+    const seq = this.loadSeq;
+    cx.spawn(async (cx) => {
+      try {
+        const st = await audioRequest(this.audioDaemon, "POST", "/volume", {
+          volume: this.audioVolume,
+          muted: this.audioMuted,
+        });
+        if (seq === this.loadSeq) {
+          this.audioStatus = st;
+          cx.notify();
+        }
+      } catch {}
+    });
+  }
+
+  toggleAudioMute(cx) {
+    this.setAudioVolume(this.audioVolume, !this.audioMuted, cx);
+  }
+
+  cycleAudioRate(cx) {
+    const idx = AUDIO_RATES.indexOf(this.audioRate);
+    this.audioRate = AUDIO_RATES[(idx + 1) % AUDIO_RATES.length];
+    cx.notify();
+    if (!this.audioDaemon) return;
+    const seq = this.loadSeq;
+    cx.spawn(async (cx) => {
+      try {
+        const st = await audioRequest(this.audioDaemon, "POST", "/rate", { rate: this.audioRate });
+        if (seq === this.loadSeq) {
+          this.audioStatus = st;
+          cx.notify();
+        }
+      } catch {}
+    });
+  }
+
+  seekVideoFrame(targetSec, cx) {
+    const slot = this.slot();
+    if (!slot || slot.on || this.mediaMode !== "video") return;
+    const fullPath = joinPath(slot.root, slot.path);
+    const dur = this.mediaData?.duration || 0;
+    const tSec = dur > 0 ? Math.max(0, Math.min(dur, Number(targetSec) || 0)) : Math.max(0, Number(targetSec) || 0);
+    const loadSeq = this.loadSeq;
+    const seekSeq = ++this.videoSeekSeq;
+    this.videoSeeking = true;
+    this.videoScrubPos = tSec;
+    if (dur > 0) {
+      this.setSliderValue(this.videoSeekSlider, Math.round((tSec / dur) * 1000));
+    }
+    cx.notify();
+
+    cx.spawn(async (cx) => {
+      try {
+        const frame = await extractVideoFrame(fullPath, tSec);
+        if (loadSeq !== this.loadSeq || seekSeq !== this.videoSeekSeq) return;
+        this.videoFrame = frame;
+        this.videoScrubPos = null;
+      } catch (e) {
+        if (loadSeq === this.loadSeq && seekSeq === this.videoSeekSeq) {
+          this.mediaError = String(e?.message || e || "Failed to extract video frame");
+        }
+      } finally {
+        if (loadSeq === this.loadSeq && seekSeq === this.videoSeekSeq) {
+          this.videoSeeking = false;
+          this.videoScrubPos = null;
+          cx.notify();
+        }
+      }
+    });
+  }
+
+  desiredPdfDpi() {
+    if (this.pdfFitMode === "manual" && this.pdfZoom > 1.3) return 220;
+    return 150;
+  }
+
+  cachePdfPage(page, dpi, pageData) {
+    if (!this.pdfPageCache) this.pdfPageCache = new Map();
+    const key = `${page}:${dpi}`;
+    if (this.pdfPageCache.has(key)) this.pdfPageCache.delete(key);
+    this.pdfPageCache.set(key, pageData);
+    while (this.pdfPageCache.size > 24) {
+      const oldest = this.pdfPageCache.keys().next().value;
+      this.pdfPageCache.delete(oldest);
+    }
+  }
+
+  syncPdfSlider(page) {
+    const pages = this.mediaData?.pages || 1;
+    const sliderVal = pages > 1 ? Math.round(((page - 1) / (pages - 1)) * 999) + 1 : 1;
+    this.setSliderValue(this.pdfPageSlider, sliderVal);
+  }
+
+  prefetchPdfNeighbors(fullPath, page, dpi, loadSeq, cx) {
+    const pages = this.mediaData?.pages || 1;
+    const targets = [page + 1, page - 1].filter((p) => p >= 1 && p <= pages && !this.pdfPageCache?.has(`${p}:${dpi}`));
+    if (!targets.length) return;
+    cx.spawn(async () => {
+      for (const p of targets) {
+        if (loadSeq !== this.loadSeq || this.mediaMode !== "pdf") return;
+        if (this.pdfPageCache?.has(`${p}:${dpi}`)) continue;
+        try {
+          const data = await loadPdfPage(fullPath, p, dpi);
+          if (loadSeq !== this.loadSeq || this.mediaMode !== "pdf") return;
+          this.cachePdfPage(p, dpi, data);
+        } catch {
+          // Ignore prefetch failure.
+        }
+      }
+    });
+  }
+
+  goToPdfPage(targetPage, cx, { forceDpi } = {}) {
+    const slot = this.slot();
+    if (!slot || slot.on || this.mediaMode !== "pdf" || !this.mediaData) return;
+    const pages = this.mediaData.pages || 1;
+    const page = Math.max(1, Math.min(pages, Math.round(Number(targetPage) || 1)));
+    const dpi = forceDpi ?? this.desiredPdfDpi();
+    if (page === this.pdfPage && dpi === this.pdfDpi && this.pdfPageData) return;
+
+    this.pdfPage = page;
+    this.pdfDpi = dpi;
+    this.pdfScrubPage = null;
+    this.syncPdfSlider(page);
+
+    const cached = this.pdfPageCache?.get(`${page}:${dpi}`);
+    const fullPath = joinPath(slot.root, slot.path);
+    if (cached) {
+      this.pdfPageData = cached;
+      this.pdfPageLoading = false;
+      cx.notify();
+      this.prefetchPdfNeighbors(fullPath, page, dpi, this.loadSeq, cx);
+      return;
+    }
+
+    const loadSeq = this.loadSeq;
+    const pageSeq = ++this.pdfPageSeq;
+    this.pdfPageLoading = true;
+    cx.notify();
+
+    cx.spawn(async (cx) => {
+      try {
+        const data = await loadPdfPage(fullPath, page, dpi);
+        if (loadSeq !== this.loadSeq || pageSeq !== this.pdfPageSeq) return;
+        this.cachePdfPage(page, dpi, data);
+        this.pdfPageData = data;
+        this.prefetchPdfNeighbors(fullPath, page, dpi, loadSeq, cx);
+      } catch (e) {
+        if (loadSeq === this.loadSeq && pageSeq === this.pdfPageSeq) {
+          this.mediaError = String(e?.message || e || `Failed to render page ${page}`);
+        }
+      } finally {
+        if (loadSeq === this.loadSeq && pageSeq === this.pdfPageSeq) {
+          this.pdfPageLoading = false;
+          cx.notify();
+        }
+      }
+    });
+  }
+
+  setPdfFitMode(mode, cx) {
+    if (this.mediaMode !== "pdf") return;
+    this.pdfFitMode = mode;
+    if (mode !== "manual") this.pdfZoom = 1;
+    const nextDpi = this.desiredPdfDpi();
+    if (nextDpi !== this.pdfDpi) {
+      this.goToPdfPage(this.pdfPage, cx, { forceDpi: nextDpi });
+    } else {
+      cx.notify();
+    }
+  }
+
+  stepPdfZoom(delta, visualZoom, cx) {
+    if (this.mediaMode !== "pdf") return;
+    const base = this.pdfFitMode === "manual" ? this.pdfZoom : visualZoom || 1;
+    const next = Math.max(0.5, Math.min(2.5, Math.round((base + delta) * 100) / 100));
+    this.pdfFitMode = "manual";
+    this.pdfZoom = next;
+    const nextDpi = this.desiredPdfDpi();
+    if (nextDpi !== this.pdfDpi) {
+      this.goToPdfPage(this.pdfPage, cx, { forceDpi: nextDpi });
+    } else {
+      cx.notify();
+    }
+  }
+
+  buildPdfTextEditor() {
+    if (!this.pdfPagesText || this.pdfTextCode) return;
+    const pages = this.pdfPagesText;
+    const joined =
+      pages.length <= 1
+        ? pages[0] ?? ""
+        : pages.map((pg, idx) => `--- Page ${idx + 1} ---\n${pg}`).join("\n\n");
+    const value = joined.length > MAX_CHARS ? joined.slice(0, MAX_CHARS) + "\n… (PDF text truncated)" : joined;
+    this.pdfTextCode = EditorState.new({
+      language: "txt",
+      readonly: true,
+      value: value || "(No selectable text found in PDF)",
+      font_family: settings().font_family,
+      font_size: 13,
+    });
+  }
+
+  ensurePdfText(fullPath, loadSeq, cx, { buildEditor = false } = {}) {
+    if (this.pdfPagesText) {
+      if (buildEditor) this.buildPdfTextEditor();
+      if (this.pdfSearchQuery.trim()) this.recomputePdfMatches(cx, { jump: false });
+      return;
+    }
+    if (this.pdfTextLoading) return;
+    this.pdfTextLoading = true;
+    cx.notify();
+
+    cx.spawn(async (cx) => {
+      try {
+        const res = await loadPdfText(fullPath);
+        if (loadSeq !== this.loadSeq || this.mediaMode !== "pdf") return;
+        this.pdfPagesText = res.pages ?? [];
+        if (buildEditor || this.pdfTextMode) this.buildPdfTextEditor();
+        if (this.pdfSearchQuery.trim()) this.recomputePdfMatches(cx, { jump: true });
+      } catch (e) {
+        if (loadSeq === this.loadSeq) {
+          this.mediaError = String(e?.message || e || "Failed to extract PDF text");
+        }
+      } finally {
+        if (loadSeq === this.loadSeq) {
+          this.pdfTextLoading = false;
+          cx.notify();
+        }
+      }
+    });
+  }
+
+  recomputePdfMatches(cx, { jump = false } = {}) {
+    const q = (this.pdfSearchQuery || "").trim().toLowerCase();
+    if (!q || !this.pdfPagesText) {
+      this.pdfMatches = [];
+      this.pdfMatchIdx = 0;
+      return;
+    }
+    const matches = [];
+    for (let i = 0; i < this.pdfPagesText.length; i++) {
+      const text = (this.pdfPagesText[i] || "").toLowerCase();
+      if (!text.includes(q)) continue;
+      let count = 0;
+      let pos = 0;
+      while ((pos = text.indexOf(q, pos)) !== -1) {
+        count++;
+        pos += q.length;
+      }
+      matches.push({ page: i + 1, count });
+    }
+    this.pdfMatches = matches;
+    this.pdfMatchIdx = 0;
+    if (jump && matches.length > 0) {
+      this.goToPdfPage(matches[0].page, cx);
+    }
+  }
+
+  stepPdfMatch(delta, cx) {
+    if (!this.pdfMatches.length) return;
+    const n = this.pdfMatches.length;
+    this.pdfMatchIdx = (this.pdfMatchIdx + delta + n) % n;
+    this.goToPdfPage(this.pdfMatches[this.pdfMatchIdx].page, cx);
+  }
+
+  togglePdfSearch(cx) {
+    const slot = this.slot();
+    if (!slot || slot.on || this.mediaMode !== "pdf") return;
+    this.pdfSearchOpen = !this.pdfSearchOpen;
+    if (this.pdfSearchOpen) {
+      this.ensurePdfText(joinPath(slot.root, slot.path), this.loadSeq, cx);
+      this.pdfSearchInput.focus();
+    } else {
+      this.focusHandle.focus();
+    }
+    cx.notify();
+  }
+
+  copyPdfPageText(fullPath, cx) {
+    const seq = this.loadSeq;
+    const page = this.pdfPage;
+    const markCopied = () => {
+      this.pdfTextCopied = true;
+      const cseq = ++this.pdfCopySeq;
+      cx.notify();
+      cx.timer.after(1500, (cx) => {
+        if (this.pdfCopySeq === cseq) {
+          this.pdfTextCopied = false;
+          cx.notify();
+        }
+      });
+    };
+
+    if (this.pdfPagesText && this.pdfPagesText[page - 1] !== undefined) {
+      cx.write_to_clipboard(this.pdfPagesText[page - 1]);
+      markCopied();
+      return;
+    }
+
+    cx.spawn(async (cx) => {
+      try {
+        const res = await loadPdfText(fullPath, page);
+        if (seq !== this.loadSeq) return;
+        cx.write_to_clipboard(res.text || "");
+        this.pdfTextCopied = true;
+        const cseq = ++this.pdfCopySeq;
+        cx.notify();
+        cx.timer.after(1500, (cx) => {
+          if (this.pdfCopySeq === cseq) {
+            this.pdfTextCopied = false;
+            cx.notify();
+          }
+        });
+      } catch (e) {
+        if (seq === this.loadSeq) {
+          this.mediaError = String(e?.message || e || "Failed to copy page text");
+          cx.notify();
+        }
+      }
+    });
+  }
+
   async close() {
     this.watched = null;
+    await this.stopAudio({ wait: true });
     this.code?.release();
     this.code = null;
+    this.pdfTextCode?.release();
+    this.pdfTextCode = null;
+    this.openWithInput?.release();
+    this.openWithInput = null;
+    this.pdfSearchInput?.release();
+    this.pdfSearchInput = null;
+    this.audioSeekSlider?.release();
+    this.audioSeekSlider = null;
+    this.audioVolSlider?.release();
+    this.audioVolSlider = null;
+    this.videoSeekSlider?.release();
+    this.videoSeekSlider = null;
+    this.pdfPageSlider?.release();
+    this.pdfPageSlider = null;
   }
 
   diffRow({ kind, number, text }, t) {
@@ -420,11 +1565,15 @@ export default class FileView extends View {
       this.dirty = false;
       this.editable = false;
       this.saveError = null;
+      this.resetTransientStates();
       if (!checking()) this.load(slot, cx, { force: true });
     }
 
     const mode = this.effectiveMode(slot);
-    const isMd = Boolean(this.markdownText) && mode === "file";
+    const fullPath = joinPath(slot.root, slot.path);
+    const showingOpenWith = this.isShowingOpenWith();
+    const isMd = Boolean(this.markdownText) && mode === "file" && !showingOpenWith;
+    const isSvg = this.isSvgFile && mode === "file" && !showingOpenWith;
     const chip = (id, label, active, onClick) =>
       div()
         .id(id)
@@ -443,22 +1592,118 @@ export default class FileView extends View {
 
     return v_flex()
       .id(`file-view-${this.slotId}`)
+      .track_focus(this.focusHandle)
       .size_full()
       .min_h(0)
       .bg(t.background)
       .text_color(t.foreground)
       .text_size(13)
       .on_key_down((e, cx) => {
+        const k = e.key?.toLowerCase();
         if (
-          e.key?.toLowerCase() === "s" &&
+          k === "s" &&
           (e.modifiers?.control || e.modifiers?.platform) &&
           !e.modifiers?.alt &&
           !e.modifiers?.shift &&
           mode === "file" &&
-          this.editable
+          this.editable &&
+          !showingOpenWith
         ) {
           this.save(cx);
           cx.stop_propagation();
+          return;
+        }
+        if (showingOpenWith) {
+          const { flat } = visibleApps(this.openWithData, this.openWithQuery, this.openWithShowAll);
+          if (k === "down" || (k === "n" && e.modifiers?.control)) {
+            if (flat.length) this.openWithAt = (this.openWithAt + 1) % flat.length;
+            cx.stop_propagation();
+            cx.notify();
+            return;
+          }
+          if (k === "up" || (k === "p" && e.modifiers?.control)) {
+            if (flat.length) this.openWithAt = (this.openWithAt + flat.length - 1) % flat.length;
+            cx.stop_propagation();
+            cx.notify();
+            return;
+          }
+          if (k === "enter") {
+            this.launchHighlightedApp(cx);
+            cx.stop_propagation();
+            return;
+          }
+          if (k === "escape") {
+            if (this.openWithQuery) {
+              this.openWithQuery = "";
+              this.openWithAt = 0;
+              this.openWithInput.set_value("");
+              cx.stop_propagation();
+              cx.notify();
+            } else if (this.openWithManual && this.hasNativeView()) {
+              this.openWithManual = false;
+              cx.stop_propagation();
+              cx.notify();
+            }
+            return;
+          }
+        }
+        if (this.mediaMode === "audio" && !showingOpenWith) {
+          if (k === "space") {
+            this.toggleAudioPlay(cx);
+            cx.stop_propagation();
+            return;
+          }
+          if (k === "left" || k === "right") {
+            const dur = this.audioDuration();
+            const cur = this.audioStatus?.position ?? 0;
+            const next = k === "left" ? Math.max(0, cur - 5) : dur > 0 ? Math.min(dur, cur + 5) : cur + 5;
+            this.seekAudio(next, cx);
+            cx.stop_propagation();
+          }
+        }
+        if (this.mediaMode === "pdf" && !showingOpenWith) {
+          if (k === "f" && (e.modifiers?.control || e.modifiers?.platform) && !this.pdfTextMode) {
+            if (!this.pdfSearchOpen) this.togglePdfSearch(cx);
+            else this.pdfSearchInput.focus();
+            cx.stop_propagation();
+            return;
+          }
+          if (k === "escape" && this.pdfSearchOpen) {
+            this.togglePdfSearch(cx);
+            cx.stop_propagation();
+            return;
+          }
+          if (!this.pdfTextMode && !this.pdfSearchOpen) {
+            if (k === "left" || k === "pageup" || k === "k" || k === "p") {
+              this.goToPdfPage(this.pdfPage - 1, cx);
+              cx.stop_propagation();
+              return;
+            }
+            if (k === "right" || k === "pagedown" || k === "j" || k === "n" || k === "space") {
+              this.goToPdfPage(this.pdfPage + 1, cx);
+              cx.stop_propagation();
+              return;
+            }
+            if (k === "home") {
+              this.goToPdfPage(1, cx);
+              cx.stop_propagation();
+              return;
+            }
+            if (k === "end") {
+              this.goToPdfPage(this.mediaData?.pages || 1, cx);
+              cx.stop_propagation();
+              return;
+            }
+            if (k === "+" || k === "=") {
+              this.stepPdfZoom(0.25, null, cx);
+              cx.stop_propagation();
+              return;
+            }
+            if (k === "-") {
+              this.stepPdfZoom(-0.25, null, cx);
+              cx.stop_propagation();
+            }
+          }
         }
       })
       .child(
@@ -529,6 +1774,69 @@ export default class FileView extends View {
                 .border_color(t.border)
                 .child(chip("fv-md-code", "Code", !this.mdPreview, (_e, cx) => { this.mdPreview = false; cx.notify(); }))
                 .child(chip("fv-md-prev", "Preview", this.mdPreview, (_e, cx) => { this.mdPreview = true; cx.notify(); })),
+            ),
+          )
+          .when(isSvg, (el) =>
+            el.child(
+              h_flex()
+                .gap(2)
+                .p(2)
+                .rounded(6)
+                .bg(t.background)
+                .border(1)
+                .border_color(t.border)
+                .child(chip("fv-svg-code", "Code", !this.svgPreview, (_e, cx) => { this.svgPreview = false; cx.notify(); }))
+                .child(chip("fv-svg-prev", "Preview", this.svgPreview, (_e, cx) => { this.svgPreview = true; cx.notify(); })),
+            ),
+          )
+          .when(this.mediaMode === "pdf" && mode === "file" && !showingOpenWith, (el) =>
+            el.child(
+              h_flex()
+                .gap(2)
+                .p(2)
+                .rounded(6)
+                .bg(t.background)
+                .border(1)
+                .border_color(t.border)
+                .child(
+                  chip("fv-pdf-page", "Page", !this.pdfTextMode, (_e, cx) => {
+                    this.pdfTextMode = false;
+                    this.focusHandle.focus();
+                    cx.notify();
+                  }),
+                )
+                .child(
+                  chip("fv-pdf-text", "Text", this.pdfTextMode, (_e, cx) => {
+                    this.pdfTextMode = true;
+                    this.ensurePdfText(fullPath, this.loadSeq, cx, { buildEditor: true });
+                    cx.notify();
+                  }),
+                ),
+            ),
+          )
+          .when(!slot.on, (el) =>
+            el.child(
+              div()
+                .id("fv-open-with-btn")
+                .h(24)
+                .px(8)
+                .flex()
+                .items_center()
+                .rounded(6)
+                .cursor_pointer()
+                .text_size(11.5)
+                .bg(showingOpenWith ? t.selected : t.chrome)
+                .text_color(showingOpenWith ? t.foreground : t.muted)
+                .hover((s) => s.bg(t.hover).text_color(t.foreground))
+                .on_click((_e, cx) => {
+                  if (showingOpenWith && this.hasNativeView()) {
+                    this.openWithManual = false;
+                    cx.notify();
+                  } else {
+                    this.openExternalPicker(cx);
+                  }
+                })
+                .child("Open with"),
             ),
           )
           .when(slot.preview, (el) =>
@@ -626,24 +1934,45 @@ export default class FileView extends View {
             ),
         ),
       )
-      .when(mode === "file", (el) =>
+      .when(showingOpenWith, (el) => el.child(renderOpenWithScreen(this, slot, fullPath, t)))
+      .when(!showingOpenWith && (mode === "file") && this.mediaMode === "image", (el) =>
+        el.child(renderImageView(this, slot, fullPath, t)),
+      )
+      .when(!showingOpenWith && (mode === "file") && this.mediaMode === "audio", (el) =>
+        el.child(renderAudioView(this, slot, fullPath, t)),
+      )
+      .when(!showingOpenWith && (mode === "file") && this.mediaMode === "video", (el) =>
+        el.child(renderVideoView(this, slot, fullPath, t)),
+      )
+      .when(!showingOpenWith && (mode === "file") && this.mediaMode === "pdf", (el) =>
+        el.child(
+          this.pdfTextMode
+            ? this.pdfTextCode
+              ? Editor.new(this.pdfTextCode).flex_1().min_h(0)
+              : div().p(16).text_color(t.dim).child(this.pdfTextLoading ? "Extracting PDF text…" : "No text available")
+            : renderPdfView(this, slot, fullPath, t),
+        ),
+      )
+      .when(!showingOpenWith && (mode === "file") && !this.mediaMode, (el) =>
         el.child(
           this.error
             ? div().p(16).text_color(t.dim).child(this.error)
-            : this.mdPreview && this.markdownText
-              ? v_flex()
-                  .id("fv-markdown-scroll")
-                  .flex_1()
-                  .min_h(0)
-                  .overflow_y_scrollbar()
-                  .p(20)
-                  .child(TextView.markdown(`fv-md-${this.slotId}`, this.markdownText))
-              : this.code
-                ? Editor.new(this.code).flex_1().min_h(0)
-                : div().p(16).text_color(t.dim).child(this.loading ? "Loading file…" : ""),
+            : isSvg && this.svgPreview
+              ? renderImageView(this, slot, fullPath, t)
+              : this.mdPreview && this.markdownText
+                ? v_flex()
+                    .id("fv-markdown-scroll")
+                    .flex_1()
+                    .min_h(0)
+                    .overflow_y_scrollbar()
+                    .p(20)
+                    .child(TextView.markdown(`fv-md-${this.slotId}`, this.markdownText))
+                : this.code
+                  ? Editor.new(this.code).flex_1().min_h(0)
+                  : div().p(16).text_color(t.dim).child(this.loading ? "Loading file…" : ""),
         ),
       )
-      .when(mode === "diff", (el) =>
+      .when(!showingOpenWith && mode === "diff", (el) =>
         el.child(
           this.error && this.rows.length === 0
             ? div().p(16).text_color(t.dim).child(this.error)
