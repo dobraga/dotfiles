@@ -762,6 +762,11 @@ export default class Spaces extends View {
     const doneCount = f.folded
       ? inside.reduce((sum, r) => sum + (this.done?.get(r.w.id) ?? (r.w.status === "done" ? 1 : 0)), 0)
       : 0;
+    const projectRepos = new Map();
+    for (const r of inside) {
+      if (r.g && !r.tree && !projectRepos.has(r.g.repo)) projectRepos.set(r.g.repo, r.g);
+    }
+    const projectGit = projectRepos.size === 1 ? [...projectRepos.values()][0] : null;
     return head
       .child(tile)
       .child(div().flex_1().min_w(0).truncate().font_medium().child(f.name))
@@ -769,6 +774,8 @@ export default class Spaces extends View {
       .when(f.folded && blockedCount > 0, (el) => el.child(blockedBadge(t, blockedCount)))
       .when(f.folded && doneCount > 0, (el) => el.child(doneBadge(t, doneCount)))
       .when(f.folded && blockedCount === 0 && doneCount === 0 && status === "working", (el) => el.child(svg("mods/workspace-chrome/spinner.svg").size(11).flex_none().text_color(t.working).spin(900)))
+      .when(Boolean(projectGit && projectGit.ahead > 0), (el) => el.child(div().flex_none().text_size(11.5).text_color(t.ansi2).child(`\u2191${projectGit.ahead}`)))
+      .when(Boolean(projectGit && projectGit.behind > 0), (el) => el.child(div().flex_none().text_size(11.5).text_color(t.ansi1).child(`\u2193${projectGit.behind}`)))
       .child(div().id(`folder-add-${f.id}`).flex_none().px(4).rounded(4).text_color(t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground))
         .on_click((_e, cx) => { cx.stop_propagation(); newSpaceIn(machine, f.id); }).child("+"))
       .child(div().flex_none().text_size(11.5).text_color(t.dim).child(String(inside.length)))
@@ -954,7 +961,7 @@ export default class Spaces extends View {
   // Only what's unusual, after the name: "herdr \u00b7 spike \u21912 \u21931". The repo or
   // branch goes when the name already says it (a worktree is named after its branch),
   // and master/main go: nearly every space is on one.
-  gitTail(g, tree, w, t, folderName = "") {
+  gitTail(g, tree, w, t, folderName = "", showAheadBehind = true) {
     const raw = g?.branch ?? "detached";
     const same = (a) =>
       a.toLowerCase() === w.name.toLowerCase() ||
@@ -972,8 +979,8 @@ export default class Spaces extends View {
       .text_size(11.5)
       .text_color(t.dim)
       .when(Boolean(where), (el) => el.child(div().min_w(0).truncate().child(where)))
-      .when(Boolean(g && g.ahead > 0), (el) => el.child(div().flex_none().text_color(t.ansi2).child(`\u2191${g.ahead}`)))
-      .when(Boolean(g && g.behind > 0), (el) => el.child(div().flex_none().text_color(t.ansi1).child(`\u2193${g.behind}`)));
+      .when(Boolean(showAheadBehind && g && g.ahead > 0), (el) => el.child(div().flex_none().text_color(t.ansi2).child(`\u2191${g.ahead}`)))
+      .when(Boolean(showAheadBehind && g && g.behind > 0), (el) => el.child(div().flex_none().text_color(t.ansi1).child(`\u2193${g.behind}`)));
   }
 
   openTabsStrip(w, t) {
@@ -1086,7 +1093,7 @@ export default class Spaces extends View {
           .when(Boolean(tree), el => el.pl(22).child(svg("mods/workspace-chrome/branch.svg").size(13).text_color(t.dim)))
           .when(showLeftName, el => el.child(div().flex_shrink(0).max_w(130).truncate().text_color(t.foreground).child(w.name)))
           .when(Boolean(tabs.length), (el) => el.child(this.openTabsStrip(w, t)))
-          .child(g || tree || w.named ? this.gitTail(g, tree, w, t, folderName) : div().flex_1())
+          .child(g || tree || w.named ? this.gitTail(g, tree, w, t, folderName, !folder || Boolean(tree)) : div().flex_1())
           .when(blockedCount > 0, (el) => el.child(blockedBadge(t, blockedCount)))
           .when(doneCount > 0, (el) => el.child(doneBadge(t, doneCount)))
           .when(blockedCount === 0 && doneCount === 0 && w.status === "working", (el) => el.child(svg("mods/workspace-chrome/spinner.svg").size(11).flex_none().text_color(t.working).spin(900))),
