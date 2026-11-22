@@ -1,0 +1,18 @@
+{
+  "agent.terminal.autoApprove": true,
+  "agentMode": "accept-edits",
+  "allowNonWorkspaceAccess": true,
+  "altScreenMode": "always",
+  "colorScheme": "dark",
+  "model": "Orchestrator (Neon)",
+  "notifications": true,
+  "pickerGrouping": "grouped",
+  "runningLightSpeed": "fast",
+  "statusLine": {
+    "type": "",
+    "command": "~/.local/bin/agy-statusline.py",
+    "enabled": true
+  },
+  "toolPermission": "always-proceed",
+  "verbosity": "low"
+}

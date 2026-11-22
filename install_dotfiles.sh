@@ -148,6 +148,42 @@ link_path "${GEMINI_DIR}/statusline.py" "${GEMINI_HOME}/statusline.py"
 link_path "${GEMINI_DIR}/statusline.py" "${HOME}/.local/bin/agy-statusline.py"
 echo "  - Configured separate statusline scripts for Claude Code and Antigravity"
 
+# Antigravity CLI defaults (merge tracked defaults without clobbering local trustedWorkspaces/permissions)
+AGY_CLI_DIR="${GEMINI_HOME}/antigravity-cli"
+AGY_CLI_SETTINGS="${AGY_CLI_DIR}/settings.json"
+if [ -f "${GEMINI_DIR}/settings.json" ] && command -v python3 &>/dev/null; then
+  mkdir -p "${AGY_CLI_DIR}"
+  python3 - "${GEMINI_DIR}/settings.json" "${AGY_CLI_SETTINGS}" "${HOME}" <<'PY'
+import json
+import os
+import sys
+
+src_path, dst_path, home_dir = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(src_path, "r", encoding="utf-8") as f:
+    defaults = json.load(f)
+
+if isinstance(defaults.get("statusLine"), dict):
+    cmd = defaults["statusLine"].get("command")
+    if isinstance(cmd, str) and cmd.startswith("~/"):
+        defaults["statusLine"]["command"] = os.path.join(home_dir, cmd[2:])
+
+existing = {}
+if os.path.exists(dst_path):
+    with open(dst_path, "r", encoding="utf-8") as f:
+        existing = json.load(f)
+
+merged = {**existing, **defaults}
+tmp_path = f"{dst_path}.tmp"
+with open(tmp_path, "w", encoding="utf-8") as f:
+    json.dump(merged, f, indent=2)
+    f.write("\n")
+os.chmod(tmp_path, 0o600)
+os.replace(tmp_path, dst_path)
+PY
+  chmod 600 "${AGY_CLI_SETTINGS}"
+  echo "  - Merged Antigravity CLI defaults -> ${AGY_CLI_SETTINGS}"
+fi
+
 # Revu (local browser review CLI + Claude/AGY hooks + MCP)
 if [ -f "${DOTFILES_DIR}/tools/revu/bin/revu" ]; then
   chmod +x "${DOTFILES_DIR}/tools/revu/bin/revu"
