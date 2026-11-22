@@ -1,6 +1,32 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, ScrollHandle } from "gpui-base";
-import { spaces, panes, run, openOverlay, theme, window, shared, setShared, layout, settings, nextCommand, checking } from "herdr";
+import { spaces, agents, panes, run, openOverlay, theme, window, shared, setShared, layout, settings, nextCommand, checking } from "herdr";
+
+function tabStatusBadge(t, kind, count) {
+  const isBlocked = kind === "blocked";
+  const color = isBlocked ? t.blocked : t.done;
+  const mark = isBlocked ? "!" : "✓";
+  const text = count > 1 ? `${count}${mark}` : mark;
+  return div()
+    .h(15)
+    .min_w(15)
+    .px(count > 1 ? 4 : 0)
+    .flex_none()
+    .rounded(4)
+    .bg(color + "26")
+    .text_size(10)
+    .font_bold()
+    .text_color(color)
+    .flex()
+    .items_center()
+    .justify_center()
+    .tooltip(
+      isBlocked
+        ? (count > 1 ? `${count} agents need you` : "Needs you")
+        : (count > 1 ? `${count} agents finished` : "Finished"),
+    )
+    .child(text);
+}
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -178,9 +204,17 @@ export default class TabsFolders extends View {
     const button = (id, label, action) => div().id(id).size(26).flex_none().flex().items_center().justify_center().rounded(6).text_color(t.dim).hover(s => s.bg(t.hover).text_color(t.foreground))
       .on_mouse_down("left", stop).on_click(action).child(label);
     const fileSlots = Object.entries(shared("file-view.slots") ?? {});
+    const blockedByTab = new Map();
+    const doneByTab = new Map();
+    for (const a of agents()) {
+      if (a.status === "blocked") blockedByTab.set(a.tab, (blockedByTab.get(a.tab) ?? 0) + 1);
+      else if (a.status === "done") doneByTab.set(a.tab, (doneByTab.get(a.tab) ?? 0) + 1);
+    }
     const item = (entry, i) => {
       const { space: sp, tab: c, indexInSpace } = entry;
       const isActive = sp.active && c.active;
+      const blockedCount = blockedByTab.get(c.id) ?? (c.status === "blocked" ? 1 : 0);
+      const doneCount = doneByTab.get(c.id) ?? (c.status === "done" ? 1 : 0);
       const lead = ps.find(p => p.tab === c.id && p.program?.agent) ?? ps.find(p => p.tab === c.id);
       const program = lead?.program;
       const fileEntry = lead?.mod === "file-view" ? fileSlots.find(([, s]) => s?.tabId === c.id) : null;
@@ -189,10 +223,17 @@ export default class TabsFolders extends View {
       const isPreview = Boolean(isFileTab && fileSlot?.preview);
       const baseName = label(c, lead);
       const name = groupSpaces.length > 1 && sp.named && !c.named && sp.tabs.length === 1 ? sp.name : baseName;
+      const borderColor = isActive
+        ? t.border
+        : blockedCount > 0
+          ? t.blocked + "73"
+          : doneCount > 0
+            ? t.done + "73"
+            : t.chrome;
       return h_flex().id(`tab-${c.id}`).h(29).px(10).gap(7).rounded(7).items_center().flex_none().text_size(12.8)
         // A rename or status dot on this or an earlier tab can push the active one out.
         .when(i <= active, el => el.on_size_change((_size, cx) => { this.scroll.scroll_to_item(active); cx.notify(); }))
-        .border(1).border_color(isActive ? t.border : t.chrome).bg(isActive ? t.raised : t.chrome).text_color(isPreview ? (isActive ? t.muted : t.dim) : (isActive ? t.foreground : t.muted))
+        .border(1).border_color(borderColor).bg(isActive ? t.raised : t.chrome).text_color(isPreview ? (isActive ? t.muted : t.dim) : (isActive ? t.foreground : t.muted))
         .hover(s => s.bg(t.hover))
         .on_mouse_down("left", (e, cx) => {
           cx.stop_propagation();
@@ -223,8 +264,9 @@ export default class TabsFolders extends View {
         .when(!isFileTab && Boolean(program?.icon), el => el.child(program.tint ? svg(program.icon).size(14).text_color(t.muted) : image(program.icon).size(14)))
         .child(div().max_w(170).truncate().child(c.zoomed ? `${name} Z` : name))
         .when(isPreview, el => el.child(div().px(4).rounded(3).bg(t.hover).text_size(9.5).text_color(t.dim).child("preview")))
-        .when(c.status === "working", el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
-        .when(c.status === "blocked" || c.status === "done", el => el.child(div().size(6).rounded(3).bg(t[c.status])))
+        .when(blockedCount > 0, el => el.child(tabStatusBadge(t, "blocked", blockedCount)))
+        .when(doneCount > 0, el => el.child(tabStatusBadge(t, "done", doneCount)))
+        .when(blockedCount === 0 && doneCount === 0 && c.status === "working", el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
         .when(isActive, el => el.child(div().id(`close-${c.id}`).text_color(t.dim).on_mouse_down("left", stop).on_click((_e, cx) => { cx.stop_propagation(); run("tab.close", { id: c.id }); }).child(svg("mods/pane/close.svg").size(12))));
     };
     const root = layout(), sidebar = find(root, "sidebar"), w = window();

@@ -13,7 +13,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { spaces, machines, panes, run, openOverlay, closeOverlay, props, exec, hc, theme, shared, setShared, watchFolder, window, layout, pickFolder, home, nextCommand } from "herdr";
+import { spaces, agents, machines, panes, run, openOverlay, closeOverlay, props, exec, hc, theme, shared, setShared, watchFolder, window, layout, pickFolder, home, nextCommand } from "herdr";
 
 // A machine's folders live in a file in its home, so every screen showing its
 // spaces shows the same folders: { list: [{ id, name, folded }], of: { spaceId:
@@ -185,6 +185,44 @@ export function tone(t, status) {
   return t[status] ?? t.unknown;
 }
 
+function blockedBadge(t, count) {
+  const text = count > 1 ? `${count}!` : "!";
+  return div()
+    .h(16)
+    .min_w(16)
+    .px(count > 1 ? 4 : 0)
+    .flex_none()
+    .rounded(4)
+    .bg(t.blocked + "26")
+    .text_size(10.5)
+    .font_bold()
+    .text_color(t.blocked)
+    .flex()
+    .items_center()
+    .justify_center()
+    .tooltip(count > 1 ? `${count} agents need you` : "Needs you")
+    .child(text);
+}
+
+function doneBadge(t, count) {
+  const text = count > 1 ? `${count}✓` : "✓";
+  return div()
+    .h(16)
+    .min_w(16)
+    .px(count > 1 ? 4 : 0)
+    .flex_none()
+    .rounded(4)
+    .bg(t.done + "26")
+    .text_size(10.5)
+    .font_bold()
+    .text_color(t.done)
+    .flex()
+    .items_center()
+    .justify_center()
+    .tooltip(count > 1 ? `${count} agents finished` : "Finished")
+    .child(text);
+}
+
 const NEW_FOLDER = "New folder";
 
 // A path's last folder name: "~/Projects/herdr/" gives "herdr"; "~" or "/" give "".
@@ -272,6 +310,8 @@ export default class Spaces extends View {
     // "space-folders.next" and ".prev" in keys.json: the next space down the
     // list as it shows, where Herdr's own space.next goes by its own order.
     this.seen = [];
+    this.blocked = new Map();
+    this.done = new Map();
     cx.spawn(async (cx) => {
       for (;;) {
         const c = String(await nextCommand()).split(".").pop();
@@ -716,12 +756,19 @@ export default class Spaces extends View {
     const tile = h_flex().size(18).flex_none().rounded(5).items_center().justify_center().bg(f.color ? (MARK[f.color] ?? f.color) : t.dim)
       .child(svg("mods/workspace-chrome/folder.svg").size(13).text_color("#ffffff"));
     if (collapsed) return head.justify_center().child(tile);
+    const blockedCount = f.folded
+      ? inside.reduce((sum, r) => sum + (this.blocked?.get(r.w.id) ?? (r.w.status === "blocked" ? 1 : 0)), 0)
+      : 0;
+    const doneCount = f.folded
+      ? inside.reduce((sum, r) => sum + (this.done?.get(r.w.id) ?? (r.w.status === "done" ? 1 : 0)), 0)
+      : 0;
     return head
       .child(tile)
       .child(div().flex_1().min_w(0).truncate().font_medium().child(f.name))
-      // Folded, it still says when something in it is running or needs you.
-      .when(f.folded && status === "working", (el) => el.child(svg("mods/workspace-chrome/spinner.svg").size(11).flex_none().text_color(t.working).spin(900)))
-      .when(f.folded && Boolean(status) && status !== "working", (el) => el.child(div().flex_none().text_color(tone(t, status)).child(glyph(status))))
+      // Folded, it still says when something in it is running, finished, or needs you.
+      .when(f.folded && blockedCount > 0, (el) => el.child(blockedBadge(t, blockedCount)))
+      .when(f.folded && doneCount > 0, (el) => el.child(doneBadge(t, doneCount)))
+      .when(f.folded && blockedCount === 0 && doneCount === 0 && status === "working", (el) => el.child(svg("mods/workspace-chrome/spinner.svg").size(11).flex_none().text_color(t.working).spin(900)))
       .child(div().id(`folder-add-${f.id}`).flex_none().px(4).rounded(4).text_color(t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground))
         .on_click((_e, cx) => { cx.stop_propagation(); newSpaceIn(machine, f.id); }).child("+"))
       .child(div().flex_none().text_size(11.5).text_color(t.dim).child(String(inside.length)))
@@ -931,6 +978,8 @@ export default class Spaces extends View {
     const colors = shared("space.colors") ?? {};
     const color = colors[w.id] ?? "ansi6";
     const fill = color.startsWith("#") ? color : (MARK[color] ?? t[color]);
+    const blockedCount = this.blocked?.get(w.id) ?? (w.status === "blocked" ? 1 : 0);
+    const doneCount = this.done?.get(w.id) ?? (w.status === "done" ? 1 : 0);
     return v_flex()
       .relative()
       .id(`space-${w.id}`)
@@ -981,7 +1030,10 @@ export default class Spaces extends View {
           .when(Boolean(tree), el => el.pl(22).child(svg("mods/workspace-chrome/branch.svg").size(13).text_color(t.dim)))
           .when(!tree, el => el.child(h_flex().size(18).flex_none().rounded(5).bg(fill).items_center().justify_center().text_size(10.5).font_bold().text_color("#ffffff").child([...w.name][0]?.toUpperCase() ?? "?")))
           .child(div().flex_shrink(0).max_w(150).truncate().text_color(t.foreground).child(w.name))
-          .child(g ? this.gitTail(g, tree, w.name, t) : div().flex_1()),
+          .child(g ? this.gitTail(g, tree, w.name, t) : div().flex_1())
+          .when(blockedCount > 0, (el) => el.child(blockedBadge(t, blockedCount)))
+          .when(doneCount > 0, (el) => el.child(doneBadge(t, doneCount)))
+          .when(blockedCount === 0 && doneCount === 0 && w.status === "working", (el) => el.child(svg("mods/workspace-chrome/spinner.svg").size(11).flex_none().text_color(t.working).spin(900))),
       );
   }
 
@@ -1024,6 +1076,14 @@ export default class Spaces extends View {
     const palette = ["ansi6", "ansi3", "ansi4", "ansi5", "ansi2", "ansi1"];
     const sp = spaces();
     const ps = panes();
+    const blocked = new Map();
+    const done = new Map();
+    for (const a of agents()) {
+      if (a.status === "blocked") blocked.set(a.space, (blocked.get(a.space) ?? 0) + 1);
+      else if (a.status === "done") done.set(a.space, (done.get(a.space) ?? 0) + 1);
+    }
+    this.blocked = blocked;
+    this.done = done;
     const ids = new Set(sp.map(p => p.id));
     const kept = Object.fromEntries(Object.entries(shared("space.colors") ?? {}).filter(([id]) => ids.has(id)));
     let changed = Object.keys(kept).length !== Object.keys(shared("space.colors") ?? {}).length;

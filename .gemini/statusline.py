@@ -328,6 +328,30 @@ def main():
     in_tok = format_tokens(ctx.get("total_input_tokens", 0))
     win_tok = format_tokens(ctx.get("context_window_size", 0))
 
+    term_id = os.path.basename(os.environ.get("HC_TERMINAL_ID", "").strip())
+    if term_id:
+        try:
+            herdr_cache_dir = os.path.expanduser("~/.cache/herdr-statusline")
+            os.makedirs(herdr_cache_dir, exist_ok=True)
+            herdr_cache_path = os.path.join(herdr_cache_dir, f"{term_id}.json")
+            herdr_tmp_path = f"{herdr_cache_path}.tmp"
+            with open(herdr_tmp_path, "w") as f:
+                json.dump(
+                    {
+                        "terminal": term_id,
+                        "agent": "agy",
+                        "model": model_name,
+                        "ctx_pct": ctx_pct,
+                        "ctx_tokens": ctx.get("total_input_tokens", 0) or 0,
+                        "ctx_size": ctx.get("context_window_size", 0) or 0,
+                        "updated_at": time.time(),
+                    },
+                    f,
+                )
+            os.replace(herdr_tmp_path, herdr_cache_path)
+        except Exception:
+            pass
+
     # Working dir and git branch
     cwd = payload.get("cwd", "")
     cwd_name = os.path.basename(cwd) if cwd else ""
@@ -358,22 +382,23 @@ def main():
 
     line1 = " │ ".join(l1_parts)
 
-    # Line 2: Context + Quota
-    ctx_str = f"C {context_bar(ctx_pct)} {ctx_pct}% ({in_tok}/{win_tok})"
-
-    quota_info = extract_quota(payload, model_name)
-    if quota_info:
-        pct_5h, reset_5h, pct_w, reset_w = quota_info
-        quota_str = (
-            f"U5 {quota_bar(pct_5h)} {pct_5h}% {reset_5h}".strip()
-            + " │ "
-            + f"W {quota_bar(pct_w)} {pct_w}% {reset_w}".strip()
-        )
-        line2 = f"{ctx_str} │ {quota_str}"
-    else:
-        line2 = ctx_str
-
-    print(f"{line1}\n{line2}")
+    # Line 2 (Context + 5h/Weekly Quota) moved to Herdr status bar (herdr-statusline cache above keeps feeding ctx_pct)
+    # ctx_str = f"C {context_bar(ctx_pct)} {ctx_pct}% ({in_tok}/{win_tok})"
+    #
+    # quota_info = extract_quota(payload, model_name)
+    # if quota_info:
+    #     pct_5h, reset_5h, pct_w, reset_w = quota_info
+    #     quota_str = (
+    #         f"U5 {quota_bar(pct_5h)} {pct_5h}% {reset_5h}".strip()
+    #         + " │ "
+    #         + f"W {quota_bar(pct_w)} {pct_w}% {reset_w}".strip()
+    #     )
+    #     line2 = f"{ctx_str} │ {quota_str}"
+    # else:
+    #     line2 = ctx_str
+    #
+    # print(f"{line1}\n{line2}")
+    print(line1)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,13 @@
 // Git changes sidebar: lists changed files, commits, and opens diffs in main tabs (VS Code preview/pinned).
-import { View, div } from "gpui-kit";
+import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar } from "gpui-base";
-import { spaces, panes, focused, exec, watchFolder, theme, run, shared, setShared } from "herdr";
+import { spaces, panes, focused, exec, watchFolder, theme, run, shared, setShared, props, openOverlay, closeOverlay, notify } from "herdr";
+
+function joinPath(root, rel) {
+  if (!root) return rel;
+  const sep = root.includes("\\") && !root.includes("/") ? "\\" : "/";
+  return `${root.replace(/[\\/]+$/, "")}${sep}${rel}`;
+}
 
 function location() {
   const space = spaces().find((s) => s.active), f = focused();
@@ -85,8 +91,18 @@ function activeOpenDiff(spaceId, root, on) {
 
 export default class ChangesTabs extends View {
   init(_props, cx) {
+    const p = props() ?? {};
+    if (p.contextMenu) {
+      this.contextMenu = { ...p.contextMenu, overlay: p.overlay };
+      return;
+    }
     this.files = [];
     this.message = "";
+    this.branch = null;
+    this.ahead = 0;
+    this.behind = 0;
+    this.hasUpstream = false;
+    this.syncAction = null;
     this.handle = cx.focus_handle();
     this.input = InputState.new({ placeholder: "Commit message" });
     this.input.on("change", (_e, cx) => {
@@ -122,6 +138,10 @@ export default class ChangesTabs extends View {
       this.spaceId = space;
       this.root = null;
       this.files = [];
+      this.branch = null;
+      this.ahead = 0;
+      this.behind = 0;
+      this.hasUpstream = false;
       this.message = "";
       this.input.set_value("");
       this.error = null;
@@ -140,6 +160,18 @@ export default class ChangesTabs extends View {
         const status = await git(["status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all"]);
         if (status.code !== 0) throw new Error(status.stderr);
         const head = await git(["rev-parse", "--verify", "HEAD"]);
+        const branchRes = await git(["rev-parse", "--abbrev-ref", "HEAD"]);
+        const branch = branchRes.code === 0 ? branchRes.stdout.trim() : null;
+        let ahead = 0, behind = 0, hasUpstream = false;
+        if (head.code === 0) {
+          const abRes = await git(["rev-list", "--left-right", "--count", "@{u}...HEAD"]);
+          if (abRes.code === 0) {
+            const [b, a] = abRes.stdout.trim().split(/\s+/);
+            behind = Number(b) || 0;
+            ahead = Number(a) || 0;
+            hasUpstream = true;
+          }
+        }
         const stats = {};
         const results = head.code === 0
           ? [await git(["diff", "HEAD", "--numstat", "-z", "--no-renames"])]
@@ -166,6 +198,10 @@ export default class ChangesTabs extends View {
         this.root = root;
         this.on = on;
         this.files = files;
+        this.branch = branch;
+        this.ahead = ahead;
+        this.behind = behind;
+        this.hasUpstream = hasUpstream;
         this.limited = entries.length > 1000;
         this.error = null;
         this.watch(root, cx);
@@ -188,10 +224,49 @@ export default class ChangesTabs extends View {
     });
   }
 
+  syncGit(action, cx) {
+    if (!this.root || this.busy || this.loading || this.context !== key()) return;
+    const root = this.root, on = this.on, context = this.context, branch = this.branch;
+    this.busy = true;
+    this.syncAction = action;
+    this.note = null;
+    const args =
+      action === "fetch"
+        ? ["fetch", "--prune"]
+        : action === "pull"
+          ? ["pull"]
+          : !this.hasUpstream && branch && branch !== "HEAD"
+            ? ["push", "-u", "origin", branch]
+            : ["push"];
+    cx.spawn(async (cx) => {
+      try {
+        const r = await exec("git", args, { cwd: root, on, timeout: 120000 });
+        if (r.code !== 0) throw new Error((r.stderr || r.stdout || "").trim() || `git ${action} failed`);
+        if (action !== "fetch") {
+          notify({
+            title: action === "pull" ? "Git pull complete" : "Git push complete",
+            body: branch || undefined,
+            level: "success",
+            timeout: 3000,
+          });
+        }
+      } catch (e) {
+        if (key() === context) this.note = `${action[0].toUpperCase() + action.slice(1)} failed: ${e}`;
+      } finally {
+        this.busy = false;
+        this.syncAction = null;
+        this.refresh(cx);
+        cx.notify();
+      }
+    });
+    cx.notify();
+  }
+
   commit(cx) {
     if (!this.message.trim() || !this.root || this.busy || this.loading || this.context !== key()) return;
     const root = this.root, on = this.on, context = this.context, message = this.message.trim();
     this.busy = true;
+    this.syncAction = "commit";
     this.note = null;
     cx.spawn(async (cx) => {
       try {
@@ -201,14 +276,42 @@ export default class ChangesTabs extends View {
         }
         if (key() === context) { this.message = ""; this.input.set_value(""); }
       } catch (e) { if (key() === context) this.note = `Commit failed: ${e}`; }
-      finally { this.busy = false; this.refresh(cx); cx.notify(); }
+      finally { this.busy = false; this.syncAction = null; this.refresh(cx); cx.notify(); }
     });
     cx.notify();
   }
 
   render(cx) {
-    if (key() !== this.context) this.refresh(cx);
     const t = theme();
+    if (this.contextMenu) {
+      const { path, fullPath, overlay } = this.contextMenu;
+      const item = (id, label, value) =>
+        div()
+          .id(id)
+          .h(30)
+          .px(10)
+          .flex()
+          .items_center()
+          .rounded(6)
+          .cursor_pointer()
+          .hover((s) => s.bg(t.hover))
+          .on_click((_e, cx) => {
+            cx.write_to_clipboard(value);
+            closeOverlay(overlay);
+          })
+          .child(label);
+      return v_flex()
+        .id("changes-context-menu")
+        .size_full()
+        .p(6)
+        .gap(2)
+        .bg(t.popover)
+        .text_color(t.foreground)
+        .text_size(12.5)
+        .child(item("changes-ctx-rel", "Copy relative path", path))
+        .child(item("changes-ctx-abs", "Copy full path", fullPath));
+    }
+    if (key() !== this.context) this.refresh(cx);
     const add = this.files.reduce((n, f) => n + f.add, 0);
     const del = this.files.reduce((n, f) => n + f.del, 0);
     const enabled = Boolean(this.message.trim() && this.root && !this.busy && !this.loading);
@@ -244,6 +347,40 @@ export default class ChangesTabs extends View {
           .child(div().text_size(11).text_color(t.ansi2).child(`+${add}`))
           .child(div().text_size(11).text_color(t.ansi1).child(`−${del}`)),
       )
+      .when(Boolean(this.root), (el) => {
+        const canSync = !this.busy && !this.loading;
+        const syncBtn = (id, label, highlight, action) =>
+          div()
+            .id(id)
+            .h(22)
+            .px(8)
+            .flex()
+            .items_center()
+            .rounded(5)
+            .text_size(11)
+            .border_1()
+            .border_color(highlight ? t.accent : t.border)
+            .bg(highlight ? t.selected : t.raised)
+            .text_color(!canSync ? t.dim : highlight ? t.foreground : t.muted)
+            .when(canSync, (b) => b.cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)))
+            .on_click((_e, cx) => this.syncGit(action, cx))
+            .child(label);
+        return el.child(
+          h_flex()
+            .h(34)
+            .flex_none()
+            .px(12)
+            .gap(6)
+            .items_center()
+            .border_b(1)
+            .border_color(t.border)
+            .child(svg("mods/workspace-chrome/branch.svg").size(12).flex_none().text_color(t.dim))
+            .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.muted).child(this.branch || "HEAD"))
+            .child(syncBtn("git-fetch", this.syncAction === "fetch" ? "Fetching…" : "Fetch", false, "fetch"))
+            .child(syncBtn("git-pull", this.syncAction === "pull" ? "Pulling…" : this.behind > 0 ? `↓${this.behind} Pull` : "Pull", this.behind > 0, "pull"))
+            .child(syncBtn("git-push", this.syncAction === "push" ? "Pushing…" : this.ahead > 0 ? `↑${this.ahead} Push` : "Push", this.ahead > 0 || !this.hasUpstream, "push")),
+        );
+      })
       .child(
         div()
           .flex_1()
@@ -271,6 +408,16 @@ export default class ChangesTabs extends View {
                     .when(activePath === f.path, (e) => e.bg(t.selected))
                     .hover((s) => s.bg(t.hover))
                     .on_click((e) => this.pick(f.path, e.click_count >= 2))
+                    .on_mouse_down("right", (_e, cx) => {
+                      cx.stop_propagation();
+                      openOverlay({
+                        mod: "changes-tabs",
+                        kind: "popup",
+                        width: 190,
+                        height: 76,
+                        props: { contextMenu: { path: f.path, fullPath: joinPath(this.root, f.path) } },
+                      });
+                    })
                     .child(div().w(14).text_size(11).text_color(f.status === "A" ? t.ansi2 : f.status === "D" ? t.ansi1 : f.status === "U" ? t.ansi1 : t.blocked).child(f.status))
                     .child(h_flex().flex_1().min_w(0).child(div().text_color(t.dim).truncate().child(parts.length ? parts.join("/") + "/" : "")).child(div().max_w(260).min_w(0).truncate().child(name)))
                     .when(f.add > 0, (e) => e.child(div().text_size(11).text_color(t.ansi2).child(`+${f.add}`)))
@@ -321,7 +468,7 @@ export default class ChangesTabs extends View {
               .text_size(12)
               .when(enabled, (e) => e.cursor_pointer())
               .on_click((_e, cx) => this.commit(cx))
-              .child(this.busy ? "Committing…" : "Commit"),
+              .child(this.syncAction === "commit" ? "Committing…" : "Commit"),
           ),
       );
   }

@@ -1,7 +1,7 @@
 // Quick Open (Ctrl+P): fuzzy-search workspace files and open them in a preview/pinned main tab.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { spaces, panes, focused, exec, run, theme, settings, props, closeOverlay, shared, setShared, window, checking } from "herdr";
+import { spaces, panes, focused, exec, run, theme, settings, props, closeOverlay, shared, setShared, window, home, checking } from "herdr";
 
 const MAX_FILES = 10000;
 const MAX_SHOWN = 80;
@@ -71,36 +71,130 @@ function openFileTab({ spaceId, kind, path, root, on, name, pin }) {
   run("tab.new", { name, space: spaceId, mod: "file-view", props: { slotId, ...entry, beforeTabs: [...spaceTabIds] } });
 }
 
-function fuzzyScore(query, path, name) {
-  if (!query) return 1;
-  const q = query.toLowerCase().trim();
-  if (!q) return 1;
-  const tokens = q.split(/\s+/).filter(Boolean);
-  const lp = path.toLowerCase(), ln = name.toLowerCase();
-  let total = 0;
+function parseTokens(q) {
+  return q
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((raw) => {
+      let s = raw;
+      let neg = false;
+      let exact = false;
+      let prefix = false;
+      let suffix = false;
+      if (s.startsWith("!") && s.length > 1) { neg = true; s = s.slice(1); }
+      if (s.startsWith("'") && s.length > 1) { exact = true; s = s.slice(1); }
+      if (s.startsWith("^") && s.length > 1) { prefix = true; s = s.slice(1); }
+      if (s.endsWith("$") && s.length > 1) { suffix = true; s = s.slice(0, -1); }
+      return { neg, exact, prefix, suffix, text: s };
+    })
+    .filter((t) => t.text.length > 0);
+}
 
-  for (const tok of tokens) {
+function fuzzyScore(tokens, lp, ln) {
+  let total = 0;
+  const lpLen = lp.length;
+  const lnLen = ln.length;
+
+  for (let t = 0; t < tokens.length; t++) {
+    const { neg, exact, prefix, suffix, text: tok } = tokens[t];
+    const tokLen = tok.length;
+
+    if (neg) {
+      if (lp.includes(tok)) return -1;
+      continue;
+    }
+    if (tokLen > lpLen) return -1;
+    if (prefix) {
+      if (!lp.startsWith(tok)) return -1;
+      total += 320 - lpLen * 0.1;
+      continue;
+    }
+    if (suffix) {
+      if (!lp.endsWith(tok) && !ln.endsWith(tok)) return -1;
+      total += 300 - lpLen * 0.1;
+      continue;
+    }
+    if (exact) {
+      const idx = lp.indexOf(tok);
+      if (idx < 0) return -1;
+      total += 220 - idx * 0.5 - lpLen * 0.1;
+      continue;
+    }
     if (ln === tok) { total += 500; continue; }
-    if (ln.startsWith(tok)) { total += 350 - ln.length; continue; }
+    if (ln.startsWith(tok)) { total += 350 - lnLen; continue; }
     const nIdx = ln.indexOf(tok);
-    if (nIdx >= 0) { total += 250 - nIdx * 2 - ln.length * 0.2; continue; }
+    if (nIdx >= 0) { total += 250 - nIdx * 2 - lnLen * 0.2; continue; }
     const pIdx = lp.indexOf(tok);
-    if (pIdx >= 0) { total += 160 - pIdx * 0.5 - lp.length * 0.1; continue; }
+    if (pIdx >= 0) { total += 160 - pIdx * 0.5 - lpLen * 0.1; continue; }
 
     // Subsequence match on path, rewarding word boundaries.
     let qi = 0, score = 0, prevMatch = -2;
-    for (let i = 0; i < lp.length && qi < tok.length; i++) {
-      if (lp[i] === tok[qi]) {
-        const boundary = i === 0 || "/_-.".includes(lp[i - 1]);
+    for (let i = 0; i < lpLen && qi < tokLen; i++) {
+      if (lp.charCodeAt(i) === tok.charCodeAt(qi)) {
+        let boundary = i === 0;
+        if (!boundary) {
+          const prev = lp.charCodeAt(i - 1);
+          boundary = prev === 47 || prev === 95 || prev === 45 || prev === 46; // / _ - .
+        }
         score += 10 + (boundary ? 12 : 0) + (i === prevMatch + 1 ? 8 : 0);
         prevMatch = i;
         qi++;
       }
     }
-    if (qi < tok.length) return -1;
-    total += score - lp.length * 0.1;
+    if (qi < tokLen) return -1;
+    total += score - lpLen * 0.1;
   }
   return total;
+}
+
+function buildEntries(filePaths) {
+  const dirChildren = new Map();
+  const files = [];
+  for (let idx = 0; idx < filePaths.length; idx++) {
+    const p = filePaths[idx];
+    const slash = p.lastIndexOf("/");
+    const name = slash >= 0 ? p.slice(slash + 1) : p;
+    const dir = slash >= 0 ? p.slice(0, slash) : "";
+    files.push({
+      kind: "file",
+      path: p,
+      name,
+      dir,
+      lp: p.toLowerCase(),
+      ln: name.toLowerCase(),
+    });
+    let child = p;
+    let cur = dir;
+    while (cur) {
+      let set = dirChildren.get(cur);
+      if (!set) {
+        set = new Set();
+        dirChildren.set(cur, set);
+      }
+      set.add(child);
+      child = cur;
+      const prevSlash = cur.lastIndexOf("/");
+      cur = prevSlash >= 0 ? cur.slice(0, prevSlash) : "";
+    }
+  }
+  const dirs = [];
+  for (const [d, children] of dirChildren.entries()) {
+    const slash = d.lastIndexOf("/");
+    const name = slash >= 0 ? d.slice(slash + 1) : d;
+    const parent = slash >= 0 ? d.slice(0, slash) : "";
+    dirs.push({
+      kind: "dir",
+      path: d,
+      name,
+      dir: parent,
+      lp: d.toLowerCase(),
+      ln: name.toLowerCase(),
+      count: children.size,
+    });
+  }
+  dirs.sort((a, b) => a.path.localeCompare(b.path));
+  return [...dirs, ...files];
 }
 
 async function listFiles(cwd, on) {
@@ -115,6 +209,13 @@ async function listFiles(cwd, on) {
       };
     }
   }
+  const rgRes = await exec("rg", ["--files", "--null"], { cwd, on }).catch(() => null);
+  if (rgRes?.code === 0) {
+    return {
+      root: cwd,
+      files: rgRes.stdout.split("\0").filter(Boolean).slice(0, MAX_FILES),
+    };
+  }
   if (!on && window()?.platform === "windows") {
     const r = await exec("powershell", ["-NoProfile", "-Command", "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); & { param($p) Get-ChildItem -LiteralPath $p -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch '\\\\\\.git\\\\' } | Select-Object -First 4000 | ForEach-Object { $_.FullName.Substring($p.Length).TrimStart('\\') -replace '\\\\','/' } } '" + cwd.replace(/['‘’‚‛]/g, "$&$&") + "'"], { on });
     if (r.code !== 0) throw new Error(r.stderr || "Cannot list files");
@@ -125,9 +226,150 @@ async function listFiles(cwd, on) {
   return { root: cwd, files: r.stdout.split("\n").filter(Boolean).slice(0, MAX_FILES) };
 }
 
+function cleanPathInput(raw) {
+  let s = raw.trim();
+  if (s.length >= 2 && ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'")))) {
+    s = s.slice(1, -1).trim();
+  }
+  if (s.startsWith("file://")) s = s.slice(7);
+  return s;
+}
+
+function isDirectPath(q) {
+  return q === "~" || q.startsWith("~/") || q.startsWith("/");
+}
+
+function shortDir(dir, on) {
+  if (!dir) return "";
+  if (!on) {
+    const h = home();
+    if (h && dir === h) return "~";
+    if (h && dir.startsWith(h + "/")) return "~" + dir.slice(h.length);
+  }
+  return dir;
+}
+
+function expandLocalPath(q, on) {
+  if (on) return q;
+  const h = home();
+  if (!h) return q;
+  if (q === "~") return h;
+  if (q.startsWith("~/")) return h + q.slice(1);
+  return q;
+}
+
+function joinFullPath(root, rel) {
+  if (!root) return rel;
+  if (root === "/") return "/" + rel;
+  return `${root.replace(/[\\/]+$/, "")}/${rel}`;
+}
+
+function splitParent(absPath) {
+  const trimmed = absPath.length > 1 ? absPath.replace(/\/+$/, "") : absPath;
+  const slash = trimmed.lastIndexOf("/");
+  if (slash < 0) return { dir: "", base: trimmed };
+  return { dir: slash === 0 ? "/" : trimmed.slice(0, slash), base: trimmed.slice(slash + 1) };
+}
+
+const PATH_PROBE_SCRIPT = [
+  'p="$1"',
+  'case "$p" in "~") p="$HOME" ;; "~/"*) p="$HOME/${p#??}" ;; esac',
+  'if [ -f "$p" ]; then',
+  '  d=$(dirname -- "$p")',
+  '  rd=$(cd -- "$d" 2>/dev/null && pwd) || rd="$d"',
+  '  printf "F\\t%s\\t%s\\n" "$rd" "$(basename -- "$p")"',
+  'elif [ -d "$p" ]; then',
+  '  rd=$(cd -- "$p" 2>/dev/null && pwd) || rd="$p"',
+  '  printf "D\\t%s\\t\\n" "$rd"',
+  '  LC_ALL=C ls -1Ap -- "$rd" 2>/dev/null | head -n 2000',
+  'else',
+  '  d=$(dirname -- "$p")',
+  '  b=$(basename -- "$p")',
+  '  if [ -d "$d" ]; then',
+  '    rd=$(cd -- "$d" 2>/dev/null && pwd) || rd="$d"',
+  '    printf "P\\t%s\\t%s\\n" "$rd" "$b"',
+  '    LC_ALL=C ls -1Ap -- "$rd" 2>/dev/null | head -n 2000',
+  '  fi',
+  'fi',
+].join("\n");
+
+function parseProbeOutput(stdout, on) {
+  if (!stdout) return null;
+  const lines = stdout.split("\n");
+  const header = lines[0] ?? "";
+  const [kind, dir, name] = header.split("\t");
+  if (!kind || !dir) return null;
+  const displayDir = shortDir(dir, on);
+  if (kind === "F" && name) {
+    return {
+      kind: "file",
+      dir,
+      entries: [
+        {
+          kind: "file",
+          path: name,
+          name,
+          dir: displayDir,
+          externalRoot: dir,
+          lp: name.toLowerCase(),
+          ln: name.toLowerCase(),
+        },
+      ],
+    };
+  }
+  if (kind === "D" || kind === "P") {
+    const dirs = [];
+    const files = [];
+    for (let i = 1; i < lines.length; i++) {
+      const raw = lines[i];
+      if (!raw) continue;
+      const isDir = raw.endsWith("/");
+      const entryName = isDir ? raw.slice(0, -1) : raw;
+      if (!entryName) continue;
+      const entry = isDir
+        ? {
+            kind: "dir",
+            path: entryName,
+            name: entryName,
+            dir: displayDir,
+            externalPath: joinFullPath(dir, entryName),
+            lp: entryName.toLowerCase(),
+            ln: entryName.toLowerCase(),
+            count: null,
+          }
+        : {
+            kind: "file",
+            path: entryName,
+            name: entryName,
+            dir: displayDir,
+            externalRoot: dir,
+            lp: entryName.toLowerCase(),
+            ln: entryName.toLowerCase(),
+          };
+      if (isDir) dirs.push(entry);
+      else files.push(entry);
+    }
+    return {
+      kind: kind === "D" ? "dir" : "partial",
+      dir,
+      partial: name || "",
+      entries: [...dirs, ...files],
+    };
+  }
+  return null;
+}
+
+async function probePath(rawPath, on) {
+  if (!on && window()?.platform === "windows") return null;
+  const res = await exec("sh", ["-c", PATH_PROBE_SCRIPT, "file-picker-path", rawPath], { on }).catch(() => null);
+  if (!res || res.code !== 0) return null;
+  return parseProbeOutput(res.stdout, on);
+}
+
 export default class FilePicker extends View {
   init(_props, cx) {
     this.filter = "";
+    this.scopeDir = "";
     this.files = [];
     this.root = null;
     this.on = null;
@@ -136,12 +378,22 @@ export default class FilePicker extends View {
     this.error = null;
     this.at = 0;
     this.scroll = 0;
+    this.cachedQuery = null;
+    this.cachedScope = null;
+    this.cachedFiles = null;
+    this.cachedRows = [];
+    this.extQuery = null;
+    this.extResult = null;
+    this.extLoading = false;
+    this.extSeq = 0;
+    this.extDirCache = null;
     this.handle = cx.focus_handle();
-    this.input = InputState.new({ placeholder: "Search files by name or path…" });
+    this.input = InputState.new({ placeholder: "Search files, ~/path, /path (!neg, 'exact, ^pre, suf$)…" });
     this.input.on("change", (_e, cx) => {
       this.filter = this.input.value();
       this.at = 0;
       this.scroll = 0;
+      this.syncExternal(cx);
       cx.notify();
     });
     this.input.on("submit", (e, cx) => {
@@ -167,10 +419,8 @@ export default class FilePicker extends View {
       try {
         const res = await listFiles(loc.cwd, loc.on);
         this.root = res.root;
-        this.files = res.files.map((p) => {
-          const i = p.lastIndexOf("/");
-          return { path: p, name: i >= 0 ? p.slice(i + 1) : p, dir: i >= 0 ? p.slice(0, i) : "" };
-        });
+        this.files = buildEntries(res.files);
+        this.cachedFiles = null;
       } catch (e) {
         this.error = String(e || "Cannot list files");
       } finally {
@@ -184,39 +434,236 @@ export default class FilePicker extends View {
     closeOverlay(props().overlay);
   }
 
+  enterDir(dirPath, cx) {
+    this.scopeDir = dirPath || "";
+    this.filter = "";
+    this.input.set_value("");
+    this.at = 0;
+    this.scroll = 0;
+    this.cachedQuery = null;
+    this.syncExternal(cx);
+    this.input.focus();
+    cx.notify();
+  }
+
+  enterExternalDir(absDir, cx) {
+    const label = shortDir(absDir, this.on);
+    const next = label === "/" ? "/" : label.replace(/\/+$/, "") + "/";
+    this.scopeDir = "";
+    this.filter = next;
+    this.input.set_value(next);
+    this.at = 0;
+    this.scroll = 0;
+    this.cachedQuery = null;
+    this.syncExternal(cx);
+    this.input.focus();
+    cx.notify();
+  }
+
+  syncExternal(cx) {
+    const q = cleanPathInput(this.filter);
+    if (this.scopeDir || !isDirectPath(q)) {
+      this.extQuery = null;
+      this.extResult = null;
+      this.extLoading = false;
+      this.extSeq++;
+      return;
+    }
+
+    if (!this.on && this.extDirCache) {
+      const expanded = expandLocalPath(q, this.on);
+      const norm = expanded.length > 1 ? expanded.replace(/\/+$/, "") : expanded;
+      if (norm === this.extDirCache.dir) {
+        this.extSeq++;
+        this.extQuery = q;
+        this.extLoading = false;
+        this.extResult = { kind: "dir", dir: this.extDirCache.dir, entries: this.extDirCache.entries };
+        this.cachedQuery = null;
+        return;
+      }
+      if (!expanded.endsWith("/")) {
+        const { dir, base } = splitParent(expanded);
+        if (dir === this.extDirCache.dir && base) {
+          const exact = this.extDirCache.entries.find((e) => e.name === base);
+          if (exact?.kind === "file") {
+            this.extSeq++;
+            this.extQuery = q;
+            this.extLoading = false;
+            this.extResult = { kind: "file", dir, entries: [exact] };
+            this.cachedQuery = null;
+            return;
+          }
+          if (!exact) {
+            this.extSeq++;
+            this.extQuery = q;
+            this.extLoading = false;
+            this.extResult = { kind: "partial", dir, partial: base, entries: this.extDirCache.entries };
+            this.cachedQuery = null;
+            return;
+          }
+        }
+      }
+    }
+
+    const seq = ++this.extSeq;
+    this.extQuery = q;
+    this.extLoading = true;
+    cx.spawn(async (cx) => {
+      const res = await probePath(q, this.on);
+      if (seq !== this.extSeq) return;
+      this.extLoading = false;
+      this.extResult = res;
+      if (res && (res.kind === "dir" || res.kind === "partial")) {
+        this.extDirCache = { dir: res.dir, entries: res.entries };
+      }
+      this.cachedQuery = null;
+      cx.notify();
+    });
+  }
+
+  upDir(cx) {
+    if (!this.scopeDir) return false;
+    const i = this.scopeDir.lastIndexOf("/");
+    this.enterDir(i >= 0 ? this.scopeDir.slice(0, i) : "", cx);
+    return true;
+  }
+
+  revealDir(dirPath) {
+    if (!dirPath || !this.root || !this.spaceId) return;
+    this.close();
+    setShared("files-tabs.reveal", {
+      spaceId: this.spaceId,
+      root: this.root,
+      dir: dirPath,
+      seq: Date.now(),
+    });
+    run("layout.show", { id: "panel" });
+    run("layout.select", { stack: "panel-body", child: "files" });
+  }
+
   rows() {
-    const q = this.filter.trim();
+    let q = this.filter.trim();
+    const scope = this.scopeDir;
+    const scopePrefix = scope ? scope + "/" : "";
+
     if (!q) {
-      // Put already-open files in this space first, then repo files.
+      if (scope) {
+        // Inside a folder: direct children first (dirs then files), then nested files.
+        const directDirs = [];
+        const directFiles = [];
+        const nested = [];
+        for (let i = 0; i < this.files.length; i++) {
+          const f = this.files[i];
+          if (!f.path.startsWith(scopePrefix)) continue;
+          if (f.dir === scope) {
+            if (f.kind === "dir") directDirs.push(f);
+            else directFiles.push(f);
+          } else if (f.kind === "file") {
+            nested.push(f);
+          }
+        }
+        return [...directDirs, ...directFiles, ...nested].slice(0, MAX_SHOWN);
+      }
+      // At root: already-open files first, then top-level dirs, then files.
       const openPaths = new Set(
         Object.values(shared("file-view.slots") ?? {})
           .filter((s) => s?.spaceId === this.spaceId && s?.root === this.root)
           .map((s) => s.path),
       );
-      const open = this.files.filter((f) => openPaths.has(f.path));
-      const rest = this.files.filter((f) => !openPaths.has(f.path));
-      return [...open, ...rest].slice(0, MAX_SHOWN);
+      const open = [];
+      const topDirs = [];
+      const rest = [];
+      for (let i = 0; i < this.files.length; i++) {
+        const f = this.files[i];
+        if (f.kind === "file" && openPaths.has(f.path)) open.push(f);
+        else if (f.kind === "dir" && !f.dir) topDirs.push(f);
+        else if (f.kind === "file") rest.push(f);
+      }
+      return [...open, ...topDirs, ...rest].slice(0, MAX_SHOWN);
     }
+
+    const rawQ = cleanPathInput(this.filter);
+    if (!scope && isDirectPath(rawQ)) {
+      if (this.extQuery !== rawQ || !this.extResult) return [];
+      const res = this.extResult;
+      if (res.kind === "file") return res.entries;
+      if (res.kind === "dir") return res.entries.slice(0, MAX_SHOWN);
+      const tokens = parseTokens(res.partial || "");
+      if (!tokens.length) return res.entries.slice(0, MAX_SHOWN);
+      const scored = [];
+      for (let i = 0; i < res.entries.length; i++) {
+        const e = res.entries[i];
+        const s = fuzzyScore(tokens, e.lp, e.ln);
+        if (s >= 0) scored.push({ f: e, s });
+      }
+      scored.sort((a, b) => b.s - a.s || a.f.name.length - b.f.name.length || a.f.name.localeCompare(b.f.name));
+      return scored.slice(0, MAX_SHOWN).map((x) => x.f);
+    }
+
+    if (this.cachedQuery === q && this.cachedScope === scope && this.cachedFiles === this.files) {
+      return this.cachedRows;
+    }
+
+    if (this.root && q.startsWith(this.root + "/")) {
+      q = q.slice(this.root.length + 1);
+    } else if (q.startsWith("./")) {
+      q = q.slice(2);
+    }
+    const tokens = parseTokens(q);
+    if (!tokens.length) return [];
+
+    const scopePrefixLen = scopePrefix.length;
     const scored = [];
-    for (const f of this.files) {
-      const s = fuzzyScore(q, f.path, f.name);
+    for (let i = 0; i < this.files.length; i++) {
+      const f = this.files[i];
+      if (scopePrefix && !f.path.startsWith(scopePrefix)) continue;
+      const relLp = scopePrefixLen ? f.lp.slice(scopePrefixLen) : f.lp;
+      const s = fuzzyScore(tokens, relLp, f.ln);
       if (s >= 0) scored.push({ f, s });
     }
     scored.sort((a, b) => b.s - a.s || a.f.path.length - b.f.path.length || a.f.path.localeCompare(b.f.path));
-    return scored.slice(0, MAX_SHOWN).map((x) => x.f);
+    const result = scored.slice(0, MAX_SHOWN).map((x) => x.f);
+    this.cachedQuery = this.filter.trim();
+    this.cachedScope = scope;
+    this.cachedFiles = this.files;
+    this.cachedRows = result;
+    return result;
   }
 
-  choose(row, pin) {
-    if (!row || !this.root || !this.spaceId) return;
+  choose(row, secondary, cx) {
+    if (!row || !this.spaceId) return;
+    if (row.kind === "dir") {
+      if (row.externalPath) {
+        this.enterExternalDir(row.externalPath, cx);
+        return;
+      }
+      if (!this.root) return;
+      if (secondary) this.revealDir(row.path);
+      else this.enterDir(row.path, cx);
+      return;
+    }
+    let root = this.root;
+    let path = row.path;
+    if (row.externalRoot) {
+      const full = joinFullPath(row.externalRoot, row.path);
+      if (this.root && full.startsWith(this.root + "/")) {
+        root = this.root;
+        path = full.slice(this.root.length + 1);
+      } else {
+        root = row.externalRoot;
+        path = row.path;
+      }
+    }
+    if (!root) return;
     this.close();
     openFileTab({
       spaceId: this.spaceId,
       kind: "file",
-      path: row.path,
-      root: this.root,
+      path,
+      root,
       on: this.on,
       name: row.name,
-      pin,
+      pin: secondary,
     });
   }
 
@@ -225,8 +672,8 @@ export default class FilePicker extends View {
     const rows = this.rows();
     const openMap = new Map(
       Object.values(shared("file-view.slots") ?? {})
-        .filter((s) => s?.spaceId === this.spaceId && s?.root === this.root)
-        .map((s) => [s.path, s]),
+        .filter((s) => s?.spaceId === this.spaceId && s?.root && s?.path)
+        .map((s) => [joinFullPath(s.root, s.path), s]),
     );
     this.at = rows.length ? Math.max(0, Math.min(this.at, rows.length - 1)) : 0;
 
@@ -248,9 +695,19 @@ export default class FilePicker extends View {
         : el;
     const visible = (i) => !fixed || ((i + 1) * ROW_H > this.scroll && i * ROW_H < this.scroll + height);
 
+    const scopePrefix = this.scopeDir ? this.scopeDir + "/" : "";
     const rowEl = (r, i) => {
       const on = i === this.at;
-      const openSlot = openMap.get(r.path);
+      const isDir = r.kind === "dir";
+      const fullKey = isDir ? null : joinFullPath(r.externalRoot ?? this.root, r.path);
+      const openSlot = fullKey ? openMap.get(fullKey) : null;
+      const displayDir = r.externalRoot || r.externalPath
+        ? r.dir
+        : scopePrefix && r.dir.startsWith(scopePrefix)
+          ? r.dir.slice(scopePrefix.length)
+          : r.dir === this.scopeDir
+            ? ""
+            : r.dir;
       return h_flex()
         .id(`fp-${i}`)
         .mx(4)
@@ -262,14 +719,43 @@ export default class FilePicker extends View {
         .cursor_pointer()
         .when(on, (el) => el.bg(t.hover))
         .hover((s) => s.bg(t.hover))
-        .on_click((e) => this.choose(r, e.click_count >= 2 || Boolean(e.modifiers?.shift)))
-        .child(svg("mods/files/file.svg").size(14).flex_none().text_color(openSlot ? t.accent : t.muted))
-        .child(div().flex_none().max_w(260).truncate().font_medium().text_color(t.foreground).child(r.name))
-        .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.dim).child(r.dir))
+        .on_click((e, cx) => this.choose(r, e.click_count >= 2 || Boolean(e.modifiers?.shift), cx))
+        .child(
+          svg(isDir ? "mods/files-tabs/folder.svg" : "mods/files/file.svg")
+            .size(14)
+            .flex_none()
+            .text_color(isDir || openSlot ? t.accent : t.muted),
+        )
+        .child(
+          div()
+            .flex_none()
+            .max_w(260)
+            .truncate()
+            .font_medium()
+            .text_color(t.foreground)
+            .child(isDir ? `${r.name}/` : r.name),
+        )
+        .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.dim).child(displayDir))
+        .when(isDir && r.count != null, (el) =>
+          el.child(
+            div()
+              .px(5)
+              .rounded(4)
+              .bg(t.background)
+              .border(1)
+              .border_color(t.border)
+              .text_size(10)
+              .text_color(t.dim)
+              .child(`${r.count} ${r.count === 1 ? "item" : "items"}`),
+          ),
+        )
         .when(Boolean(openSlot), (el) =>
           el.child(div().px(5).rounded(4).bg(t.background).border(1).border_color(t.border).text_size(10).text_color(t.dim).child(openSlot.preview ? "preview" : "open")),
         );
     };
+
+    const rootLabel = this.root?.split(/[\\/]/).pop() || "root";
+    const crumbs = this.scopeDir ? this.scopeDir.split("/") : [];
 
     return v_flex()
       .id("file-picker")
@@ -283,12 +769,23 @@ export default class FilePicker extends View {
       .on_key_down((e, cx) => {
         const k = e.key;
         if (k === "escape") return this.close();
+        if (k === "backspace" && !this.filter && this.scopeDir) {
+          this.upDir(cx);
+          cx.stop_propagation();
+          return;
+        }
+        if (k === "tab" && rows[this.at]?.kind === "dir") {
+          if (rows[this.at].externalPath) this.enterExternalDir(rows[this.at].externalPath, cx);
+          else this.enterDir(rows[this.at].path, cx);
+          cx.stop_propagation();
+          return;
+        }
         if (k === "down" || (k === "n" && e.modifiers.control)) {
           if (rows.length) this.at = (this.at + 1) % rows.length;
-        } else if (k === "up") {
+        } else if (k === "up" || (k === "p" && e.modifiers.control)) {
           if (rows.length) this.at = (this.at + rows.length - 1) % rows.length;
         } else if (k === "enter" && rows[this.at]) {
-          this.choose(rows[this.at], Boolean(e.modifiers?.shift || e.modifiers?.control || e.modifiers?.platform));
+          this.choose(rows[this.at], Boolean(e.modifiers?.shift || e.modifiers?.control || e.modifiers?.platform), cx);
           return;
         } else return;
         cx.stop_propagation();
@@ -299,8 +796,55 @@ export default class FilePicker extends View {
           .items_center()
           .gap(8)
           .child(div().flex_1().text_size(15).font_semibold().text_color(t.foreground).child("Quick Open"))
-          .child(div().text_size(11).text_color(t.dim).child("Enter: preview · Shift+Enter: pin"))
+          .child(div().text_size(11).text_color(t.dim).child("Enter: open / enter dir · Shift+Enter: pin / reveal"))
           .child(div().id("fp-esc").px(6).py(2).rounded(5).text_size(11).text_color(t.dim).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)).on_click(() => this.close()).child("Esc")),
+      )
+      .when(Boolean(this.scopeDir), (el) =>
+        el.child(
+          h_flex()
+            .gap(4)
+            .items_center()
+            .text_size(11.5)
+            .child(
+              div()
+                .id("fp-crumb-root")
+                .px(6)
+                .py(2)
+                .rounded(5)
+                .cursor_pointer()
+                .bg(t.background)
+                .border(1)
+                .border_color(t.border)
+                .text_color(t.muted)
+                .hover((s) => s.bg(t.hover).text_color(t.foreground))
+                .on_click((_e, cx) => this.enterDir("", cx))
+                .child(rootLabel),
+            )
+            .children(
+              crumbs.flatMap((seg, idx) => {
+                const target = crumbs.slice(0, idx + 1).join("/");
+                const last = idx === crumbs.length - 1;
+                return [
+                  div().text_color(t.dim).child("/"),
+                  div()
+                    .id(`fp-crumb-${idx}`)
+                    .px(6)
+                    .py(2)
+                    .rounded(5)
+                    .cursor_pointer()
+                    .bg(last ? t.selected : t.background)
+                    .border(1)
+                    .border_color(t.border)
+                    .text_color(last ? t.foreground : t.muted)
+                    .hover((s) => s.bg(t.hover).text_color(t.foreground))
+                    .on_click((_e, cx) => this.enterDir(target, cx))
+                    .child(seg),
+                ];
+              }),
+            )
+            .child(div().flex_1())
+            .child(div().text_size(10.5).text_color(t.dim).child("Backspace: up")),
+        ),
       )
       .child(
         h_flex()
@@ -334,9 +878,15 @@ export default class FilePicker extends View {
               cx.notify();
             }),
           )
-          .when(!rows.length, (el) =>
-            el.child(div().px(10).py(12).text_size(12).text_color(t.dim).child(this.error || (this.loading ? "Indexing files…" : "No matching files"))),
-          )
+          .when(!rows.length, (el) => {
+            const direct = !this.scopeDir && isDirectPath(cleanPathInput(this.filter));
+            const msg = direct
+              ? this.extLoading
+                ? "Looking up path…"
+                : "No matching files"
+              : this.error || (this.loading ? "Indexing files…" : "No matching files");
+            return el.child(div().px(10).py(12).text_size(12).text_color(t.dim).child(msg));
+          })
           .when(rows.length > 0, (el) => el.children(rows.map((r, i) => (visible(i) ? place(rowEl(r, i), i) : null)).filter(Boolean))),
       );
   }

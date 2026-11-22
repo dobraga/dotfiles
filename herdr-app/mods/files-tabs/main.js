@@ -1,7 +1,13 @@
 // A lazy file browser for the focused pane's folder that opens files as main tabs (VS Code preview/pinned).
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { spaces, panes, focused, exec, watchFolder, theme, window, run, shared, setShared } from "herdr";
+import { spaces, panes, focused, exec, watchFolder, theme, window, run, shared, setShared, props, openOverlay, closeOverlay } from "herdr";
+
+function joinPath(root, rel) {
+  if (!root) return rel;
+  const sep = root.includes("\\") && !root.includes("/") ? "\\" : "/";
+  return `${root.replace(/[\\/]+$/, "")}${sep}${rel}`;
+}
 
 function location() {
   const space = spaces().find((s) => s.active), f = focused();
@@ -104,11 +110,18 @@ async function directory(path, on) {
 
 export default class FilesTabs extends View {
   init(_props, cx) {
+    const p = props() ?? {};
+    if (p.contextMenu) {
+      this.contextMenu = { ...p.contextMenu, overlay: p.overlay };
+      return;
+    }
     this.saved = new Map();
     this.entries = new Map();
     this.folders = new Set();
     this.pending = new Set();
     this.marks = {};
+    this.lastRevealSeq = 0;
+    this.revealedDir = null;
     this.refresh(cx);
     cx.timer.every(10000, (cx) => this.refresh(cx));
   }
@@ -222,7 +235,7 @@ export default class FilesTabs extends View {
       const path = prefix ? `${prefix}/${entry.name}` : entry.name;
       const open = this.folders.has(path);
       const mark = this.marks[`${this.root}/${path}`];
-      const selected = !entry.dir && activePath === path;
+      const selected = (!entry.dir && activePath === path) || (entry.dir && this.revealedDir === path);
       out.push(
         h_flex()
           .id(`file-${path}`)
@@ -237,6 +250,16 @@ export default class FilesTabs extends View {
           .when(selected, (el) => el.bg(t.selected))
           .hover((s) => s.bg(t.hover))
           .on_click((e, cx) => (entry.dir ? this.toggle(path, cx) : this.open(path, entry.name, e.click_count >= 2)))
+          .on_mouse_down("right", (_e, cx) => {
+            cx.stop_propagation();
+            openOverlay({
+              mod: "files-tabs",
+              kind: "popup",
+              width: 190,
+              height: 76,
+              props: { contextMenu: { path, fullPath: joinPath(this.root, path) } },
+            });
+          })
           .child(entry.dir ? svg(`mods/files-tabs/chevron-${open ? "down" : "right"}.svg`).size(12).flex_none().text_color(t.dim) : div().w(12).flex_none())
           .child(svg(`mods/files-tabs/${entry.dir ? "folder" : "file"}.svg`).size(14).flex_none().text_color(t.muted))
           .child(div().flex_1().min_w(0).truncate().child(entry.name))
@@ -247,9 +270,79 @@ export default class FilesTabs extends View {
     return out;
   }
 
+  applyReveal(cx) {
+    const rev = shared("files-tabs.reveal");
+    if (!rev || rev.seq <= this.lastRevealSeq || !rev.dir) return;
+    const activeSpace = this.spaceId ?? spaces().find((s) => s.active)?.id;
+    if (rev.spaceId !== activeSpace || !this.root) return;
+    let relDir = rev.dir;
+    if (rev.root && rev.root !== this.root) {
+      const full = joinPath(rev.root, rev.dir);
+      if (full.startsWith(this.root + "/")) relDir = full.slice(this.root.length + 1);
+      else return;
+    }
+    this.lastRevealSeq = rev.seq;
+    this.revealedDir = relDir;
+    const parts = relDir.split("/").filter(Boolean);
+    const toLoad = [];
+    let acc = "";
+    for (const part of parts) {
+      acc = acc ? `${acc}/${part}` : part;
+      this.folders.add(acc);
+      if (!this.entries.has(acc) && !this.pending.has(acc)) toLoad.push(acc);
+    }
+    if (toLoad.length && this.context) {
+      const context = this.context;
+      for (const f of toLoad) this.pending.add(f);
+      cx.spawn(async (cx) => {
+        try {
+          for (const f of toLoad) {
+            if (!this.current(context)) return;
+            await this.loadFolder(f, context);
+          }
+        } catch {}
+        finally {
+          if (this.context === context) {
+            for (const f of toLoad) this.pending.delete(f);
+          }
+          cx.notify();
+        }
+      });
+    }
+  }
+
   render(cx) {
-    if (key() !== this.context?.key) this.refresh(cx);
     const t = theme();
+    if (this.contextMenu) {
+      const { path, fullPath, overlay } = this.contextMenu;
+      const item = (id, label, value) =>
+        div()
+          .id(id)
+          .h(30)
+          .px(10)
+          .flex()
+          .items_center()
+          .rounded(6)
+          .cursor_pointer()
+          .hover((s) => s.bg(t.hover))
+          .on_click((_e, cx) => {
+            cx.write_to_clipboard(value);
+            closeOverlay(overlay);
+          })
+          .child(label);
+      return v_flex()
+        .id("files-context-menu")
+        .size_full()
+        .p(6)
+        .gap(2)
+        .bg(t.popover)
+        .text_color(t.foreground)
+        .text_size(12.5)
+        .child(item("files-ctx-rel", "Copy relative path", path))
+        .child(item("files-ctx-abs", "Copy full path", fullPath));
+    }
+    if (key() !== this.context?.key) this.refresh(cx);
+    this.applyReveal(cx);
     const activePath = activeOpenFile(this.spaceId ?? spaces().find((s) => s.active)?.id, this.root, this.on);
     return v_flex()
       .id("files-tabs")
