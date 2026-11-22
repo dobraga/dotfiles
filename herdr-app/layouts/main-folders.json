@@ -1,5 +1,6 @@
 {
   "id": "root",
+  "toast": "desktop-toast",
   "cloned_from": {
     "name": "main",
     "version": "0.1.10"
