@@ -47,7 +47,7 @@
     "ctrl-shift-?": "app.help",
     "ctrl-shift-b": "layout.toggle:sidebar",
     "ctrl-shift-n": "space.new",
-    "ctrl-t": "tab.new",
+    "ctrl-t": "mod.open:new-chat",
     "ctrl-shift-k": "mod.open:picker",
     "ctrl-shift-p": "app.palette",
     "ctrl-,": "app.settings",
