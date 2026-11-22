@@ -6,6 +6,7 @@ import {
   renderCurrentView,
 } from "./app.js";
 import { renderSingleDiffTable } from "./diff-view.js";
+import { highlightBlock, highlightLine, langFromPath } from "./highlight.js";
 
 const popover = document.getElementById("selection-popover");
 let currentSelectionCtx = null;
@@ -153,6 +154,12 @@ export function renderMarkdownView(toolbarEl, bodyEl) {
 
   bodyEl.innerHTML = `<article class="md-container md-rendered" id="md-article">${renderedHtml}</article>`;
   const article = bodyEl.querySelector("#md-article");
+  article.querySelectorAll("pre > code").forEach((codeEl) => {
+    const langCls = Array.from(codeEl.classList).find((c) => c.startsWith("language-"));
+    const rawLang = langCls ? langCls.slice("language-".length).toLowerCase() : "";
+    const lang = langFromPath(`x.${rawLang}`) || (rawLang === "typescript" ? "ts" : rawLang === "python" ? "py" : rawLang === "bash" ? "sh" : "");
+    if (lang) codeEl.innerHTML = highlightBlock(codeEl.textContent || "", lang);
+  });
   applyHighlights(article, appState.data.comments, doc.displayPath);
 
   article.addEventListener("mouseup", () => {
@@ -199,6 +206,7 @@ function renderSourceLinesView(bodyEl, doc) {
     commentsByEndLine.set(key, arr);
   }
 
+  const lang = langFromPath(doc.displayPath);
   let anchorLine = null;
   const rows = lines
     .map((line, i) => {
@@ -217,8 +225,9 @@ function renderSourceLinesView(bodyEl, doc) {
               )
               .join("")}</td></tr>`
           : "";
-      return `<tr class="diff-row" data-ln="${n}"><td class="ln" data-pick="${n}">${n}</td><td class="code">${escapeHtml(
-        line
+      return `<tr class="diff-row" data-ln="${n}"><td class="ln" data-pick="${n}">${n}</td><td class="code">${highlightLine(
+        line,
+        lang
       )}</td></tr>${threadRow}`;
     })
     .join("");

@@ -571,6 +571,23 @@ input[type="text"]:focus {
   text-decoration: line-through;
 }
 
+.revu-mark.revu-pulse {
+  outline: 2px solid var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-bg);
+  transition: box-shadow 0.25s ease;
+}
+
+/* Lightweight offline syntax highlighting */
+.hl-kw { color: #c792ea; }
+.hl-str { color: #a5d6a7; }
+.hl-cmt { color: var(--text-muted); font-style: italic; }
+.hl-num { color: #f78c6c; }
+.hl-key { color: var(--accent); }
+
+[data-theme="light"] .hl-kw { color: #7c3aed; }
+[data-theme="light"] .hl-str { color: #15803d; }
+[data-theme="light"] .hl-num { color: #c2410c; }
+
 /* Source & Diff views */
 .diff-layout {
   display: grid;

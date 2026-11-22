@@ -21,6 +21,7 @@ const els = {
   roundBadge: document.getElementById("round-badge"),
   title: document.getElementById("review-title"),
   commentCount: document.getElementById("comment-count"),
+  btnCopyMd: document.getElementById("btn-copy-md"),
   btnRefresh: document.getElementById("btn-refresh"),
   btnTheme: document.getElementById("btn-theme"),
   btnHelp: document.getElementById("btn-help"),
@@ -271,6 +272,57 @@ els.btnRefresh.addEventListener("click", async () => {
   }
 });
 
+function buildFeedbackMarkdown() {
+  const data = appState.data;
+  if (!data) return "";
+  const open = data.comments.filter((c) => !c.resolved);
+  const lines = [`# Revu Feedback (Round ${data.session.round})`, `Target: ${data.session.title}`];
+  const note = els.generalNote.value.trim();
+  if (note) lines.push("", "## General Notes", note);
+  for (const c of open) {
+    const loc = c.selector || `${c.file}${c.lineStart ? `:${c.lineStart}` : ""}`;
+    lines.push("", `- **[#${c.id}] [${c.kind.toUpperCase()}] ${loc}**: ${c.body}`);
+    if (c.suggestion) lines.push("  ```suggestion", c.suggestion, "  ```");
+  }
+  return lines.join("\n");
+}
+
+els.btnCopyMd.addEventListener("click", async () => {
+  const md = buildFeedbackMarkdown();
+  try {
+    await navigator.clipboard.writeText(md);
+    showToast("Copied feedback Markdown");
+  } catch {
+    showToast("Clipboard unavailable");
+  }
+});
+
+function focusComment(c) {
+  if (!c) return;
+  const mode = appState.data?.session.mode;
+  if (c.kind === "pin") {
+    focusLivePin(c);
+  } else if (mode === "diff" && c.file) {
+    appState.activeFile = c.file;
+    renderCurrentView();
+  } else if (mode === "markdown") {
+    const docs = appState.data.documents || [];
+    const docIdx = docs.findIndex((d) => d.displayPath === c.file);
+    if (docIdx !== -1 && docIdx !== appState.activeDocIndex) {
+      appState.activeDocIndex = docIdx;
+      renderCurrentView();
+    }
+    const mark = document.querySelector(`mark[data-cid="${c.id}"]`);
+    if (mark) {
+      mark.scrollIntoView({ behavior: "smooth", block: "center" });
+      mark.classList.remove("revu-pulse");
+      void mark.offsetWidth;
+      mark.classList.add("revu-pulse");
+      setTimeout(() => mark.classList.remove("revu-pulse"), 1200);
+    }
+  }
+}
+
 // Help modal
 els.btnHelp.addEventListener("click", () => els.helpModal.classList.remove("hidden"));
 els.helpClose.addEventListener("click", () => els.helpModal.classList.add("hidden"));
@@ -354,14 +406,7 @@ export function renderSidebar() {
       }
       appState.activeCommentId = cid;
       const c = data.comments.find((x) => x.id === cid);
-      if (c) {
-        if (c.kind === "pin") {
-          focusLivePin(c);
-        } else if (data.session.mode === "diff" && c.file) {
-          appState.activeFile = c.file;
-          renderCurrentView();
-        }
-      }
+      if (c) focusComment(c);
       renderSidebar();
     });
   });
@@ -434,6 +479,18 @@ document.addEventListener("keydown", (e) => {
     renderCurrentView();
   } else if (e.key === "p" && (appState.data?.session.mode === "live" || appState.data?.session.mode === "html")) {
     toggleLivePinMode();
+  } else if (e.key === "]" || e.key === "[") {
+    const open = (appState.data?.comments || []).filter((c) => !c.resolved);
+    if (open.length === 0) return;
+    const curIdx = open.findIndex((c) => c.id === appState.activeCommentId);
+    const nextIdx =
+      e.key === "]"
+        ? (curIdx + 1) % open.length
+        : (curIdx <= 0 ? open.length - 1 : curIdx - 1);
+    const target = open[nextIdx];
+    appState.activeCommentId = target.id;
+    renderSidebar();
+    focusComment(target);
   } else if (e.key === "j" || e.key === "k") {
     const mode = appState.data?.session.mode;
     if (mode === "diff") {

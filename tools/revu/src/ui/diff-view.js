@@ -4,6 +4,7 @@ import {
   escapeHtml,
   renderCurrentView,
 } from "./app.js";
+import { highlightLine, langFromPath } from "./highlight.js";
 
 let fileFilter = "";
 let activeInlineForm = null; // { file, lineStart, lineEnd, side, quote }
@@ -232,6 +233,7 @@ export function renderSingleDiffTable(hostEl, fileObj, layout) {
 
   let bodyRows = "";
   const colSpan = layout === "split" ? 4 : 3;
+  const lang = langFromPath(fileObj.path);
 
   for (const hunk of fileObj.hunks) {
     bodyRows += `<tr class="diff-hunk-row"><td colspan="${colSpan}">${escapeHtml(hunk.header)}</td></tr>`;
@@ -251,7 +253,7 @@ export function renderSingleDiffTable(hostEl, fileObj, layout) {
           <tr class="diff-row ${l.type} ${isSelected ? "selected" : ""}">
             <td class="ln" data-pick-ln="${l.oldLine ?? ""}" data-pick-side="old">${l.oldLine ?? ""}</td>
             <td class="ln" data-pick-ln="${l.newLine ?? ""}" data-pick-side="new">${l.newLine ?? ""}</td>
-            <td class="code">${prefix}${escapeHtml(l.content)}</td>
+            <td class="code">${prefix}${highlightLine(l.content, lang)}</td>
           </tr>
         `;
         const inlineHtml = targetLn ? renderInlineCommentsHtml(fileObj.path, targetLn, targetSide) : "";
@@ -289,9 +291,9 @@ export function renderSingleDiffTable(hostEl, fileObj, layout) {
         bodyRows += `
           <tr class="diff-row">
             <td class="ln" data-pick-ln="${l?.oldLine ?? ""}" data-pick-side="old">${l?.oldLine ?? ""}</td>
-            <td class="diff-cell ${l?.type === "del" ? "del" : ""} ${lSel ? "selected" : ""}">${l ? escapeHtml(l.content) : ""}</td>
+            <td class="diff-cell ${l?.type === "del" ? "del" : ""} ${lSel ? "selected" : ""}">${l ? highlightLine(l.content, lang) : ""}</td>
             <td class="ln" data-pick-ln="${r?.newLine ?? ""}" data-pick-side="new">${r?.newLine ?? ""}</td>
-            <td class="diff-cell ${r?.type === "add" ? "add" : ""} ${rSel ? "selected" : ""}">${r ? escapeHtml(r.content) : ""}</td>
+            <td class="diff-cell ${r?.type === "add" ? "add" : ""} ${rSel ? "selected" : ""}">${r ? highlightLine(r.content, lang) : ""}</td>
           </tr>
         `;
         const leftComments = l?.oldLine ? renderInlineCommentsHtml(fileObj.path, l.oldLine, "old") : "";
