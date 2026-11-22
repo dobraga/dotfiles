@@ -4,7 +4,35 @@ import logging
 import os
 import subprocess
 import sys
+from collections.abc import Mapping
 from logging.handlers import TimedRotatingFileHandler
+
+HERDR_ENV_VARS = ("HC_TERMINAL_ID", "HERDR_CHAT_HOST", "HERDR_PANE_ID")
+
+
+def is_running_in_herdr(env: Mapping[str, str] | None = None) -> bool:
+    """Return True if the current process environment originates from Herdr."""
+    target_env = os.environ if env is None else env
+    return any(bool(target_env.get(var)) for var in HERDR_ENV_VARS)
+
+
+def is_herdr_app_running() -> bool:
+    """Return True if the herdr-app desktop GUI process is currently running."""
+    try:
+        result = subprocess.run(
+            ["pgrep", "-x", "herdr-app"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        return result.returncode == 0
+    except FileNotFoundError:
+        return False
+
+
+def should_suppress_for_herdr(env: Mapping[str, str] | None = None) -> bool:
+    """Suppress hook OS notifications when inside Herdr and its GUI is open."""
+    return is_running_in_herdr(env) and is_herdr_app_running()
 
 
 class ClaudeNotify:
@@ -28,6 +56,10 @@ class ClaudeNotify:
 
     def send_notification(self, title: str, message: str) -> None:
         """Sends a desktop notification: osascript on macOS, notify-send on Linux."""
+        if should_suppress_for_herdr():
+            self.logger.info("Suppressed desktop notification (handled by Herdr)")
+            return
+
         if sys.platform == "darwin":
             script = f"display notification {json.dumps(message, ensure_ascii=False)} with title {json.dumps(title, ensure_ascii=False)}"
             command = ["osascript", "-e", script]

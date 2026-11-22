@@ -1,10 +1,11 @@
 // Desktop + enhanced in-app toast notifications for Herdr.
-// Sends a native Linux notification via `notify-send` on mount and renders
-// a high-contrast in-app toast with severity color and quick jump action.
+// Sends a native Linux notification via `notify-send` on mount only when the
+// Herdr window is not active (!appWindow()?.active), and always renders a
+// high-contrast in-app toast with severity color and quick jump action.
 
 import { View, div, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { props, closeOverlay, run, theme, exec, home } from "herdr";
+import { props, closeOverlay, run, theme, exec, home, window as appWindow } from "herdr";
 
 const DOT = { error: "blocked", warning: "working", success: "done", info: "accent" };
 const URGENCY = { error: "critical", warning: "normal", success: "normal", info: "low" };
@@ -13,6 +14,8 @@ const BADGE = { error: "Atenção", warning: "Aviso", success: "Pronto" };
 
 export default class DesktopToast extends View {
   init(p, cx) {
+    if (appWindow()?.active) return;
+
     const data = p ?? props() ?? {};
     const title = (data.title ?? "").trim();
     const body = (data.body ?? "").trim();
