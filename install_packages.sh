@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # Install font
 curl -OL https://github.com/ryanoasis/nerd-fonts/releases/download/v3.1.1/FiraCode.zip
 unzip FiraCode.zip -d ~/.fonts
@@ -6,6 +7,9 @@ fc-cache -f -v
 
 # Install kitty terminal (config is linked by install_dotfiles.sh)
 sudo apt install -y kitty
+
+# Install Herdr (config is linked by install_dotfiles.sh)
+curl -fsSL https://releases.herdr.dev/app/install.sh | sh
 
 # Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -59,7 +63,7 @@ sudo apt autoremove -y
 sudo apt autoclean -y
 
 # ZSH default
-chsh -s $(which zsh)
+chsh -s "$(which zsh)"
 uv python install --default --preview-features python-install-default
 
 # uses F keys
