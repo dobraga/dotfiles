@@ -56,6 +56,18 @@ export function mergeClaudeSettings(path: string, revuCmd: string): boolean {
 export function mergeAgyHooks(path: string, revuCmd: string): boolean {
   const cfg = readJsonOrEmpty(path);
   const desired = {
+    PreToolUse: [
+      {
+        matcher: "exit_plan_mode",
+        hooks: [
+          {
+            type: "command",
+            command: `${revuCmd} hook agy-exit-plan`,
+            timeout: 86400,
+          },
+        ],
+      },
+    ],
     PostToolUse: [
       {
         matcher: "write_file|edit_file",

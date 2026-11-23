@@ -1,5 +1,5 @@
 import { runClaudeHook } from "./hooks/claude.ts";
-import { runAgyMarkHook, runAgyStopHook } from "./hooks/agy.ts";
+import { runAgyExitPlanHook, runAgyMarkHook, runAgyStopHook } from "./hooks/agy.ts";
 import { runMcpServer } from "./mcp.ts";
 import { runReviewSession } from "./runner.ts";
 import {
@@ -25,7 +25,7 @@ Usage:
   revu sessions                         List recent review sessions
   revu clean [--days <n>]               Remove sessions older than N days (default 14)
   revu mcp                              Run MCP stdio server
-  revu hook <claude|agy-mark|agy-stop>  Run agent lifecycle hook
+  revu hook <claude|agy-exit-plan|agy-mark|agy-stop>  Run agent lifecycle hook
 
 Review options:
   --staged              Review only staged git changes
@@ -74,6 +74,10 @@ async function main() {
       await runClaudeHook();
       return;
     }
+    if (sub === "agy-exit-plan") {
+      await runAgyExitPlanHook();
+      return;
+    }
     if (sub === "agy-mark") {
       await runAgyMarkHook();
       return;
@@ -82,7 +86,9 @@ async function main() {
       await runAgyStopHook();
       return;
     }
-    console.error(`revu hook: unknown hook '${sub ?? ""}'. Expected claude | agy-mark | agy-stop.`);
+    console.error(
+      `revu hook: unknown hook '${sub ?? ""}'. Expected claude | agy-exit-plan | agy-mark | agy-stop.`
+    );
     process.exit(1);
   }
 

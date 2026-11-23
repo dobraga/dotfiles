@@ -71,7 +71,7 @@ export interface ReviewDocument {
   isMarkdown: boolean;
 }
 
-export type DecisionAction = "approve" | "approve_and_proceed" | "request_changes";
+export type DecisionAction = "approve" | "request_changes";
 
 export interface ReviewDecision {
   approved: boolean;
@@ -99,7 +99,6 @@ export interface SessionMeta {
   updatedAt: string;
   port?: number;
   pid?: number;
-  allowProceedAction?: boolean;
   lastDecision?: ReviewDecision;
 }
 

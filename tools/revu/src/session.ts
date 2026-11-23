@@ -141,7 +141,6 @@ export interface UpsertSessionInput {
   staged?: boolean;
   liveUrl?: string;
   snapshotFiles: Record<string, string>;
-  allowProceedAction?: boolean;
 }
 
 export function hashSnapshot(snapshotFiles: Record<string, string>, extra = ""): string {
@@ -193,7 +192,6 @@ export function upsertSession(input: UpsertSessionInput): {
       contentHash,
       createdAt: now,
       updatedAt: now,
-      allowProceedAction: input.allowProceedAction,
     };
     saveSessionMeta(meta);
     saveRoundSnapshot(meta.id, 1, input.snapshotFiles);
@@ -222,7 +220,6 @@ export function upsertSession(input: UpsertSessionInput): {
     round,
     contentHash,
     updatedAt: now,
-    allowProceedAction: input.allowProceedAction ?? existing.allowProceedAction,
   };
   saveSessionMeta(meta);
 
@@ -421,6 +418,10 @@ export interface PendingAgyPlan {
   path: string;
   sha256: string;
   lastReviewedHash?: string;
+  approvedHash?: string;
+  approvedNormalizedHash?: string;
+  approvedTurnUserStep?: number;
+  approvedForExecution?: boolean;
   autoRounds?: number;
   updatedAt: string;
 }

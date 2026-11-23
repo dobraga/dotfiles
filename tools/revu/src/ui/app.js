@@ -27,7 +27,6 @@ const els = {
   btnHelp: document.getElementById("btn-help"),
   btnRequestChanges: document.getElementById("btn-request-changes"),
   btnApprove: document.getElementById("btn-approve"),
-  btnApproveProceed: document.getElementById("btn-approve-proceed"),
   decisionBanner: document.getElementById("decision-banner"),
   toolbar: document.getElementById("view-toolbar"),
   body: document.getElementById("view-body"),
@@ -225,7 +224,6 @@ async function submitDecision(action) {
   if (appState.decided) return;
   els.btnApprove.disabled = true;
   els.btnRequestChanges.disabled = true;
-  els.btnApproveProceed.disabled = true;
 
   const res = await fetch("/api/decision", {
     method: "POST",
@@ -235,7 +233,6 @@ async function submitDecision(action) {
   if (!res.ok) {
     els.btnApprove.disabled = false;
     els.btnRequestChanges.disabled = false;
-    els.btnApproveProceed.disabled = false;
     showToast("Failed to send decision");
     return;
   }
@@ -249,9 +246,7 @@ function showDecisionBanner(decision) {
   if (decision.approved) {
     els.decisionBanner.classList.add("approved");
     els.decisionBanner.textContent =
-      decision.action === "approve_and_proceed"
-        ? "✓ Approved & sent proceed signal to agent. You can close this tab."
-        : "✓ Approved and returned to agent. You can close this tab.";
+      "✓ Approved and returned to agent. You can close this tab.";
   } else {
     els.decisionBanner.classList.add("changes");
     els.decisionBanner.textContent =
@@ -260,7 +255,6 @@ function showDecisionBanner(decision) {
 }
 
 els.btnApprove.addEventListener("click", () => submitDecision("approve"));
-els.btnApproveProceed.addEventListener("click", () => submitDecision("approve_and_proceed"));
 els.btnRequestChanges.addEventListener("click", () => submitDecision("request_changes"));
 
 els.btnRefresh.addEventListener("click", async () => {
@@ -427,7 +421,6 @@ export function renderHeader() {
   els.roundBadge.classList.toggle("multi", session.round > 1);
   els.title.textContent = session.title;
   document.title = `Revu — ${session.title}`;
-  els.btnApproveProceed.classList.toggle("hidden", !session.allowProceedAction);
   if (els.generalNote.value !== (appState.data.generalNote || "")) {
     els.generalNote.value = appState.data.generalNote || "";
   }

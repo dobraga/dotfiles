@@ -179,13 +179,6 @@ body {
   font-weight: 600;
 }
 
-.btn-accent {
-  background: var(--accent);
-  color: #081226;
-  border-color: transparent;
-  font-weight: 600;
-}
-
 .btn-danger {
   background: var(--red-bg);
   color: var(--red);

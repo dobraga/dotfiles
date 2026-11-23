@@ -239,15 +239,15 @@ export function startReviewServer(opts: ReviewServerOptions): ReviewServerHandle
       // Final decision
       if (req.method === "POST" && path === "/api/decision") {
         const state = opts.getState();
-        const body = (await req.json()) as { action?: DecisionAction; generalNote?: string };
+        const body = (await req.json()) as { action?: string; generalNote?: string };
         const action: DecisionAction =
           body.action === "approve" || body.action === "approve_and_proceed"
-            ? body.action
+            ? "approve"
             : "request_changes";
         const note = typeof body.generalNote === "string" ? body.generalNote : loadGeneralNote(state.session.id);
         saveGeneralNote(state.session.id, note);
         const decision: ReviewDecision = {
-          approved: action === "approve" || action === "approve_and_proceed",
+          approved: action === "approve",
           action,
           generalNote: note,
           round: state.session.round,

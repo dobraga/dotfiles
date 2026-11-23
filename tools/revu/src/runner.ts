@@ -38,7 +38,6 @@ export interface RunReviewOptions {
   port?: number;
   noOpen?: boolean;
   liveCookie?: string;
-  allowProceedAction?: boolean;
   quiet?: boolean;
 }
 
@@ -207,7 +206,6 @@ export function buildReviewState(opts: RunReviewOptions): {
     staged: opts.staged,
     liveUrl: resolved.liveUrl,
     snapshotFiles,
-    allowProceedAction: opts.allowProceedAction,
   });
 
   // Attach per-document round diff for Markdown mode

@@ -36,7 +36,11 @@ describe("HTTP review server & decision loop", () => {
     try {
       const htmlRes = await fetch(srv.url + "/");
       expect(htmlRes.status).toBe(200);
-      expect(await htmlRes.text()).toContain("revu");
+      const htmlText = await htmlRes.text();
+      expect(htmlText).toContain("revu");
+      expect(htmlText).toContain('id="btn-approve"');
+      expect(htmlText).toContain('id="btn-request-changes"');
+      expect(htmlText).not.toContain("btn-approve-proceed");
 
       const stateRes = await fetch(srv.url + "/api/state");
       const stateJson = (await stateRes.json()) as any;
@@ -77,6 +81,37 @@ describe("HTTP review server & decision loop", () => {
       expect(formatted).toContain("Clear line 2");
     } finally {
       srv.stop();
+    }
+  });
+
+  test("resolves approve and normalizes legacy approve_and_proceed to approve", async () => {
+    const mdPath = join(tempDir, "plan.md");
+    writeFileSync(mdPath, "# Plan\n1. Step 1\n", "utf8");
+
+    for (const [idx, sentAction] of ["approve", "approve_and_proceed"].entries()) {
+      const sid = `srv-approve-${idx}`;
+      const built = buildReviewState({ cwd: tempDir, targets: [mdPath], sessionId: sid });
+      const srv = startReviewServer({
+        getState: () => ({ ...built.state, comments: loadComments(sid) }),
+        onRefresh: () => built.state,
+      });
+
+      try {
+        const decisionPromise = srv.waitForDecision();
+        const decRes = await fetch(srv.url + "/api/decision", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: sentAction, generalNote: "Ship it" }),
+        });
+        expect(decRes.status).toBe(200);
+
+        const decision = await decisionPromise;
+        expect(decision.approved).toBe(true);
+        expect(decision.action).toBe("approve");
+        expect(decision.generalNote).toBe("Ship it");
+      } finally {
+        srv.stop();
+      }
     }
   });
 });
