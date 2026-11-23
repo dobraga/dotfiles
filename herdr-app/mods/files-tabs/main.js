@@ -1,7 +1,7 @@
 // A lazy file browser for the focused pane's folder that opens files as main tabs (VS Code preview/pinned).
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, ScrollHandle } from "gpui-base";
-import { spaces, panes, focused, exec, watchFolder, theme, window, run, shared, setShared, props, openOverlay, closeOverlay } from "herdr";
+import { spaces, panes, focused, exec, watchFolder, theme, window, run, shared, setShared, props, openOverlay, closeOverlay, appHome, readTextFile } from "herdr";
 
 function joinPath(root, rel) {
   if (!root) return rel;
@@ -117,6 +117,8 @@ export default class FilesTabs extends View {
     }
     this.saved = new Map();
     this.treeScroll = ScrollHandle.new();
+    this.fileSettingsSeed = null;
+    this.loadSettingsSeed();
     this.rowPaths = [];
     this.followKey = null;
     this.scrollTo = null;
@@ -221,8 +223,23 @@ export default class FilesTabs extends View {
     cx.notify();
   }
 
+  // Behaviour toggles from Settings → Files (default on). `shared` is live; the file seeds it after a restart.
+  setting(key) {
+    const v = shared("files-tabs.settings")?.[key];
+    return v === undefined ? this.fileSettingsSeed?.[key] !== false : v !== false;
+  }
+
+  async loadSettingsSeed() {
+    try {
+      const parsed = JSON.parse((await readTextFile(`${appHome()}/data/files-tabs/settings.json`)) || "{}");
+      this.fileSettingsSeed = parsed;
+      if (shared("files-tabs.settings") === undefined) setShared("files-tabs.settings", parsed);
+    } catch {}
+  }
+
   // Accordion: opening a folder closes every open folder that is not on its path (or inside it).
   collapseOthers(path) {
+    if (!this.setting("accordion")) return;
     for (const folder of [...this.folders]) {
       if (folder === path || path.startsWith(folder + "/") || folder.startsWith(path + "/")) continue;
       this.folders.delete(folder);
@@ -416,7 +433,7 @@ export default class FilesTabs extends View {
     // Follow the active file tab (preview or pinned): expand its folders and scroll it into view, once per switch.
     const activeTabId = spaces().find((s) => s.id === activeSpaceId)?.tabs?.find((t) => t.active)?.id;
     const followKey = activePath ? `${activeTabId}|${this.root}|${activePath}` : null;
-    if (followKey && followKey !== this.followKey) {
+    if (followKey && followKey !== this.followKey && this.setting("followActive")) {
       this.followKey = followKey;
       this.scrollTo = activePath;
       const dir = activePath.split("/").slice(0, -1).join("/");

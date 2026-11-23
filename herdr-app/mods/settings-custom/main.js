@@ -13,6 +13,7 @@ import {
   settings,
   layouts,
   shared,
+  setShared,
   appHome,
   readTextFile,
   writeTextFile,
@@ -35,6 +36,7 @@ const SECTIONS = [
   { id: "alerts", title: "Alerts", icon: "frame/settings/bell.svg" },
   { id: "git", title: "GitHub & Bitbucket", icon: "mods/prs-panel/pull-request.svg" },
   { id: "chat", title: "Herdr Chat", icon: "frame/welcome/messages.svg" },
+  { id: "files", title: "Files", icon: "mods/files/file.svg" },
   { id: "updates", title: "Updates", icon: "frame/settings/refresh.svg" },
   { id: "privacy", title: "Privacy", icon: "frame/settings/shield.svg" },
 ];
@@ -140,6 +142,41 @@ export default class SettingsCustom extends View {
 
   chatStateFile() {
     return `${appHome()}/data/herdr-chat/state.json`;
+  }
+
+  filesSettingsFile() {
+    return `${appHome()}/data/files-tabs/settings.json`;
+  }
+
+  async loadFilesSettings() {
+    const next = { accordion: true, followActive: true };
+    try {
+      const parsed = JSON.parse((await readTextFile(this.filesSettingsFile())) || "{}");
+      if (typeof parsed?.accordion === "boolean") next.accordion = parsed.accordion;
+      if (typeof parsed?.followActive === "boolean") next.followActive = parsed.followActive;
+    } catch {}
+    this.filesSettings = next;
+    setShared("files-tabs.settings", next);
+  }
+
+  updateFilesSettings(patch, cx) {
+    const next = { ...(this.filesSettings ?? { accordion: true, followActive: true }), ...patch };
+    this.filesSettings = next;
+    this.filesError = null;
+    setShared("files-tabs.settings", next);
+    cx.notify();
+    cx.spawn(async (cx) => {
+      try {
+        await exec("mkdir", ["-p", `${appHome()}/data/files-tabs`]);
+        const file = this.filesSettingsFile();
+        await writeTextFile(file, JSON.stringify(next, null, 2) + "\n", await readTextFile(file));
+      } catch (e) {
+        this.filesError = String(e?.message ?? e);
+        notify({ title: "Failed to save Files settings", body: this.filesError, level: "error" });
+      } finally {
+        cx.notify();
+      }
+    });
   }
 
   async resolveRealPath(p) {
@@ -444,6 +481,39 @@ export default class SettingsCustom extends View {
           .text_color(t.dim)
           .child(`Active Ctrl+T: ${ctrlTEffective ? "mod.open:new-chat" : "tab.new"} · State file: ${this.chatStateFile()}`),
       );
+  }
+
+  // Files ----------------------------------------------------------------
+
+  filesTab(t) {
+    const st = this.filesSettings ?? { accordion: true, followActive: true };
+    return v_flex()
+      .w_full()
+      .child(this.heading(t, "Files"))
+      .child(
+        this.row(
+          t,
+          "Close other folders when opening one",
+          "Accordion: opening a folder in the Files tab closes the open folders that are not on its path.",
+          this.toggle(t, "st-files-accordion", st.accordion, (_e, cx) =>
+            this.updateFilesSettings({ accordion: !st.accordion }, cx),
+          ),
+        ),
+      )
+      .child(
+        this.row(
+          t,
+          "Follow the active file tab",
+          "Switching to a file tab expands its folders in the Files tab, highlights the file and scrolls to it.",
+          this.toggle(t, "st-files-follow", st.followActive, (_e, cx) =>
+            this.updateFilesSettings({ followActive: !st.followActive }, cx),
+          ),
+        ),
+      )
+      .when(Boolean(this.filesError), (el) =>
+        el.child(div().pt(12).text_size(12.5).text_color(t.ansi1).child(this.filesError)),
+      )
+      .child(div().pt(12).text_size(12).text_color(t.dim).child(`Settings file: ${this.filesSettingsFile()}`));
   }
 
   // Look -----------------------------------------------------------------
@@ -1233,6 +1303,7 @@ export default class SettingsCustom extends View {
               this.handle.focus();
               if (s.id === "machines") cx.spawn(async (cx) => { await this.loadMachines(); cx.notify(); });
               if (s.id === "git") this.profilesCtrl.ensureLoaded(cx);
+              if (s.id === "files") cx.spawn(async (cx) => { await this.loadFilesSettings(); cx.notify(); });
               if (s.id === "chat") cx.spawn(async (cx) => { await this.loadChatState(); cx.notify(); });
               cx.notify();
             })
@@ -1326,6 +1397,8 @@ export default class SettingsCustom extends View {
                               ? this.alerts(t)
                               : this.section === "chat"
                                 ? this.herdrChat(t)
+                                : this.section === "files"
+                                ? this.filesTab(t)
                                 : this.section === "privacy"
                                   ? this.privacy(t)
                                   : this.updates(t),

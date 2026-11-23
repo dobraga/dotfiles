@@ -1,7 +1,7 @@
 ## 1. The Planning Lifecycle
 * **The "Rule of Three":** Any task requiring 3+ steps or architectural shifts triggers **Plan Mode**. Detailed specs must be committed to `docs/tasks/plan-<slug>.md` before the first line of code is written. Skip the plan for single-file or easily reversible changes.
 * **Scope Restatement:** Before multi-step edits, state the repo, branch and scope you will touch; ask if unsure.
-* **Verification Gate:** Implementation only begins after the plan is vetted by the user/lead.
+* **Verification Gate:** Implementation only begins after the plan is vetted by the user/lead. A revu result with `approved: true` (or an explicit "approved"/"implement" from the user) IS that vetting: start implementing immediately, do not ask "want me to implement?". Only stop if revu returns comments or a rejection.
 * **The Pivot Rule:** If a strategy encounters friction or "code smell," **STOP**. Re-plan and document the shift immediately. Do not sink cost into a failing path.
 * **Living Documentation:**
   * **Registry:** One file per plan, `docs/tasks/plan-<slug>.md`, holding the spec and its own todo checklist. When every item is checked and its PRs are merged, move it to `docs/tasks/archive/YYYY-MM-<slug>.md` in the same PR; the top level of `docs/tasks/` holds only open plans.
