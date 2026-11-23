@@ -298,10 +298,13 @@ export default class ChangesTabs extends View {
     const root = this.root, on = this.on, context = this.context;
     this.busy = true;
     this.note = null;
+    this.pendingDiscard = null;
     cx.spawn(async (cx) => {
       try {
-        const r = await exec("git", args, { cwd: root, on });
-        if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim());
+        for (const cmd of Array.isArray(args[0]) ? args : [args]) {
+          const r = await exec("git", cmd, { cwd: root, on });
+          if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim());
+        }
       } catch (e) { if (key() === context) this.note = `${failLabel} failed: ${e}`; }
       finally { this.busy = false; this.refresh(cx); cx.notify(); }
     });
@@ -313,6 +316,17 @@ export default class ChangesTabs extends View {
   unstage(path, cx) {
     const args = this.hasHead ? ["restore", "--staged", "--"] : ["rm", "--cached", "-r", "-q", "--"];
     this.gitOp(path ? [...args, path] : [...args, "."], cx, "Unstage");
+  }
+
+  // Destructive: first click arms (button turns "✓"), second click on the same target runs.
+  discard(f, cx) {
+    const id = f ? f.path : "*";
+    if (this.pendingDiscard !== id) { this.pendingDiscard = id; cx.notify(); return; }
+    if (f) {
+      this.gitOp(f.fresh ? ["clean", "-fdq", "--", f.path] : ["restore", "--", f.path], cx, "Discard");
+    } else {
+      this.gitOp([["restore", "--", "."], ["clean", "-fdq"]], cx, "Discard");
+    }
   }
 
   commit(cx) {
@@ -529,6 +543,8 @@ export default class ChangesTabs extends View {
                     .gap(6)
                     .items_center()
                     .child(div().flex_1().text_size(11).font_semibold().text_color(t.muted).child(`${title.toUpperCase()}  ${list.length}`))
+                    .when(section === "changes", (e) =>
+                      e.child(actBtn("discard-all", this.pendingDiscard === "*" ? "✓" : "↩", this.pendingDiscard === "*" ? "Click again to discard ALL changes" : "Discard all changes", (cx) => this.discard(null, cx))))
                     .child(section === "staged"
                       ? actBtn("unstage-all", "−", "Unstage all", (cx) => this.unstage(null, cx))
                       : actBtn("stage-all", "+", "Stage all", (cx) => this.stage(null, cx)));
@@ -569,6 +585,8 @@ export default class ChangesTabs extends View {
                       .child(h_flex().flex_1().min_w(0).child(div().text_color(t.dim).truncate().child(parts.length ? parts.join("/") + "/" : "")).child(div().max_w(260).min_w(0).truncate().child(name)))
                       .when(f.add > 0, (e) => e.child(div().text_size(11).text_color(t.ansi2).child(`+${f.add}`)))
                       .when(f.del > 0, (e) => e.child(div().text_size(11).text_color(t.ansi1).child(`−${f.del}`)))
+                      .when(section === "changes" && f.status !== "U", (e) =>
+                        e.child(actBtn(`discard-${f.path}`, this.pendingDiscard === f.path ? "✓" : "↩", this.pendingDiscard === f.path ? "Click again to discard" : "Discard changes", (cx) => this.discard(f, cx))))
                       .child(section === "staged"
                         ? actBtn(`unstage-${f.path}`, "−", "Unstage", (cx) => this.unstage(f.path, cx))
                         : actBtn(`stage-${f.path}`, "+", "Stage", (cx) => this.stage(f.path, cx)));
