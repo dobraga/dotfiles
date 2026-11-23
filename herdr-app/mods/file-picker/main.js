@@ -410,6 +410,7 @@ export default class FilePicker extends View {
     this.spaceId = loc.spaceId;
     this.on = loc.on;
     this.root = loc.cwd;
+    this.cwd = loc.cwd;
     if (!loc.cwd) {
       this.loading = false;
       this.error = "No folder in active space";
@@ -655,6 +656,16 @@ export default class FilePicker extends View {
       }
     }
     if (!root) return;
+    // The Files tab keys files by the space's cwd, not the git toplevel the picker lists from;
+    // re-root so the same file is recognised (and reuses its tab) whichever way it is opened.
+    const cwd = this.cwd?.replace(/[\\/]+$/, "");
+    if (cwd && root !== cwd) {
+      const full = joinFullPath(root, path);
+      if (full.startsWith(cwd + "/")) {
+        root = cwd;
+        path = full.slice(cwd.length + 1);
+      }
+    }
     this.close();
     openFileTab({
       spaceId: this.spaceId,

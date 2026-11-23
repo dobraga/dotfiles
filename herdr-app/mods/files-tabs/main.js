@@ -1,6 +1,6 @@
 // A lazy file browser for the focused pane's folder that opens files as main tabs (VS Code preview/pinned).
 import { View, div, svg } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
+import { v_flex, h_flex, ScrollHandle } from "gpui-base";
 import { spaces, panes, focused, exec, watchFolder, theme, window, run, shared, setShared, props, openOverlay, closeOverlay } from "herdr";
 
 function joinPath(root, rel) {
@@ -116,6 +116,10 @@ export default class FilesTabs extends View {
       return;
     }
     this.saved = new Map();
+    this.treeScroll = ScrollHandle.new();
+    this.rowPaths = [];
+    this.followKey = null;
+    this.scrollTo = null;
     this.entries = new Map();
     this.folders = new Set();
     this.pending = new Set();
@@ -202,6 +206,7 @@ export default class FilesTabs extends View {
         this.entries.delete(folder);
       }
     } else {
+      this.collapseOthers(path);
       this.folders.add(path);
       if (!this.entries.has(path) && !this.pending.has(path)) {
         const context = this.context;
@@ -214,6 +219,15 @@ export default class FilesTabs extends View {
       }
     }
     cx.notify();
+  }
+
+  // Accordion: opening a folder closes every open folder that is not on its path (or inside it).
+  collapseOthers(path) {
+    for (const folder of [...this.folders]) {
+      if (folder === path || path.startsWith(folder + "/") || folder.startsWith(path + "/")) continue;
+      this.folders.delete(folder);
+      this.entries.delete(folder);
+    }
   }
 
   open(path, name, pin) {
@@ -236,6 +250,7 @@ export default class FilesTabs extends View {
       const open = this.folders.has(path);
       const mark = this.marks[`${this.root}/${path}`];
       const selected = (!entry.dir && activePath === path) || (entry.dir && this.revealedDir === path);
+      this.rowPaths.push(path);
       out.push(
         h_flex()
           .id(`file-${path}`)
@@ -293,6 +308,12 @@ export default class FilesTabs extends View {
     }
     this.lastRevealSeq = rev.seq;
     this.revealedDir = relDir;
+    this.expandDir(relDir, cx);
+  }
+
+  // Expands every folder down to relDir (loading the ones not fetched yet).
+  expandDir(relDir, cx) {
+    this.collapseOthers(relDir);
     const parts = relDir.split("/").filter(Boolean);
     const toLoad = [];
     let acc = "";
@@ -324,7 +345,7 @@ export default class FilesTabs extends View {
   render(cx) {
     const t = theme();
     if (this.contextMenu) {
-      const { path, fullPath, overlay, spaceId, root, on, name, isDir } = this.contextMenu;
+      const { path, fullPath, overlay, spaceId, root, on, name, isDir, tabTarget } = this.contextMenu;
       const canOpenWith = !isDir && !on && Boolean(spaceId && root && path);
       const item = (id, label, value) =>
         div()
@@ -368,11 +389,48 @@ export default class FilesTabs extends View {
           ),
         )
         .child(item("files-ctx-rel", "Copy relative path", path))
-        .child(item("files-ctx-abs", "Copy full path", fullPath));
+        .child(item("files-ctx-abs", "Copy full path", fullPath))
+        .when(Boolean(tabTarget), (el) =>
+          el.child(
+            div()
+              .id("files-ctx-tab-menu")
+              .h(30)
+              .px(10)
+              .flex()
+              .items_center()
+              .rounded(6)
+              .cursor_pointer()
+              .hover((s) => s.bg(t.hover))
+              .on_click(() => {
+                closeOverlay(overlay);
+                openOverlay({ mod: "menu", kind: "popup", width: 200, props: { tab: "tab", target: tabTarget } });
+              })
+              .child("Tab options…"),
+          ),
+        );
     }
     if (key() !== this.context?.key) this.refresh(cx);
     this.applyReveal(cx);
-    const activePath = activeOpenFile(this.spaceId ?? spaces().find((s) => s.active)?.id, this.root, this.on);
+    const activeSpaceId = this.spaceId ?? spaces().find((s) => s.active)?.id;
+    const activePath = activeOpenFile(activeSpaceId, this.root, this.on);
+    // Follow the active file tab (preview or pinned): expand its folders and scroll it into view, once per switch.
+    const activeTabId = spaces().find((s) => s.id === activeSpaceId)?.tabs?.find((t) => t.active)?.id;
+    const followKey = activePath ? `${activeTabId}|${this.root}|${activePath}` : null;
+    if (followKey && followKey !== this.followKey) {
+      this.followKey = followKey;
+      this.scrollTo = activePath;
+      const dir = activePath.split("/").slice(0, -1).join("/");
+      if (dir) this.expandDir(dir, cx);
+    }
+    this.rowPaths = [];
+    const rowEls = this.rows("", 0, [], t, activePath);
+    if (this.scrollTo) {
+      const idx = this.rowPaths.indexOf(this.scrollTo);
+      if (idx >= 0) {
+        this.treeScroll.scroll_to_item(idx);
+        this.scrollTo = null;
+      }
+    }
     return v_flex()
       .id("files-tabs")
       .size_full()
@@ -399,11 +457,12 @@ export default class FilesTabs extends View {
       .child(
         v_flex()
           .id("files-tree")
+          .track_scroll(this.treeScroll)
           .flex_1()
           .min_h(0)
           .overflow_y_scrollbar()
           .p(6)
-          .children(this.rows("", 0, [], t, activePath))
+          .children(rowEls)
           .when(Boolean(this.error) || !this.entries.get("")?.length, (el) =>
             el.child(div().p(8).text_size(12).text_color(t.dim).child(this.error || (this.loading ? "Loading files…" : this.root ? "No files" : "No folder"))),
           )

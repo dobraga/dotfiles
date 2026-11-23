@@ -273,7 +273,18 @@ export default class TabsFolders extends View {
             if (!c.active) run("tab.select", { id: c.id });
           }
         })
-        .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); openOverlay({ mod: "menu", kind: "popup", width: 200, props: { tab: "tab", target: { id: c.id, space: sp.id } } }); })
+        .on_mouse_down("right", (_e, cx) => {
+          cx.stop_propagation();
+          const target = { id: c.id, space: sp.id };
+          if (fileSlot?.path && fileSlot?.root) {
+            const sep = fileSlot.root.endsWith("/") ? "" : "/";
+            openOverlay({ mod: "files-tabs", kind: "popup", width: 190, height: 112, props: { contextMenu: {
+              path: fileSlot.path, fullPath: fileSlot.root + sep + fileSlot.path, tabTarget: target,
+            } } });
+            return;
+          }
+          openOverlay({ mod: "menu", kind: "popup", width: 200, props: { tab: "tab", target } });
+        })
         .when(isFileTab, el => el.child(svg(fileSlot?.kind === "diff" ? "mods/changes/changes.svg" : "mods/files/file.svg").size(13).flex_none().text_color(isPreview ? t.dim : t.muted)))
         .when(!isFileTab && Boolean(program?.icon), el => el.child(program.tint ? svg(program.icon).size(14).text_color(t.muted) : image(program.icon).size(14)))
         .child(div().max_w(170).truncate().child(c.zoomed ? `${name} Z` : name))
