@@ -271,9 +271,27 @@ export default class TabsFolders extends View {
       ? Math.max(10, (root.traffic_lights[0] + 64) / settings().zoom - (sidebar?.hidden ? 0 : sidebar?.size?.px ?? 0))
       : 10;
     const panel = find(root, "panel"), body = find(root, "panel-body");
-    const enabled = shared("workspace.panels") ?? ["files", "changes"];
+    const basePanels = shared("workspace.panels") ?? ["files", "changes"];
+    const enabled = basePanels.includes("prs") ? basePanels : [...basePanels, "prs"];
     this.syncPanel(space, panel, body, enabled);
-    const panelButton = (id, label, icon) => {
+    const forgeState = shared("forge.state");
+    const activeProf = shared("space-folders.profile") || null;
+    const prSummary = (() => {
+      const byProf = forgeState?.summaryByProfile;
+      if (!byProf) return { total: 0, review: 0, alert: false };
+      if (activeProf && byProf[activeProf]) {
+        const s = byProf[activeProf];
+        return { total: s.total ?? 0, review: s.review ?? 0, alert: (s.failingCi ?? 0) > 0 || (s.changesRequested ?? 0) > 0 };
+      }
+      let total = 0, review = 0, alert = false;
+      for (const s of Object.values(byProf)) {
+        total += s.total ?? 0;
+        review += s.review ?? 0;
+        if ((s.failingCi ?? 0) > 0 || (s.changesRequested ?? 0) > 0) alert = true;
+      }
+      return { total, review, alert };
+    })();
+    const panelButton = (id, label, icon, extra = null) => {
       const on = panel && !panel.hidden && body?.active === id;
       return h_flex().id(`panel-${id}`).h(26).px(8).gap(5).flex_none().items_center().rounded(6)
         .text_size(12).bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : t.muted)
@@ -281,8 +299,19 @@ export default class TabsFolders extends View {
         .on_click(() => {
           if (on) run("layout.hide", { id: "panel" });
           else { run("layout.select", { stack: "panel-body", child: id }); run("layout.show", { id: "panel" }); }
-        }).child(svg(icon).size(14)).child(label);
+        }).child(svg(icon).size(14)).child(label).when(Boolean(extra), (el) => el.child(extra));
     };
+    const prBadge = prSummary.total > 0 || prSummary.alert
+      ? h_flex()
+          .gap(4)
+          .items_center()
+          .when(prSummary.total > 0, (el) =>
+            el.child(div().px(4).rounded(4).bg(t.raised).text_size(10).text_color(t.muted).child(String(prSummary.total))),
+          )
+          .when(prSummary.alert || prSummary.review > 0, (el) =>
+            el.child(div().size(5).rounded(3).bg(prSummary.alert ? t.ansi1 : t.blocked)),
+          )
+      : null;
     return h_flex().size_full().min_w(0).px(10).pl(lightsPadding).gap(3).items_center().bg(t.chrome).border_b(1).border_color(t.border)
       .on_mouse_up("left", () => { this.pressed = null; })
       .on_scroll_wheel(e => this.wheel(e))
@@ -292,6 +321,7 @@ export default class TabsFolders extends View {
       .child(button("tab-new", "+", () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 })))
       .when(enabled.includes("files"), el => el.child(panelButton("files", "Files", "mods/files/file.svg")))
       .when(enabled.includes("changes"), el => el.child(panelButton("changes", "Changes", "mods/changes/changes.svg")))
+      .when(enabled.includes("prs"), el => el.child(panelButton("prs", "PRs", "mods/prs-panel/pull-request.svg", prBadge)))
       .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/tabs-folders/win-min.svg").size(16) : "−", () => run("window.minimize")))
         .child(button("maximize", w.platform === "windows" ? svg(`mods/tabs-folders/${w.maximized ? "win-restore" : "win-max"}.svg`).size(16) : "□", () => run("window.maximize")))
         .child(button("close-window", w.platform === "windows" ? svg("mods/tabs-folders/win-close.svg").size(16) : svg("mods/pane/close.svg").size(13), () => run("window.close"))));

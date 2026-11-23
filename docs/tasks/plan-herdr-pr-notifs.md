@@ -14,7 +14,7 @@ Keep the native `agents` mod exactly as it is today and add a compact PR notific
 ## Decisions (defaults, confirm or change before implementation)
 1. **Placement:** the `agents` block (`main-folders.json:62`) becomes a vertical container: `agents` (weight 1, unchanged) + `pr-notifs` (compact, ~120-160px). The native mod is not reimplemented.
 2. **Content:** persistent event history in `shared("forge.notifs")` (cap 50), not only the current PR state.
-3. **Space filter:** by the active space's profile (`shared("space-folders.profile")`), same as `prs-panel` (`effectiveProfile()`). A header chip `All` lifts the filter temporarily. Unread items from other profiles show as `+N in <profile>`. Filtering by repo is a possible later option.
+3. **Space filter:** by the active space's profile (`shared("space-folders.profile")`), same as `prs-panel` (`effectiveProfile()`). There is no local override: the Spaces list (All / Personal / Work) is the single source of truth for `prs-panel` and `pr-notifs`; neither shows a profile selector or label. Unread items from other profiles show as `+N in <profile>`. Filtering by repo is a possible later option.
 
 ## Design
 - **Data source:** `shared("forge.state")` is already filled by `workspace-status-usage.syncForge`; no new polling.

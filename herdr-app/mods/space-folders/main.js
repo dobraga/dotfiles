@@ -13,7 +13,34 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { spaces, agents, machines, panes, run, openOverlay, closeOverlay, props, exec, hc, theme, shared, setShared, watchFolder, window, layout, pickFolder, home, nextCommand } from "herdr";
+import { spaces, agents, machines, panes, run, openOverlay, closeOverlay, props, exec, hc, theme, shared, setShared, watchFolder, window, layout, pickFolder, home, appHome, checking, nextCommand } from "herdr";
+
+function normalizeRemoteSlug(url) {
+  const s = (url ?? "").trim();
+  if (!s) return null;
+  let host = "";
+  let path = "";
+  const idx = s.indexOf("://");
+  if (idx >= 0) {
+    const rest = s.slice(idx + 3);
+    const slash = rest.indexOf("/");
+    if (slash < 0) return null;
+    const hostPart = rest.slice(0, slash);
+    host = (hostPart.includes("@") ? hostPart.split("@").pop() : hostPart).split(":")[0].toLowerCase();
+    path = rest.slice(slash + 1);
+  } else {
+    const m = /^(?:[^@]+@)?([^:/]+):(.+)$/.exec(s);
+    if (!m) return null;
+    host = m[1].toLowerCase();
+    path = m[2];
+  }
+  const provider = host.includes("github") ? "github" : host.includes("bitbucket") ? "bitbucket" : null;
+  if (!provider) return null;
+  path = path.replace(/^\/+|\/+$/g, "").replace(/\.git$/, "");
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length < 2) return null;
+  return `${provider}:${parts[0].toLowerCase()}/${parts[1].toLowerCase()}`;
+}
 
 // A machine's folders live in a file in its home, so every screen showing its
 // spaces shows the same folders: { list: [{ id, name, folded }], of: { spaceId:
@@ -428,9 +455,10 @@ export default class Spaces extends View {
       // The repo's own .git folder names it; a worktree's top differs from it.
       const top = await exec("git", ["rev-parse", "--show-toplevel"], { cwd, on });
       const common = await exec("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd, on });
+      const remote = await exec("git", ["config", "--get", "remote.origin.url"], { cwd, on }).catch(() => null);
       const repo = common.stdout.trim();
       const name = repo.endsWith("/.git") ? base(repo.slice(0, -5)) : base(repo).replace(/\.git$/, "");
-      const info = { name, branch: null, ahead: 0, behind: 0, repo: JSON.stringify([on, repo]), linked: repo !== `${top.stdout.trim()}/.git` };
+      const info = { name, branch: null, ahead: 0, behind: 0, repo: JSON.stringify([on, repo]), repoSlug: remote?.code === 0 ? normalizeRemoteSlug(remote.stdout) : null, linked: repo !== `${top.stdout.trim()}/.git` };
       for (const line of r.stdout.split("\n")) {
         if (line.startsWith("# branch.head ")) info.branch = line.slice(14);
         else if (line.startsWith("# branch.ab ")) {
@@ -660,6 +688,10 @@ export default class Spaces extends View {
       }
     }
     if (activeProfile() === id) this.setProfile(null);
+    if (!checking()) {
+      exec("python3", [`${appHome()}/mods/prs-panel/forge-helper.py`, "delete-profile", "--id", id]).catch(() => null);
+      setShared("forge.refreshReq", Date.now());
+    }
   }
 
   saveFolder() {
@@ -814,6 +846,7 @@ export default class Spaces extends View {
     const item = (key, label, action) => div().id(key).h(30).px(10).flex().items_center().rounded(6).cursor_pointer()
       .hover((s) => s.bg(t.hover)).on_click(() => { closeOverlay(overlay); action(); }).child(label);
     return v_flex().id("profile-menu").size_full().p(5).gap(1).bg(t.popover).text_color(t.foreground).text_size(12.5)
+      .child(item("prof-forge", "Configure GitHub / Bitbucket…", () => openOverlay({ mod: "settings-custom", kind: "dialog", width: 900, height: 640, props: { section: "git", selectProfile: id } })))
       .child(item("prof-rename", "Rename profile…", () => openOverlay({ mod: "space-folders", kind: "dialog", width: 380, props: { editProfile: id, freshProfile: false } })))
       .child(item("prof-delete", "Delete profile", () => this.deleteProfile(id)));
   }
@@ -970,6 +1003,16 @@ export default class Spaces extends View {
     const customName = tree || w.named ? w.name : "";
     const repo = customName || (g && !tree && !same(g.name) ? g.name : "");
     const where = [repo, branch].filter(Boolean).join(" \u00b7 ");
+    const branchPr = g?.repoSlug && g?.branch ? shared("forge.state")?.byBranch?.[`${g.repoSlug}::${g.branch}`] ?? null : null;
+    const prColor = branchPr
+      ? (branchPr.ciState === "failure" || branchPr.conflicts || branchPr.reviewState === "changes_requested"
+          ? t.ansi1
+          : branchPr.ciState === "success" && branchPr.reviewState === "approved"
+            ? t.ansi2
+            : branchPr.ciState === "pending"
+              ? t.working
+              : t.muted)
+      : t.dim;
     return h_flex()
       .flex_1()
       .min_w(0)
@@ -979,6 +1022,29 @@ export default class Spaces extends View {
       .text_size(11.5)
       .text_color(t.dim)
       .when(Boolean(where), (el) => el.child(div().min_w(0).truncate().child(where)))
+      .when(Boolean(branchPr), (el) =>
+        el.child(
+          div()
+            .id(`sp-pr-${w.id}-${branchPr.number}`)
+            .flex_none()
+            .px(4)
+            .rounded(4)
+            .bg(prColor + "20")
+            .text_size(10)
+            .font_medium()
+            .text_color(prColor)
+            .cursor_pointer()
+            .tooltip(`${branchPr.title} · CI: ${branchPr.ciState} · Review: ${branchPr.reviewState}`)
+            .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+            .on_click((_e, cx) => {
+              cx.stop_propagation();
+              setShared("forge.focusPrKey", { key: branchPr.key, seq: Date.now() });
+              run("layout.select", { stack: "panel-body", child: "prs" });
+              run("layout.show", { id: "panel" });
+            })
+            .child(`#${branchPr.number}`),
+        ),
+      )
       .when(Boolean(showAheadBehind && g && g.ahead > 0), (el) => el.child(div().flex_none().text_color(t.ansi2).child(`\u2191${g.ahead}`)))
       .when(Boolean(showAheadBehind && g && g.behind > 0), (el) => el.child(div().flex_none().text_color(t.ansi1).child(`\u2193${g.behind}`)));
   }
@@ -1203,7 +1269,7 @@ export default class Spaces extends View {
         .when(Boolean(pid), (el) =>
           el.on_mouse_down("right", (_e, cx) => {
             cx.stop_propagation();
-            openOverlay({ mod: "space-folders", kind: "popup", width: 170, height: 80, props: { profileMenu: pid } });
+            openOverlay({ mod: "space-folders", kind: "popup", width: 230, height: 112, props: { profileMenu: pid } });
           }),
         )
         .child(label)
@@ -1241,6 +1307,21 @@ export default class Spaces extends View {
                 .hover((s) => s.bg(t.hover).text_color(t.foreground))
                 .on_click(() => openOverlay({ mod: "space-folders", kind: "dialog", width: 380, props: { editProfile: null, freshProfile: true } }))
                 .child("+"),
+            )
+            .child(
+              div()
+                .id("profile-manage")
+                .h(22)
+                .px(5)
+                .flex()
+                .items_center()
+                .rounded(6)
+                .cursor_pointer()
+                .text_color(t.dim)
+                .tooltip("Configure profiles & GitHub/Bitbucket")
+                .hover((s) => s.bg(t.hover).text_color(t.foreground))
+                .on_click(() => openOverlay({ mod: "settings-custom", kind: "dialog", width: 900, height: 640, props: { section: "git", selectProfile: prof } }))
+                .child(svg("mods/workspace-chrome/settings.svg").size(12)),
             ),
         ),
       )

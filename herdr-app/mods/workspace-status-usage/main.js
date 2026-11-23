@@ -13,12 +13,54 @@ import {
   readTextFile,
   watchFolder,
   home,
+  appHome,
+  notify,
+  nextCommand,
+  layout,
   openOverlay,
   closeOverlay,
   shared,
   setShared,
   checking,
 } from "herdr";
+
+import { readPlayers, pickActive, signature, sendCommand, pillLabel } from "./media.js";
+
+function findNode(node, id) {
+  if (node?.id === id) return node;
+  for (const child of node?.children ?? []) {
+    const found = findNode(child, id);
+    if (found) return found;
+  }
+  return null;
+}
+
+function normalizeRemoteSlug(url) {
+  const s = (url ?? "").trim();
+  if (!s) return null;
+  let host = "";
+  let path = "";
+  const idx = s.indexOf("://");
+  if (idx >= 0) {
+    const rest = s.slice(idx + 3);
+    const slash = rest.indexOf("/");
+    if (slash < 0) return null;
+    const hostPart = rest.slice(0, slash);
+    host = (hostPart.includes("@") ? hostPart.split("@").pop() : hostPart).split(":")[0].toLowerCase();
+    path = rest.slice(slash + 1);
+  } else {
+    const m = /^(?:[^@]+@)?([^:/]+):(.+)$/.exec(s);
+    if (!m) return null;
+    host = m[1].toLowerCase();
+    path = m[2];
+  }
+  const provider = host.includes("github") ? "github" : host.includes("bitbucket") ? "bitbucket" : null;
+  if (!provider) return null;
+  path = path.replace(/^\/+|\/+$/g, "").replace(/\.git$/, "");
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length < 2) return null;
+  return `${provider}:${parts[0].toLowerCase()}/${parts[1].toLowerCase()}`;
+}
 
 const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 
@@ -152,12 +194,37 @@ export default class WorkspaceStatusUsage extends View {
     this.lastCtxTerm = null;
     this.branchByKey = {};
     this.branchLoading = new Set();
+    this.lastForgeReq = shared("forge.refreshReq") ?? 0;
+    this.forgeSyncing = false;
+    this.forgeLastSync = 0;
+    this.repoByKey = {};
+    this.repoLoading = new Set();
     if (checking()) return;
 
     setShared("usage.pillHovered", false);
     setShared("usage.cardHovered", false);
     setShared("usage.pinned", false);
     setShared("usage.openOverlayId", null);
+    setShared("media.state", null);
+    setShared("media.hovered", false);
+    setShared("media.cardHovered", false);
+    setShared("media.pinned", false);
+    setShared("media.openOverlayId", null);
+    this.mediaSig = "";
+    this.mediaBusy = false;
+    this.lastMediaReq = shared("media.cmdReq")?.n ?? 0;
+
+    cx.spawn(async () => {
+      for (;;) {
+        const cmd = String(await nextCommand());
+        if (cmd === "open-pr" || cmd.startsWith("open-pr:")) {
+          const prKey = cmd.startsWith("open-pr:") ? cmd.slice(8) : null;
+          if (prKey) setShared("forge.focusPrKey", { key: prKey, seq: Date.now() });
+          run("layout.select", { stack: "panel-body", child: "prs" });
+          run("layout.show", { id: "panel" });
+        }
+      }
+    });
 
     cx.spawn(async (cx) => {
       const cachedAgy = await readAgyCache();
@@ -167,6 +234,9 @@ export default class WorkspaceStatusUsage extends View {
       await this.setupContextWatch(cx);
       await this.refresh(cx);
     });
+    cx.timer.after(1500, (cx) => this.syncForge(cx));
+    cx.timer.every(15000, (cx) => this.maybeSyncForge(cx));
+    cx.timer.every(2000, (cx) => this.pollMedia(cx));
     cx.timer.every(180000, (cx) => this.refresh(cx));
     cx.timer.every(3000, (cx) => {
       const info = this.focusedAgentInfo();
@@ -234,6 +304,100 @@ export default class WorkspaceStatusUsage extends View {
       setShared("usage.loading", false);
       cx.notify();
     }
+  }
+
+  async pollMedia(cx) {
+    if (this.mediaBusy) return;
+    this.mediaBusy = true;
+    try {
+      const players = await readPlayers(exec);
+      const active = pickActive(players);
+      const state = active ? { ...active, players: players.map((p) => ({ bus: p.bus, title: p.title, status: p.status })), syncedAt: Date.now() } : null;
+      const sig = signature(state);
+      if (sig !== this.mediaSig) {
+        this.mediaSig = sig;
+        setShared("media.state", state);
+        if (!state) this.closeMediaCard();
+        cx.notify();
+      } else if (state) {
+        // re-anchor shared position only on seek/drift (>1.5s from local extrapolation)
+        const cur = shared("media.state");
+        const expected = cur.positionUs + (cur.status === "Playing" ? (state.syncedAt - cur.syncedAt) * 1000 : 0);
+        if (Math.abs(state.positionUs - expected) > 1.5e6) setShared("media.state", state);
+      }
+    } finally {
+      this.mediaBusy = false;
+    }
+  }
+
+  openMediaCard(cx) {
+    if (shared("media.openOverlayId")) return;
+    // anchor to the pointer (it is on the badge): card bottom ~16px above it
+    const vp = cx.viewport_size();
+    const m = cx.mouse_position();
+    const W = 340, H = 175;
+    this.dbg = `open vp=${Math.round(vp.width)}x${Math.round(vp.height)} m=${Math.round(m.x)},${Math.round(m.y)}`;
+    const x = Math.max(8, Math.min(vp.width - W - 8, Math.round(m.x - W / 2)));
+    const id = openOverlay({ mod: "media-card", kind: "window", frame: "none", at: { x, y: Math.max(8, Math.round(m.y - 16 - H)) }, width: W });
+    setShared("media.openOverlayId", id);
+  }
+
+  closeMediaCard() {
+    const id = shared("media.openOverlayId");
+    if (id) closeOverlay(id);
+    setShared("media.openOverlayId", null);
+    setShared("media.pinned", false);
+  }
+
+  mediaPill(m, t) {
+    const btn = (id, icon, on) =>
+      div()
+        .id(id)
+        .p(3)
+        .rounded(4)
+        .cursor_pointer()
+        .hover((s) => s.bg(t.hover).text_color(t.foreground))
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => {
+          cx.stop_propagation();
+          on();
+        })
+        .child(svg(`mods/media-card/icons/${icon}.svg`).size(12).flex_none().text_color(t.foreground));
+    const isOpen = Boolean(shared("media.openOverlayId"));
+    return h_flex()
+      .id("status-media")
+      .px(7)
+      .py(2)
+      .gap(4)
+      .items_center()
+      .rounded(5)
+      .cursor_pointer()
+      .when(isOpen, (el) => el.bg(t.selected))
+      .hover((s) => s.bg(t.hover).text_color(t.foreground))
+      .on_hover((hovered, cx) => {
+        setShared("media.hovered", hovered);
+        if (hovered) {
+          this.openMediaCard(cx);
+        } else if (!shared("media.pinned")) {
+          cx.timer.after(260, () => {
+            if (!shared("media.hovered") && !shared("media.cardHovered") && !shared("media.pinned")) this.closeMediaCard();
+          });
+        }
+      })
+      .on_click((_e, cx) => {
+        if (!shared("media.openOverlayId")) {
+          setShared("media.pinned", true);
+          this.openMediaCard(cx);
+        } else if (shared("media.pinned")) {
+          this.closeMediaCard();
+        } else {
+          setShared("media.pinned", true);
+        }
+      })
+      .when(m.canPrev, (el) => el.child(btn("media-prev", "prev", () => this.mediaCmdRef("prev"))))
+      .child(btn("media-toggle", m.status === "Playing" ? "pause" : "play", () => this.mediaCmdRef("toggle")))
+      .when(m.canNext, (el) => el.child(btn("media-next", "next", () => this.mediaCmdRef("next"))))
+      .child(div().max_w(380).truncate().child(pillLabel(m, 30) + (this.dbg ? " | " + this.dbg : "")));
   }
 
   openCard() {
@@ -318,6 +482,85 @@ export default class WorkspaceStatusUsage extends View {
     return { title: "Usage", items };
   }
 
+  maybeSyncForge(cx) {
+    const intervalMs = (shared("forge.state")?.pollIntervalSec ?? 90) * 1000;
+    if (Date.now() - this.forgeLastSync >= intervalMs) {
+      this.syncForge(cx);
+    }
+  }
+
+  persistForgeEvents(events) {
+    if (!events.length) return;
+    const at = Date.now();
+    const fresh = events.map((ev, i) => ({
+      id: `${ev.prKey}:${ev.kind}:${at}:${i}`,
+      prKey: ev.prKey,
+      kind: ev.kind,
+      profile: ev.profileId ?? null,
+      title: ev.title,
+      body: ev.body ?? "",
+      level: ev.level || "info",
+      at,
+      read: false,
+    }));
+    const prev = shared("forge.notifs");
+    setShared("forge.notifs", [...fresh, ...(Array.isArray(prev) ? prev : [])].slice(0, 50));
+  }
+
+  syncForge(cx) {
+    if (checking() || this.forgeSyncing) return;
+    this.forgeSyncing = true;
+    this.forgeLastSync = Date.now();
+    setShared("forge.loading", true);
+    const helper = `${appHome()}/mods/prs-panel/forge-helper.py`;
+    cx.spawn(async (cx) => {
+      try {
+        const res = await exec("python3", [helper, "sync"], { timeout: 35000 });
+        if (res.code === 0 && res.stdout.trim()) {
+          const data = JSON.parse(res.stdout);
+          setShared("forge.state", data);
+          this.persistForgeEvents(data.events ?? []);
+          for (const ev of data.events ?? []) {
+            notify({
+              title: ev.title,
+              body: ev.body || undefined,
+              level: ev.level || "info",
+              timeout: ev.level === "error" ? 8000 : 5000,
+              action: { name: `workspace-status-usage.open-pr:${ev.prKey}` },
+            });
+          }
+        }
+      } catch {
+      } finally {
+        this.forgeSyncing = false;
+        this.forgeLastSync = Date.now();
+        setShared("forge.loading", false);
+        cx.notify();
+      }
+    });
+  }
+
+  resolveRepoSlug(cwd, on, cx) {
+    if (!cwd) return null;
+    const k = `${on ?? ""}:${cwd}`;
+    if (k in this.repoByKey) return this.repoByKey[k];
+    if (!checking() && !this.repoLoading.has(k)) {
+      this.repoLoading.add(k);
+      cx.spawn(async (cx) => {
+        try {
+          const r = await exec("git", ["config", "--get", "remote.origin.url"], { cwd, on });
+          this.repoByKey[k] = r.code === 0 ? normalizeRemoteSlug(r.stdout) : null;
+        } catch {
+          this.repoByKey[k] = null;
+        } finally {
+          this.repoLoading.delete(k);
+          cx.notify();
+        }
+      });
+    }
+    return null;
+  }
+
   resolveBranch(cwd, on, cx) {
     if (!cwd) return null;
     const k = `${on ?? ""}:${cwd}`;
@@ -346,12 +589,30 @@ export default class WorkspaceStatusUsage extends View {
       if (!checking()) cx.spawn(async (cx) => this.refresh(cx));
     }
 
+    const forgeReq = shared("forge.refreshReq") ?? 0;
+    if (forgeReq && forgeReq !== this.lastForgeReq) {
+      this.lastForgeReq = forgeReq;
+      if (!checking()) this.syncForge(cx);
+    }
+
     const activeAgent = this.focusedAgentInfo();
     if (activeAgent && activeAgent.term !== this.lastCtxTerm) {
       this.lastCtxTerm = activeAgent.term;
       if (!checking()) cx.spawn(async (cx) => this.readContext(activeAgent.term, cx));
     } else if (!activeAgent) {
       this.lastCtxTerm = null;
+    }
+
+    const mreq = shared("media.cmdReq");
+    if (mreq && mreq.n !== this.lastMediaReq) {
+      this.lastMediaReq = mreq.n;
+      const m = shared("media.state");
+      if (m && !checking()) {
+        cx.spawn(async (cx) => {
+          await sendCommand(exec, m.bus, mreq.cmd, mreq.arg).catch(() => null);
+          await this.pollMedia(cx);
+        });
+      }
     }
 
     const t = theme();
@@ -366,11 +627,44 @@ export default class WorkspaceStatusUsage extends View {
     } else if (!branch && spaceCwd) {
       branch = this.resolveBranch(spaceCwd, spaceOn, cx);
     }
+    const repoSlug = spaceCwd ? this.resolveRepoSlug(spaceCwd, spaceOn, cx) : null;
+    const forgeState = shared("forge.state");
+    const branchPr = repoSlug && branch ? forgeState?.byBranch?.[`${repoSlug}::${branch}`] ?? null : null;
+    const activeProf = shared("space-folders.profile") || null;
+    const prSummary = (() => {
+      const byProf = forgeState?.summaryByProfile;
+      if (!byProf) return { total: 0, mine: 0, review: 0, alert: false, configured: false };
+      if (activeProf && byProf[activeProf]) {
+        const s = byProf[activeProf];
+        return {
+          total: s.total ?? 0,
+          mine: s.mine ?? 0,
+          review: s.review ?? 0,
+          alert: (s.failingCi ?? 0) > 0 || (s.changesRequested ?? 0) > 0,
+          configured: Boolean(s.configured),
+        };
+      }
+      let total = 0, mine = 0, review = 0, alert = false, configured = false;
+      for (const s of Object.values(byProf)) {
+        total += s.total ?? 0;
+        mine += s.mine ?? 0;
+        review += s.review ?? 0;
+        if ((s.failingCi ?? 0) > 0 || (s.changesRequested ?? 0) > 0) alert = true;
+        if (s.configured) configured = true;
+      }
+      return { total, mine, review, alert, configured };
+    })();
+    const rootLayout = layout();
+    const sidePanel = findNode(rootLayout, "panel");
+    const panelBody = findNode(rootLayout, "panel-body");
+    const prsPanelOpen = Boolean(sidePanel && !sidePanel.hidden && panelBody?.active === "prs");
     const list = agents();
     const needs = list.filter((a) => a.status === "blocked").length;
     const data = shared("usage.data");
     const pill = this.pillItems(data, activeAgent, t);
     const isOpen = Boolean(shared("usage.openOverlayId"));
+    this.mediaCmdRef = (c) => ((this.dbg = "cmd " + c), setShared("media.cmdReq", { cmd: c, arg: null, n: Date.now() }));
+    const media = shared("media.state");
     const label = (icon, text) => h_flex().gap(6).items_center().child(svg(`mods/workspace-chrome/${icon}.svg`).size(13)).child(text);
 
     return h_flex()
@@ -385,6 +679,35 @@ export default class WorkspaceStatusUsage extends View {
       .text_color(t.muted)
       .child(label(space?.machine ? "server" : "monitor", space?.machine ?? "This computer"))
       .when(Boolean(branch), (el) => el.child(label("branch", branch)))
+      .when(Boolean(branchPr), (el) => {
+        const ciMark = branchPr.ciState === "failure" ? "✕ CI" : branchPr.ciState === "success" ? "✓ CI" : branchPr.ciState === "pending" ? "● CI" : null;
+        const ciCol = branchPr.ciState === "failure" ? t.ansi1 : branchPr.ciState === "success" ? t.ansi2 : branchPr.ciState === "pending" ? t.working : t.dim;
+        const revCol = branchPr.reviewState === "changes_requested" ? t.ansi1 : branchPr.reviewState === "approved" ? t.ansi2 : t.muted;
+        const revMark = branchPr.reviewState === "changes_requested" ? "! chg" : branchPr.approvals > 0 ? `✓ ${branchPr.approvals}` : null;
+        return el.child(
+          h_flex()
+            .id("status-branch-pr")
+            .px(6)
+            .py(1)
+            .gap(5)
+            .items_center()
+            .rounded(5)
+            .bg(t.raised)
+            .border_1()
+            .border_color(t.border)
+            .cursor_pointer()
+            .tooltip(`${branchPr.title} — click to inspect PR`)
+            .hover((s) => s.bg(t.hover).text_color(t.foreground))
+            .on_click(() => {
+              setShared("forge.focusPrKey", { key: branchPr.key, seq: Date.now() });
+              run("layout.select", { stack: "panel-body", child: "prs" });
+              run("layout.show", { id: "panel" });
+            })
+            .child(div().font_medium().text_color(t.foreground).child(`#${branchPr.number}`))
+            .when(Boolean(ciMark), (e2) => e2.child(div().text_color(ciCol).child(ciMark)))
+            .when(Boolean(revMark), (e2) => e2.child(div().text_color(revCol).child(revMark))),
+        );
+      })
       .child(
         h_flex()
           .gap(6)
@@ -443,7 +766,50 @@ export default class WorkspaceStatusUsage extends View {
             ),
           ),
       )
+      .child(
+        h_flex()
+          .id("status-prs")
+          .px(7)
+          .py(2)
+          .gap(5)
+          .items_center()
+          .rounded(5)
+          .cursor_pointer()
+          .when(prsPanelOpen, (el) => el.bg(t.selected))
+          .hover((s) => s.bg(t.hover).text_color(t.foreground))
+          .tooltip("Toggle Pull Requests panel")
+          .on_click(() => {
+            if (prsPanelOpen) {
+              run("layout.hide", { id: "panel" });
+            } else {
+              run("layout.select", { stack: "panel-body", child: "prs" });
+              run("layout.show", { id: "panel" });
+            }
+          })
+          .child(
+            div().size(6).rounded(3).bg(
+              shared("forge.loading")
+                ? t.working
+                : prSummary.alert
+                  ? t.ansi1
+                  : prSummary.review > 0
+                    ? t.blocked
+                    : prSummary.configured
+                      ? t.ansi2
+                      : t.dim,
+            ),
+          )
+          .child("PRs")
+          .when(prSummary.total > 0, (el) =>
+            el.child(
+              div().text_color(prSummary.alert ? t.ansi1 : t.foreground).child(
+                prSummary.review > 0 ? `${prSummary.mine} · ${prSummary.review} rev` : String(prSummary.total),
+              ),
+            ),
+          ),
+      )
       .child(div().flex_1())
+      .when(Boolean(media), (el) => el.child(this.mediaPill(media, t)))
       .child(div().id("palette").text_color(t.dim).cursor_pointer().on_click(() => run("app.palette")).child(this.hint()));
   }
 }

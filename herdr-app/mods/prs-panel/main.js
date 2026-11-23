@@ -39,7 +39,6 @@ export function normalizeRemoteSlug(url) {
 export default class PrsPanel extends View {
   init(_props, cx) {
     this.tab = "all"; // "mine" | "review" | "all"
-    this.scopeOverride = null; // null = follow active profile, "all" = show all profiles
     this.selectedKey = null;
     this.detailCache = {};
     this.detailLoading = false;
@@ -72,8 +71,8 @@ export default class PrsPanel extends View {
     return p && this.profileList().some((x) => x.id === p) ? p : null;
   }
 
+  // The profile filter is owned by the Spaces list (All / Personal / Work); no local override.
   effectiveProfile() {
-    if (this.scopeOverride === "all") return null;
     return this.activeSpaceProfile();
   }
 
@@ -253,10 +252,6 @@ export default class PrsPanel extends View {
         this.selectedKey = focusReq.key;
         this.showAgentPicker = false;
         this.showDescription = false;
-        const activeProf = this.effectiveProfile();
-        if (target && activeProf && target.profileId !== activeProf) {
-          this.scopeOverride = "all";
-        }
         if (target && !checking()) this.loadDetail(target, cx);
       }
     }
@@ -346,28 +341,6 @@ export default class PrsPanel extends View {
           .border_b(1)
           .border_color(t.border)
           .child(div().font_semibold().child("PRs"))
-          .when(Boolean(activeProf), (el) =>
-            el.child(
-              div()
-                .id("prs-scope-toggle")
-                .px(7)
-                .py(2)
-                .rounded(5)
-                .cursor_pointer()
-                .border_1()
-                .border_color(t.border)
-                .bg(t.chrome)
-                .text_size(11)
-                .text_color(t.muted)
-                .tooltip("Toggle active profile vs All profiles")
-                .hover((s) => s.bg(t.hover).text_color(t.foreground))
-                .on_click((_e, cx) => {
-                  this.scopeOverride = this.scopeOverride === "all" ? null : "all";
-                  cx.notify();
-                })
-                .child(activeProfName),
-            ),
-          )
           .child(div().flex_1())
           .child(
             iconBtn(

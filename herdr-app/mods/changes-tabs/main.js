@@ -23,6 +23,33 @@ const key = () => JSON.stringify(location());
 // the folder watch would see it, and every refresh would start the next one.
 const READ = ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "diff.autoRefreshIndex=false"];
 
+function normalizeRemoteSlug(url) {
+  const s = (url ?? "").trim();
+  if (!s) return null;
+  let host = "";
+  let path = "";
+  const idx = s.indexOf("://");
+  if (idx >= 0) {
+    const rest = s.slice(idx + 3);
+    const slash = rest.indexOf("/");
+    if (slash < 0) return null;
+    const hostPart = rest.slice(0, slash);
+    host = (hostPart.includes("@") ? hostPart.split("@").pop() : hostPart).split(":")[0].toLowerCase();
+    path = rest.slice(slash + 1);
+  } else {
+    const m = /^(?:[^@]+@)?([^:/]+):(.+)$/.exec(s);
+    if (!m) return null;
+    host = m[1].toLowerCase();
+    path = m[2];
+  }
+  const provider = host.includes("github") ? "github" : host.includes("bitbucket") ? "bitbucket" : null;
+  if (!provider) return null;
+  path = path.replace(/^\/+|\/+$/g, "").replace(/\.git$/, "");
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length < 2) return null;
+  return `${provider}:${parts[0].toLowerCase()}/${parts[1].toLowerCase()}`;
+}
+
 function openFileTab({ spaceId, kind, path, root, on, name, pin }) {
   if (!spaceId || !root || !path) return;
   const slots = { ...(shared("file-view.slots") ?? {}) };
@@ -139,6 +166,7 @@ export default class ChangesTabs extends View {
       this.root = null;
       this.files = [];
       this.branch = null;
+      this.repoSlug = null;
       this.ahead = 0;
       this.behind = 0;
       this.hasUpstream = false;
@@ -161,7 +189,9 @@ export default class ChangesTabs extends View {
         if (status.code !== 0) throw new Error(status.stderr);
         const head = await git(["rev-parse", "--verify", "HEAD"]);
         const branchRes = await git(["rev-parse", "--abbrev-ref", "HEAD"]);
+        const remoteRes = await git(["config", "--get", "remote.origin.url"]);
         const branch = branchRes.code === 0 ? branchRes.stdout.trim() : null;
+        const repoSlug = remoteRes.code === 0 ? normalizeRemoteSlug(remoteRes.stdout) : null;
         let ahead = 0, behind = 0, hasUpstream = false;
         if (head.code === 0) {
           const abRes = await git(["rev-list", "--left-right", "--count", "@{u}...HEAD"]);
@@ -199,6 +229,7 @@ export default class ChangesTabs extends View {
         this.on = on;
         this.files = files;
         this.branch = branch;
+        this.repoSlug = repoSlug;
         this.ahead = ahead;
         this.behind = behind;
         this.hasUpstream = hasUpstream;
@@ -384,6 +415,18 @@ export default class ChangesTabs extends View {
             .when(canSync, (b) => b.cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)))
             .on_click((_e, cx) => this.syncGit(action, cx))
             .child(label);
+        const branchPr = this.repoSlug && this.branch
+          ? shared("forge.state")?.byBranch?.[`${this.repoSlug}::${this.branch}`] ?? null
+          : null;
+        const branchPrColor = branchPr
+          ? (branchPr.ciState === "failure" || branchPr.conflicts || branchPr.reviewState === "changes_requested"
+              ? t.ansi1
+              : branchPr.ciState === "success" && branchPr.reviewState === "approved"
+                ? t.ansi2
+                : branchPr.ciState === "pending"
+                  ? t.working
+                  : t.muted)
+          : t.dim;
         return el.child(
           h_flex()
             .h(34)
@@ -395,6 +438,30 @@ export default class ChangesTabs extends View {
             .border_color(t.border)
             .child(svg("mods/workspace-chrome/branch.svg").size(12).flex_none().text_color(t.dim))
             .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.muted).child(this.branch || "HEAD"))
+            .when(Boolean(branchPr), (e2) =>
+              e2.child(
+                div()
+                  .id("changes-branch-pr")
+                  .px(6)
+                  .py(2)
+                  .rounded(5)
+                  .border_1()
+                  .border_color(branchPrColor + "66")
+                  .bg(branchPrColor + "1a")
+                  .text_size(10.5)
+                  .font_medium()
+                  .text_color(branchPrColor)
+                  .cursor_pointer()
+                  .tooltip(`${branchPr.title} — click to open in PRs panel`)
+                  .hover((s) => s.opacity(0.85))
+                  .on_click(() => {
+                    setShared("forge.focusPrKey", { key: branchPr.key, seq: Date.now() });
+                    run("layout.select", { stack: "panel-body", child: "prs" });
+                    run("layout.show", { id: "panel" });
+                  })
+                  .child(`PR #${branchPr.number}${branchPr.ciState === "failure" ? " ✕" : branchPr.ciState === "success" ? " ✓" : ""}`),
+              ),
+            )
             .child(syncBtn("git-fetch", this.syncAction === "fetch" ? "Fetching…" : "Fetch", false, "fetch"))
             .child(syncBtn("git-pull", this.syncAction === "pull" ? "Pulling…" : this.behind > 0 ? `↓${this.behind} Pull` : "Pull", this.behind > 0, "pull"))
             .child(syncBtn("git-push", this.syncAction === "push" ? "Pushing…" : this.ahead > 0 ? `↑${this.ahead} Push` : "Push", this.ahead > 0 || !this.hasUpstream, "push")),

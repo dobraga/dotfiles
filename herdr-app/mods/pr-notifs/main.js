@@ -19,7 +19,6 @@ function levelColor(level, t) {
 
 export default class PrNotifs extends View {
   init(_props, cx) {
-    this.showAll = false;
     if (checking()) return;
     cx.timer.every(30000, (cx) => cx.notify());
   }
@@ -93,7 +92,7 @@ export default class PrNotifs extends View {
     const t = theme();
     const all = Array.isArray(shared("forge.notifs")) ? shared("forge.notifs") : [];
     const active = this.activeProfile();
-    const filtering = Boolean(active) && !this.showAll;
+    const filtering = Boolean(active);
     const visible = filtering ? all.filter((n) => n.profile === active) : all;
     const hidden = filtering ? all.filter((n) => n.profile !== active && !n.read) : [];
     const unread = visible.filter((n) => !n.read).length;
@@ -128,14 +127,6 @@ export default class PrNotifs extends View {
           .items_center()
           .child(div().text_size(11).font_semibold().text_color(t.dim).child(unread ? `PR ALERTS (${unread})` : "PR ALERTS"))
           .child(div().flex_1())
-          .when(Boolean(active), (el) =>
-            el.child(
-              chip("prn-scope", this.showAll ? "All" : this.profileName(active), (_e, cx) => {
-                this.showAll = !this.showAll;
-                cx.notify();
-              }),
-            ),
-          )
           .when(visible.length > 0, (el) =>
             el.child(
               chip("prn-clear", "Clear", (_e, cx) => {
