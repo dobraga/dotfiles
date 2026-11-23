@@ -149,18 +149,19 @@ export default class SettingsCustom extends View {
   }
 
   async loadFilesSettings() {
-    const next = { accordion: true, followActive: true };
+    const next = { accordion: true, followActive: true, materialIcons: true };
     try {
       const parsed = JSON.parse((await readTextFile(this.filesSettingsFile())) || "{}");
       if (typeof parsed?.accordion === "boolean") next.accordion = parsed.accordion;
       if (typeof parsed?.followActive === "boolean") next.followActive = parsed.followActive;
+      if (typeof parsed?.materialIcons === "boolean") next.materialIcons = parsed.materialIcons;
     } catch {}
     this.filesSettings = next;
     setShared("files-tabs.settings", next);
   }
 
   updateFilesSettings(patch, cx) {
-    const next = { ...(this.filesSettings ?? { accordion: true, followActive: true }), ...patch };
+    const next = { ...(this.filesSettings ?? { accordion: true, followActive: true, materialIcons: true }), ...patch };
     this.filesSettings = next;
     this.filesError = null;
     setShared("files-tabs.settings", next);
@@ -486,7 +487,7 @@ export default class SettingsCustom extends View {
   // Files ----------------------------------------------------------------
 
   filesTab(t) {
-    const st = this.filesSettings ?? { accordion: true, followActive: true };
+    const st = this.filesSettings ?? { accordion: true, followActive: true, materialIcons: true };
     return v_flex()
       .w_full()
       .child(this.heading(t, "Files"))
@@ -507,6 +508,16 @@ export default class SettingsCustom extends View {
           "Switching to a file tab expands its folders in the Files tab, highlights the file and scrolls to it.",
           this.toggle(t, "st-files-follow", st.followActive, (_e, cx) =>
             this.updateFilesSettings({ followActive: !st.followActive }, cx),
+          ),
+        ),
+      )
+      .child(
+        this.row(
+          t,
+          "Material file icons",
+          "Coloured file and folder icons from Material Icon Theme in the Files tab. Off uses the plain monochrome icons.",
+          this.toggle(t, "st-files-icons", st.materialIcons, (_e, cx) =>
+            this.updateFilesSettings({ materialIcons: !st.materialIcons }, cx),
           ),
         ),
       )

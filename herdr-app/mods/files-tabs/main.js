@@ -1,6 +1,7 @@
 // A lazy file browser for the focused pane's folder that opens files as main tabs (VS Code preview/pinned).
-import { View, div, svg } from "gpui-kit";
+import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, ScrollHandle } from "gpui-base";
+import { iconFor, iconPath } from "./icon-for.js";
 import { spaces, panes, focused, exec, watchFolder, theme, window, run, shared, setShared, props, openOverlay, closeOverlay, appHome, readTextFile } from "herdr";
 
 function joinPath(root, rel) {
@@ -303,7 +304,11 @@ export default class FilesTabs extends View {
             });
           })
           .child(entry.dir ? svg(`mods/files-tabs/chevron-${open ? "down" : "right"}.svg`).size(12).flex_none().text_color(t.dim) : div().w(12).flex_none())
-          .child(svg(`mods/files-tabs/${entry.dir ? "folder" : "file"}.svg`).size(14).flex_none().text_color(t.muted))
+          .child(
+            this.setting("materialIcons")
+              ? image(iconPath(iconFor(entry.name, entry.dir, open))).size(16).flex_none()
+              : svg(`mods/files-tabs/${entry.dir ? "folder" : "file"}.svg`).size(14).flex_none().text_color(t.muted),
+          )
           .child(div().flex_1().min_w(0).truncate().child(entry.name))
           .when(Boolean(mark), (el) => el.child(div().text_size(11).text_color(mark === "A" ? t.ansi2 : mark === "D" || mark === "U" ? t.ansi1 : t.blocked).child(mark))),
       );
