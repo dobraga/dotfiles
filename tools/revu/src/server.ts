@@ -244,6 +244,17 @@ export function startReviewServer(opts: ReviewServerOptions): ReviewServerHandle
           body.action === "approve" || body.action === "approve_and_proceed"
             ? "approve"
             : "request_changes";
+        if (action === "approve") {
+          const unanswered = loadComments(state.session.id).filter(
+            (c) => !c.resolved && !c.replies.some((r) => r.author !== "Reviewer"),
+          );
+          if (unanswered.length > 0) {
+            return Response.json(
+              { error: `Cannot approve: ${unanswered.length} comment(s) unanswered (${unanswered.map((c) => "#" + c.id).join(", ")}). Wait for a reply, resolve them, or request changes.` },
+              { status: 409 },
+            );
+          }
+        }
         const note = typeof body.generalNote === "string" ? body.generalNote : loadGeneralNote(state.session.id);
         saveGeneralNote(state.session.id, note);
         const decision: ReviewDecision = {

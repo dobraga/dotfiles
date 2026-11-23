@@ -88,7 +88,7 @@ export async function apiAddComment(payload) {
   });
   if (!res.ok) throw new Error("Failed to add comment");
   const created = await res.json();
-  appState.data.comments.push(created);
+  if (!appState.data.comments.some((c) => c.id === created.id)) appState.data.comments.push(created);
   renderSidebar();
   renderCurrentView();
   showToast("Annotation saved");
@@ -127,7 +127,7 @@ export async function apiReplyComment(id, body) {
   if (!res.ok) return;
   const reply = await res.json();
   const target = appState.data.comments.find((c) => c.id === id);
-  if (target) target.replies.push(reply);
+  if (target && !target.replies.some((r) => r.id === reply.id)) target.replies.push(reply);
   renderSidebar();
   renderCurrentView();
 }
@@ -233,7 +233,8 @@ async function submitDecision(action) {
   if (!res.ok) {
     els.btnApprove.disabled = false;
     els.btnRequestChanges.disabled = false;
-    showToast("Failed to send decision");
+    const err = await res.json().catch(() => ({}));
+    showToast(err.error || "Failed to send decision");
     return;
   }
   const { decision } = await res.json();
@@ -326,6 +327,14 @@ export function renderSidebar() {
   const data = appState.data;
   if (!data) return;
   const openCount = data.comments.filter((c) => !c.resolved).length;
+  const unanswered = data.comments.filter(
+    (c) => !c.resolved && !c.replies.some((r) => r.author !== "Reviewer"),
+  ).length;
+  if (!appState.decided) {
+    els.btnApprove.disabled = unanswered > 0;
+    els.btnApprove.textContent = unanswered > 0 ? `Approve (${unanswered} unanswered)` : "Approve";
+    els.btnApprove.title = unanswered > 0 ? "Wait for replies, resolve, or request changes" : "";
+  }
   els.commentCount.textContent = `${openCount} open${data.comments.length !== openCount ? ` / ${data.comments.length}` : ""}`;
 
   const visible = appState.showResolved
