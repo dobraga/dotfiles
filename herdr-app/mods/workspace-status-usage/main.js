@@ -62,6 +62,21 @@ function normalizeRemoteSlug(url) {
   return `${provider}:${parts[0].toLowerCase()}/${parts[1].toLowerCase()}`;
 }
 
+// Window position that centres a card of size W x H right above the pointer (which is on the status-bar pill).
+function anchorAbove(cx, W, H) {
+  try {
+    const w = globalThis.window; // the herdr `window` import shadows the GPUI Window global
+    const vp = w.viewport_size(), m = w.mouse_position();
+    const x = Math.round(m.x - W / 2), y = Math.round(m.y - 16 - H);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error(`bad pointer ${m.x},${m.y}`);
+    return { x: Math.max(8, Math.min(vp.width - W - 8, x)), y: Math.max(8, y) };
+  } catch (e) {
+    anchorError = String(e);
+    return "pointer";
+  }
+}
+let anchorError = null;
+
 const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 
 function formatCurrency(minor, currency = "USD", exponent = 2) {
@@ -341,13 +356,8 @@ export default class WorkspaceStatusUsage extends View {
 
   openMediaCard(cx) {
     if (shared("media.openOverlayId")) return;
-    // anchor to the pointer (it is on the badge): card bottom ~16px above it
-    const vp = cx.viewport_size();
-    const m = cx.mouse_position();
     const W = 340, H = 175;
-    this.dbg = `open vp=${Math.round(vp.width)}x${Math.round(vp.height)} m=${Math.round(m.x)},${Math.round(m.y)}`;
-    const x = Math.max(8, Math.min(vp.width - W - 8, Math.round(m.x - W / 2)));
-    const id = openOverlay({ mod: "media-card", kind: "window", frame: "none", at: { x, y: Math.max(8, Math.round(m.y - 16 - H)) }, width: W });
+    const id = openOverlay({ mod: "media-card", kind: "window", frame: "none", at: anchorAbove(cx, W, H), width: W });
     setShared("media.openOverlayId", id);
   }
 
@@ -406,17 +416,17 @@ export default class WorkspaceStatusUsage extends View {
       .when(m.canPrev, (el) => el.child(btn("media-prev", "prev", () => this.mediaCmdRef("prev"))))
       .child(btn("media-toggle", m.status === "Playing" ? "pause" : "play", () => this.mediaCmdRef("toggle")))
       .when(m.canNext, (el) => el.child(btn("media-next", "next", () => this.mediaCmdRef("next"))))
-      .child(div().max_w(380).truncate().child(pillLabel(m, 30) + (this.dbg ? " | " + this.dbg : "")));
+      .child(div().max_w(380).truncate().child(pillLabel(m, 30) + (anchorError ? " | anchor: " + anchorError : "")));
   }
 
-  openCard() {
+  openCard(cx) {
     if (shared("usage.openOverlayId")) return;
     const id = openOverlay({
       mod: "usage-card",
       kind: "window",
       frame: "none",
       key: "usage-card",
-      at: "pointer",
+      at: anchorAbove(cx, 356, 355),
       width: 356,
     });
     setShared("usage.openOverlayId", id);
@@ -739,7 +749,7 @@ export default class WorkspaceStatusUsage extends View {
           .on_hover((hovered, cx) => {
             setShared("usage.pillHovered", hovered);
             if (hovered) {
-              this.openCard();
+              this.openCard(cx);
               if (!data?.updatedAt || Date.now() - data.updatedAt > 60000) {
                 cx.spawn(async (cx) => this.refresh(cx));
               }
@@ -751,10 +761,10 @@ export default class WorkspaceStatusUsage extends View {
               });
             }
           })
-          .on_click(() => {
+          .on_click((_e, cx) => {
             if (!shared("usage.openOverlayId")) {
               setShared("usage.pinned", true);
-              this.openCard();
+              this.openCard(cx);
             } else if (shared("usage.pinned")) {
               this.closeCard();
             } else {

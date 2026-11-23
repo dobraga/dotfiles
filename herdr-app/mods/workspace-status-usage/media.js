@@ -54,9 +54,74 @@ export async function readPlayer(exec, bus) {
   };
 }
 
+// macOS backend: `nowplaying-cli` (brew install nowplaying-cli). No volume, art or per-player list.
+const MAC_BUS = "macos.nowplaying";
+const MAC_BINS = ["nowplaying-cli", "/opt/homebrew/bin/nowplaying-cli", "/usr/local/bin/nowplaying-cli"];
+let macBin = null;
+
+export function parseMacRaw(stdout) {
+  let raw;
+  try {
+    raw = JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+  const k = (name) => raw[`kMRMediaRemoteNowPlayingInfo${name}`];
+  const title = k("Title");
+  if (!title) return null;
+  const bundle = String(k("ClientBundleIdentifier") ?? "");
+  return {
+    bus: MAC_BUS,
+    brand: brandOf(bundle),
+    status: Number(k("PlaybackRate") ?? 0) > 0 ? "Playing" : "Paused",
+    title,
+    artist: k("Artist") ?? "",
+    album: k("Album") ?? "",
+    artUrl: "",
+    lengthUs: Math.round(Number(k("Duration") ?? 0) * 1e6),
+    positionUs: Math.round(Number(k("ElapsedTime") ?? 0) * 1e6),
+    canPrev: true,
+    canNext: true,
+    volume: null,
+  };
+}
+
+async function runMac(exec, args) {
+  for (const bin of macBin ? [macBin] : MAC_BINS) {
+    try {
+      const r = await exec(bin, args, { timeout: 2000 });
+      if (r.code === 0) {
+        macBin = bin;
+        return r;
+      }
+    } catch {
+      // binary not found at this path, try the next one
+    }
+  }
+  return null;
+}
+
+// get-raw's ElapsedTime is a snapshot that only changes on play/pause/seek/track change and its timestamp
+// is not exposed, so while playing we extrapolate from the moment we first saw that snapshot.
+let macAnchor = null;
+
+export function anchorMacPosition(p, now = Date.now()) {
+  const same = macAnchor && macAnchor.title === p.title && macAnchor.lengthUs === p.lengthUs && macAnchor.snapUs === p.positionUs;
+  if (!same) macAnchor = { title: p.title, lengthUs: p.lengthUs, snapUs: p.positionUs, seenAt: now };
+  if (p.status !== "Playing") return p;
+  const extrapolated = p.positionUs + (now - macAnchor.seenAt) * 1000;
+  return { ...p, positionUs: p.lengthUs > 0 ? Math.min(p.lengthUs, extrapolated) : extrapolated };
+}
+
+async function readPlayersMac(exec) {
+  const r = await runMac(exec, ["get-raw"]);
+  const p = r ? parseMacRaw(r.stdout) : null;
+  return p ? [anchorMacPosition(p)] : [];
+}
+
 export async function readPlayers(exec) {
   const r = await exec("busctl", ["--user", "--no-legend", "list"], { timeout: 1500 }).catch(() => null);
-  if (!r || r.code !== 0) return [];
+  if (!r || r.code !== 0) return readPlayersMac(exec);
   const all = await Promise.all(parseListOutput(r.stdout).map((b) => readPlayer(exec, b)));
   return all.filter((p) => p && (p.title || p.status === "Playing"));
 }
@@ -73,9 +138,23 @@ export function signature(state) {
   return JSON.stringify(rest);
 }
 
+const MAC_CMD = { play: "play", pause: "pause", toggle: "togglePlayPause", next: "next", prev: "previous" };
+
+async function sendCommandMac(exec, cmd, arg) {
+  if (cmd === "seek") {
+    const raw = parseMacRaw((await runMac(exec, ["get-raw"]))?.stdout);
+    if (!raw) return null;
+    const cur = anchorMacPosition(raw);
+    return runMac(exec, ["seek", String(Math.max(0, (cur.positionUs + arg) / 1e6).toFixed(1))]);
+  }
+  if (!MAC_CMD[cmd]) throw new Error(`unsupported media command on macOS: ${cmd}`);
+  return runMac(exec, [MAC_CMD[cmd]]);
+}
+
 const CMD = { play: "Play", pause: "Pause", toggle: "PlayPause", next: "Next", prev: "Previous" };
 
 export async function sendCommand(exec, bus, cmd, arg) {
+  if (bus === MAC_BUS) return sendCommandMac(exec, cmd, arg);
   if (cmd === "seek") {
     // negative deltas need `--` so they are not parsed as flags
     return exec("busctl", ["--user", "call", "--", bus, PATH, PLAYER, "Seek", "x", String(Math.round(arg))]);
