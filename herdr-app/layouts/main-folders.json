@@ -183,6 +183,13 @@
                       "content": {
                         "mod": "prs-panel"
                       }
+                    },
+                    {
+                      "id": "loadout",
+                      "type": "block",
+                      "content": {
+                        "mod": "loadout"
+                      }
                     }
                   ]
                 }
