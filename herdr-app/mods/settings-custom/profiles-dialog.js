@@ -12,17 +12,10 @@ const DEFAULT_PROFILES = [
 
 const emptyGh = () => ({
   enabled: false,
-  username: "",
+  host: "github.com",
+  account: "",
   orgs: [],
   repos: [],
-  authMode: "env",
-  envVar: "GITHUB_TOKEN",
-  apiBase: "https://api.github.com",
-  hasToken: false,
-  tokenPreview: "",
-  envFound: false,
-  pendingToken: "",
-  tokenAction: "keep",
 });
 
 const emptyBb = () => ({
@@ -37,6 +30,8 @@ const emptyBb = () => ({
   hasToken: false,
   tokenPreview: "",
   userEnvFound: false,
+  userIsEmail: false,
+  userNeedsEmailHint: false,
   tokenEnvFound: false,
   pendingToken: "",
   tokenAction: "keep",
@@ -49,10 +44,10 @@ function cloneProfileForge(raw) {
     github: {
       ...emptyGh(),
       ...g,
+      host: g.host || "github.com",
+      account: g.account ?? g.username ?? "",
       orgs: Array.isArray(g.orgs) ? [...g.orgs] : [],
       repos: Array.isArray(g.repos) ? [...g.repos] : [],
-      pendingToken: "",
-      tokenAction: "keep",
     },
     bitbucket: {
       ...emptyBb(),
@@ -82,6 +77,7 @@ export class ProfilesDialogController {
     this.saving = false;
     this.savedBanner = null;
     this.detecting = false;
+    this.refreshingGh = false;
     this.testingGh = false;
     this.testingBb = false;
     this.ghTestResult = null;
@@ -89,9 +85,10 @@ export class ProfilesDialogController {
     this.detectBanner = null;
     this.error = null;
     this.confirmDelete = false;
-    this.showGhToken = false;
     this.showBbToken = false;
     this.syncingInputs = false;
+    this.ghInfo = { installed: true, accounts: [] };
+    this.ghLogin = null;
 
     const sfLocal = shared("space-folders")?.[""] ?? {};
     const initialProfiles = Array.isArray(sfLocal.profiles) && sfLocal.profiles.length
@@ -113,16 +110,14 @@ export class ProfilesDialogController {
 
     // Allocate all InputState instances once in init (never inside render).
     this.nameInput = InputState.new({ placeholder: "Profile name" });
-    this.ghUsernameInput = InputState.new({ placeholder: "e.g. dobraga (empty = @me)" });
-    this.ghEnvVarInput = InputState.new({ placeholder: "GITHUB_TOKEN" });
-    this.ghTokenInput = InputState.new({ placeholder: "ghp_... (stored local chmod 600)" });
-    this.ghTokenInput.set_masked(true);
+    this.ghHostInput = InputState.new({ placeholder: "github.com" });
+    this.ghAccountInput = InputState.new({ placeholder: "Select below or type login (empty = active)" });
     this.ghOrgsInput = InputState.new({ placeholder: "Optional: org1, org2" });
     this.ghReposInput = InputState.new({ placeholder: "Optional: owner/repo1, owner/repo2" });
 
     this.bbWorkspaceInput = InputState.new({ placeholder: "e.g. tricura" });
     this.bbUsernameInput = InputState.new({ placeholder: "Optional username / account" });
-    this.bbUserEnvVarInput = InputState.new({ placeholder: "BB_USER" });
+    this.bbUserEnvVarInput = InputState.new({ placeholder: "you@company.com or BB_EMAIL" });
     this.bbTokenEnvVarInput = InputState.new({ placeholder: "BB_TOKEN" });
     this.bbBasicUserInput = InputState.new({ placeholder: "Atlassian email or username" });
     this.bbTokenInput = InputState.new({ placeholder: "Token (stored local chmod 600)" });
@@ -156,18 +151,11 @@ export class ProfilesDialogController {
       const p = this.profiles.find((x) => x.id === this.selectedId);
       if (p) p.name = this.nameInput.value();
     }));
-    this.ghUsernameInput.on("change", syncText(() => {
-      this.currentForge().github.username = this.ghUsernameInput.value().trim();
+    this.ghHostInput.on("change", syncText(() => {
+      this.currentForge().github.host = this.ghHostInput.value().trim() || "github.com";
     }));
-    this.ghEnvVarInput.on("change", syncText(() => {
-      this.currentForge().github.envVar = this.ghEnvVarInput.value().trim();
-    }));
-    this.ghTokenInput.on("change", syncText(() => {
-      const val = this.ghTokenInput.value().trim();
-      const gh = this.currentForge().github;
-      gh.pendingToken = val;
-      if (val) gh.tokenAction = "set";
-      else if (gh.tokenAction === "set") gh.tokenAction = "keep";
+    this.ghAccountInput.on("change", syncText(() => {
+      this.currentForge().github.account = this.ghAccountInput.value().trim();
     }));
     this.ghOrgsInput.on("change", syncText(() => {
       this.currentForge().github.orgs = splitCsv(this.ghOrgsInput.value());
@@ -214,9 +202,8 @@ export class ProfilesDialogController {
     this.syncingInputs = true;
     try {
       this.nameInput.set_value(prof?.name ?? "");
-      this.ghUsernameInput.set_value(f.github.username ?? "");
-      this.ghEnvVarInput.set_value(f.github.envVar ?? "GITHUB_TOKEN");
-      this.ghTokenInput.set_value(f.github.pendingToken ?? "");
+      this.ghHostInput.set_value(f.github.host || "github.com");
+      this.ghAccountInput.set_value(f.github.account ?? "");
       this.ghOrgsInput.set_value((f.github.orgs ?? []).join(", "));
       this.ghReposInput.set_value((f.github.repos ?? []).join(", "));
 
@@ -239,6 +226,9 @@ export class ProfilesDialogController {
     this.ghTestResult = null;
     this.bbTestResult = null;
     this.detectBanner = null;
+    if (this.ghLogin && this.ghLogin.status !== "starting" && this.ghLogin.status !== "waiting_for_browser") {
+      this.ghLogin = null;
+    }
     this.loadInputsForSelected();
     cx.notify();
   }
@@ -246,9 +236,10 @@ export class ProfilesDialogController {
   loadAll(cx) {
     cx.spawn(async (cx) => {
       try {
-        const [sfRes, cfgRes] = await Promise.all([
+        const [sfRes, cfgRes, ghLoginRes] = await Promise.all([
           exec("sh", ["-c", `cat ${SPACE_FOLDERS_FILE} 2>/dev/null`]).catch(() => null),
           exec("python3", [this.helperPath, "get-config"]),
+          exec("python3", [this.helperPath, "gh-login-status"]).catch(() => null),
         ]);
         if (sfRes?.code === 0 && sfRes.stdout.trim()) {
           try {
@@ -265,12 +256,33 @@ export class ProfilesDialogController {
           const cfg = JSON.parse(cfgRes.stdout);
           this.pollIntervalSec = cfg.pollIntervalSec ?? 90;
           this.notifications = { ...this.notifications, ...(cfg.notifications ?? {}) };
+          if (cfg.gh) this.ghInfo = cfg.gh;
           for (const prof of this.profiles) {
             this.draftForge[prof.id] = cloneProfileForge(cfg.profiles?.[prof.id]);
           }
           for (const [pid, pcfg] of Object.entries(cfg.profiles ?? {})) {
             this.draftForge[pid] ??= cloneProfileForge(pcfg);
           }
+        }
+        if (ghLoginRes?.code === 0 && ghLoginRes.stdout.trim()) {
+          try {
+            const st = JSON.parse(ghLoginRes.stdout);
+            if (st.status === "starting" || st.status === "waiting_for_browser") {
+              this.ghLogin = {
+                sessionId: st.sessionId || "",
+                status: st.status,
+                host: st.host || "github.com",
+                targetProfileId: this.selectedId,
+                code: st.code || "",
+                url: st.url || "",
+                user: st.user || "",
+                error: st.error || "",
+                copiedCode: false,
+                copiedUrl: false,
+              };
+              cx.spawn((c2) => this.pollGhLogin(st.sessionId || "", this.selectedId, st.host || "github.com", c2));
+            }
+          } catch {}
         }
         this.loadInputsForSelected();
       } catch (e) {
@@ -366,6 +378,187 @@ export class ProfilesDialogController {
     cx.notify();
   }
 
+  refreshGhAccounts(cx) {
+    if (this.refreshingGh) return;
+    this.refreshingGh = true;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      try {
+        const res = await exec("python3", [this.helperPath, "gh-accounts"]);
+        if (res.code === 0 && res.stdout.trim()) {
+          this.ghInfo = JSON.parse(res.stdout);
+        }
+      } catch (e) {
+        this.error = String(e);
+      } finally {
+        this.refreshingGh = false;
+        cx.notify();
+      }
+    });
+  }
+
+  startGhLogin(cx) {
+    const busy = this.ghLogin?.status === "starting" || this.ghLogin?.status === "waiting_for_browser";
+    if (checking() || !this.ghInfo?.installed || busy) return;
+    const targetProfileId = this.selectedId;
+    const gh = this.currentForge().github;
+    const host = (gh.host || "github.com").trim() || "github.com";
+    gh.enabled = true;
+    this.ghTestResult = null;
+    this.error = null;
+    this.ghLogin = {
+      sessionId: "",
+      status: "starting",
+      host,
+      targetProfileId,
+      code: "",
+      url: "",
+      user: "",
+      error: "",
+      copiedCode: false,
+      copiedUrl: false,
+    };
+    cx.notify();
+
+    cx.spawn(async (cx) => {
+      try {
+        const res = await exec("python3", [this.helperPath, "gh-login-start", "--host", host]);
+        if (res.code !== 0) throw new Error(res.stderr || "Failed to start GitHub login");
+        const parsed = JSON.parse(res.stdout);
+        if (!parsed.ok || parsed.status === "error") {
+          this.ghLogin = {
+            ...(this.ghLogin ?? {}),
+            status: "error",
+            host,
+            targetProfileId,
+            error: parsed.error || "Failed to start GitHub login",
+          };
+          cx.notify();
+          return;
+        }
+        if (this.ghLogin === null) return;
+        const resolvedHost = parsed.host || host;
+        this.ghLogin = {
+          ...this.ghLogin,
+          sessionId: parsed.sessionId || "",
+          status: parsed.status || "waiting_for_browser",
+          host: resolvedHost,
+          code: parsed.code || "",
+          url: parsed.url || "",
+          user: parsed.user || "",
+          error: "",
+        };
+        if (parsed.code) {
+          cx.write_to_clipboard(parsed.code);
+          this.ghLogin.copiedCode = true;
+        }
+        if (parsed.url && /^https?:\/\//.test(parsed.url)) {
+          cx.open_url(parsed.url);
+        }
+        cx.notify();
+        if (parsed.status === "completed") {
+          await this.applyGhLoginCompleted(parsed, targetProfileId, resolvedHost, cx);
+          return;
+        }
+        if (parsed.status === "starting" || parsed.status === "waiting_for_browser") {
+          await this.pollGhLogin(parsed.sessionId || "", targetProfileId, resolvedHost, cx);
+        }
+      } catch (e) {
+        this.ghLogin = {
+          ...(this.ghLogin ?? {}),
+          status: "error",
+          host,
+          targetProfileId,
+          error: String(e),
+        };
+        cx.notify();
+      }
+    });
+  }
+
+  async pollGhLogin(sessionId, targetProfileId, host, cx) {
+    while (
+      this.ghLogin &&
+      this.ghLogin.sessionId === sessionId &&
+      (this.ghLogin.status === "starting" || this.ghLogin.status === "waiting_for_browser")
+    ) {
+      await cx.sleep(1500);
+      if (
+        !this.ghLogin ||
+        this.ghLogin.sessionId !== sessionId ||
+        (this.ghLogin.status !== "starting" && this.ghLogin.status !== "waiting_for_browser")
+      ) {
+        break;
+      }
+      try {
+        const res = await exec("python3", [this.helperPath, "gh-login-status"]);
+        if (res.code !== 0 || !res.stdout.trim()) continue;
+        const st = JSON.parse(res.stdout);
+        if (st.sessionId && sessionId && st.sessionId !== sessionId) break;
+        if (st.status === "waiting_for_browser") {
+          const hadCode = Boolean(this.ghLogin.code);
+          this.ghLogin.status = "waiting_for_browser";
+          if (!hadCode && st.code) {
+            this.ghLogin.code = st.code;
+            this.ghLogin.url = st.url || "";
+            cx.write_to_clipboard(st.code);
+            this.ghLogin.copiedCode = true;
+            if (st.url && /^https?:\/\//.test(st.url)) {
+              cx.open_url(st.url);
+            }
+          }
+          cx.notify();
+        } else if (st.status === "completed") {
+          await this.applyGhLoginCompleted(st, targetProfileId, host, cx);
+          break;
+        } else if (st.status === "error") {
+          this.ghLogin = { ...this.ghLogin, status: "error", error: st.error || "GitHub login failed" };
+          cx.notify();
+          break;
+        } else if (st.status === "cancelled" || st.status === "idle") {
+          this.ghLogin = null;
+          cx.notify();
+          break;
+        }
+      } catch {}
+    }
+  }
+
+  async applyGhLoginCompleted(st, targetProfileId, host, cx) {
+    if (st.gh) {
+      this.ghInfo = st.gh;
+    } else {
+      const res = await exec("python3", [this.helperPath, "gh-accounts"]).catch(() => null);
+      if (res?.code === 0 && res.stdout.trim()) {
+        try { this.ghInfo = JSON.parse(res.stdout); } catch {}
+      }
+    }
+    const loggedUser = st.user || "";
+    this.draftForge[targetProfileId] ??= cloneProfileForge(null);
+    const gh = this.draftForge[targetProfileId].github;
+    gh.enabled = true;
+    gh.host = host || "github.com";
+    if (loggedUser) gh.account = loggedUser;
+    if (this.selectedId === targetProfileId) this.loadInputsForSelected();
+    this.ghLogin = {
+      ...(this.ghLogin ?? {}),
+      status: "completed",
+      host: host || "github.com",
+      targetProfileId,
+      user: loggedUser,
+      error: "",
+    };
+    cx.notify();
+  }
+
+  cancelGhLogin(cx) {
+    this.ghLogin = null;
+    cx.notify();
+    cx.spawn(async () => {
+      await exec("python3", [this.helperPath, "gh-login-cancel"]).catch(() => null);
+    });
+  }
+
   autoDetect(cx) {
     if (this.detecting) return;
     this.detecting = true;
@@ -378,6 +571,7 @@ export class ProfilesDialogController {
         const res = await exec("python3", [this.helperPath, "detect"]);
         if (res.code !== 0) throw new Error(res.stderr || "detect failed");
         const parsed = JSON.parse(res.stdout);
+        if (parsed.gh) this.ghInfo = parsed.gh;
         const sug = parsed.suggestions?.[this.selectedId];
         if (!sug) {
           this.detectBanner = "No matching local repos found for this profile.";
@@ -385,9 +579,8 @@ export class ProfilesDialogController {
           const cur = this.currentForge();
           if (sug.github?.enabled) {
             cur.github.enabled = true;
-            cur.github.authMode = sug.github.authMode || cur.github.authMode;
-            if (sug.github.envVar) cur.github.envVar = sug.github.envVar;
-            if (sug.github.username && !cur.github.username) cur.github.username = sug.github.username;
+            if (sug.github.host) cur.github.host = sug.github.host;
+            if (sug.github.account && !cur.github.account) cur.github.account = sug.github.account;
           }
           if (sug.bitbucket?.enabled) {
             cur.bitbucket.enabled = true;
@@ -415,14 +608,10 @@ export class ProfilesDialogController {
     if (provider === "github") {
       return {
         enabled: Boolean(cfg.enabled),
-        username: cfg.username ?? "",
+        host: cfg.host || "github.com",
+        account: cfg.account ?? "",
         orgs: cfg.orgs ?? [],
         repos: cfg.repos ?? [],
-        authMode: cfg.authMode ?? "env",
-        envVar: cfg.envVar || "GITHUB_TOKEN",
-        apiBase: cfg.apiBase || "https://api.github.com",
-        token: cfg.tokenAction === "set" ? (cfg.pendingToken ?? "") : "",
-        tokenAction: cfg.tokenAction ?? "keep",
       };
     }
     return {
@@ -459,8 +648,8 @@ export class ProfilesDialogController {
         const parsed = JSON.parse(res.stdout);
         if (isGh) {
           this.ghTestResult = parsed;
-          if (parsed.ok && parsed.identity && !this.currentForge().github.username) {
-            this.currentForge().github.username = parsed.identity;
+          if (parsed.ok && parsed.identity && !this.currentForge().github.account) {
+            this.currentForge().github.account = parsed.identity;
             if (this.selectedId === pid) this.loadInputsForSelected();
           }
         } else {
@@ -826,7 +1015,7 @@ export class ProfilesDialogController {
                         ),
                       ),
                   )
-                  // GitHub card
+                  // GitHub card (100% gh CLI multi-account)
                   .child(
                     v_flex()
                       .p(12)
@@ -840,7 +1029,7 @@ export class ProfilesDialogController {
                           .gap(8)
                           .items_center()
                           .child(svg("mods/prs-panel/github.svg").size(15).text_color(t.foreground))
-                          .child(div().flex_1().text_size(13).font_semibold().child("GitHub"))
+                          .child(div().flex_1().text_size(13).font_semibold().child("GitHub (gh CLI)"))
                           .child(
                             togglePill("gh-toggle", gh.enabled, "Enabled", "Disabled", (_e, cx) => {
                               gh.enabled = !gh.enabled;
@@ -848,75 +1037,220 @@ export class ProfilesDialogController {
                             }),
                           ),
                       )
-                      .when(gh.enabled, (el) =>
-                        el
-                          .child(
-                            h_flex()
-                              .gap(6)
-                              .items_center()
-                              .child(div().text_size(11.5).text_color(t.muted).child("Auth:"))
-                              .child(
-                                chip("gh-auth-env", "Env var (~/.env)", gh.authMode === "env", (_e, cx) => {
-                                  gh.authMode = "env";
-                                  cx.notify();
-                                }),
-                              )
-                              .child(
-                                chip("gh-auth-direct", "Direct token (0600)", gh.authMode === "direct", (_e, cx) => {
-                                  gh.authMode = "direct";
-                                  cx.notify();
-                                }),
-                              ),
-                          )
-                          .when(gh.authMode === "env", (e2) =>
+                      .when(gh.enabled, (el) => {
+                        const ghAccts = this.ghInfo?.accounts ?? [];
+                        const ghLoginBusy = this.ghLogin?.status === "starting" || this.ghLogin?.status === "waiting_for_browser";
+                        return el
+                          .when(!this.ghInfo?.installed, (e2) =>
                             e2.child(
-                              field(
-                                "Token env var",
-                                this.ghEnvVarInput,
-                                div()
-                                  .px(7)
-                                  .py(4)
-                                  .rounded(5)
-                                  .text_size(10.5)
-                                  .bg(gh.envFound ? t.ansi2 + "22" : t.raised)
-                                  .text_color(gh.envFound ? t.ansi2 : t.dim)
-                                  .child(gh.envFound ? "Found" : "Not set"),
-                              ),
+                              div()
+                                .p(8)
+                                .rounded(6)
+                                .bg(t.ansi1 + "1f")
+                                .border_1()
+                                .border_color(t.ansi1 + "55")
+                                .text_size(11.5)
+                                .text_color(t.ansi1)
+                                .child("gh CLI not found in PATH"),
                             ),
                           )
-                          .when(gh.authMode === "direct", (e2) =>
-                            e2.child(
-                              field(
-                                "Personal Access Token",
-                                this.ghTokenInput,
+                          .child(
+                            v_flex()
+                              .gap(6)
+                              .child(
                                 h_flex()
-                                  .gap(4)
+                                  .gap(6)
+                                  .flex_wrap()
+                                  .items_center()
+                                  .child(div().flex_1().text_size(11.5).font_medium().text_color(t.muted).child("Authenticated gh accounts"))
                                   .child(
-                                    btn("gh-tok-vis", this.showGhToken ? "Hide" : "Show", false, (_e, cx) => {
-                                      this.showGhToken = !this.showGhToken;
-                                      this.ghTokenInput.set_masked(!this.showGhToken);
+                                    btn(
+                                      "gh-login-btn",
+                                      ghLoginBusy ? "Logging in…" : ghAccts.length > 0 ? "+ Add account" : "Login with GitHub",
+                                      ghAccts.length === 0,
+                                      (_e, cx) => this.startGhLogin(cx),
+                                      !this.ghInfo?.installed || ghLoginBusy,
+                                    ),
+                                  )
+                                  .child(
+                                    btn(
+                                      "gh-refresh-accts",
+                                      this.refreshingGh ? "Checking…" : "Refresh accounts",
+                                      false,
+                                      (_e, cx) => this.refreshGhAccounts(cx),
+                                      this.refreshingGh,
+                                    ),
+                                  ),
+                              )
+                              .child(
+                                h_flex()
+                                  .gap(6)
+                                  .flex_wrap()
+                                  .child(
+                                    chip("gh-acct-active", "Active (default)", !gh.account, (_e, cx) => {
+                                      gh.account = "";
+                                      this.loadInputsForSelected();
                                       cx.notify();
                                     }),
                                   )
-                                  .when(gh.hasToken, (b) =>
-                                    b.child(
-                                      btn("gh-tok-clear", "Clear", false, (_e, cx) => {
-                                        gh.tokenAction = "clear";
-                                        gh.hasToken = false;
-                                        gh.tokenPreview = "";
-                                        gh.pendingToken = "";
-                                        this.syncingInputs = true;
-                                        this.ghTokenInput.set_value("");
-                                        this.syncingInputs = false;
+                                  .children(
+                                    ghAccts.map((a, idx) => {
+                                      const selected = gh.account === a.user && (gh.host || "github.com") === a.host;
+                                      const lbl = `${a.user}${a.active ? " ✓" : ""}${a.host !== "github.com" ? ` (${a.host})` : ""}`;
+                                      return chip(`gh-acct-${idx}`, lbl, selected, (_e, cx) => {
+                                        gh.account = a.user;
+                                        gh.host = a.host || "github.com";
+                                        this.loadInputsForSelected();
                                         cx.notify();
-                                      }),
-                                    ),
+                                      });
+                                    }),
                                   ),
-                                gh.hasToken ? `Saved token: ${gh.tokenPreview} (leave blank to keep)` : "Stored only in ~/.config/herdr-forge.json (chmod 600)",
-                              ),
-                            ),
+                              )
+                              .when(this.ghInfo?.installed && ghAccts.length === 0 && !this.ghLogin, (e2) =>
+                                e2.child(
+                                  div()
+                                    .text_size(11)
+                                    .text_color(t.dim)
+                                    .child("No gh accounts logged in yet — click 'Login with GitHub' above to authenticate in your browser."),
+                                ),
+                              )
+                              .when(Boolean(this.ghLogin), (e2) => {
+                                const lg = this.ghLogin;
+                                if (lg.status === "starting") {
+                                  return e2.child(
+                                    h_flex()
+                                      .p(10)
+                                      .gap(8)
+                                      .items_center()
+                                      .rounded(7)
+                                      .bg(t.selected)
+                                      .border_1()
+                                      .border_color(t.border)
+                                      .child(div().flex_1().text_size(11.5).text_color(t.foreground).child(`Starting GitHub login for ${lg.host}…`))
+                                      .child(btn("gh-login-cancel", "Cancel", false, (_e, cx) => this.cancelGhLogin(cx))),
+                                  );
+                                }
+                                if (lg.status === "waiting_for_browser") {
+                                  return e2.child(
+                                    v_flex()
+                                      .p(10)
+                                      .gap(8)
+                                      .rounded(7)
+                                      .bg(t.selected)
+                                      .border_1()
+                                      .border_color(t.accent)
+                                      .child(
+                                        h_flex()
+                                          .gap(8)
+                                          .items_center()
+                                          .child(div().flex_1().text_size(12).font_semibold().child(`GitHub Device Login (${lg.host})`))
+                                          .child(
+                                            div()
+                                              .px(7)
+                                              .py(2)
+                                              .rounded(5)
+                                              .bg(t.working + "22")
+                                              .text_size(10.5)
+                                              .text_color(t.working)
+                                              .child("Waiting for browser…"),
+                                          ),
+                                      )
+                                      .when(Boolean(lg.code), (c2) =>
+                                        c2.child(
+                                          h_flex()
+                                            .gap(8)
+                                            .items_center()
+                                            .child(div().text_size(11.5).text_color(t.muted).child("One-time code:"))
+                                            .child(
+                                              div()
+                                                .px(10)
+                                                .py(4)
+                                                .rounded(6)
+                                                .bg(t.background)
+                                                .border_1()
+                                                .border_color(t.accent)
+                                                .text_size(15)
+                                                .font_semibold()
+                                                .text_color(t.foreground)
+                                                .child(lg.code),
+                                            )
+                                            .when(Boolean(lg.copiedCode), (cp) =>
+                                              cp.child(div().text_size(10.5).text_color(t.ansi2).child("Copied")),
+                                            ),
+                                        ),
+                                      )
+                                      .child(
+                                        h_flex()
+                                          .gap(6)
+                                          .flex_wrap()
+                                          .when(Boolean(lg.code), (b2) =>
+                                            b2.child(
+                                              btn("gh-login-copy-code", lg.copiedCode ? "Copied code" : "Copy code", false, (_e, cx) => {
+                                                cx.write_to_clipboard(lg.code);
+                                                lg.copiedCode = true;
+                                                lg.copiedUrl = false;
+                                                cx.notify();
+                                              }),
+                                            ),
+                                          )
+                                          .when(Boolean(lg.url && /^https?:\/\//.test(lg.url)), (b2) =>
+                                            b2
+                                              .child(btn("gh-login-open-url", "Open browser", true, (_e, cx) => cx.open_url(lg.url)))
+                                              .child(
+                                                btn("gh-login-copy-url", lg.copiedUrl ? "Copied URL" : "Copy URL", false, (_e, cx) => {
+                                                  cx.write_to_clipboard(lg.url);
+                                                  lg.copiedUrl = true;
+                                                  cx.notify();
+                                                }),
+                                              ),
+                                          )
+                                          .child(btn("gh-login-cancel", "Cancel", false, (_e, cx) => this.cancelGhLogin(cx))),
+                                      )
+                                      .child(
+                                        div()
+                                          .text_size(10.5)
+                                          .text_color(t.dim)
+                                          .child(`Paste the code on ${lg.url || "github.com/login/device"}. To add a 2nd account (e.g. Work), copy the URL into a browser profile or incognito window signed into that account.`),
+                                      ),
+                                  );
+                                }
+                                if (lg.status === "completed") {
+                                  return e2.child(
+                                    h_flex()
+                                      .p(8)
+                                      .gap(8)
+                                      .items_center()
+                                      .rounded(6)
+                                      .bg(t.ansi2 + "1f")
+                                      .border_1()
+                                      .border_color(t.ansi2 + "55")
+                                      .child(
+                                        div()
+                                          .flex_1()
+                                          .text_size(11.5)
+                                          .text_color(t.ansi2)
+                                          .child(`Logged in as ${lg.user || "GitHub account"} via gh CLI — click Save & Sync to apply.`),
+                                      )
+                                      .child(btn("gh-login-dismiss", "Dismiss", false, (_e, cx) => { this.ghLogin = null; cx.notify(); })),
+                                  );
+                                }
+                                return e2.child(
+                                  h_flex()
+                                    .p(8)
+                                    .gap(8)
+                                    .items_center()
+                                    .rounded(6)
+                                    .bg(t.ansi1 + "1f")
+                                    .border_1()
+                                    .border_color(t.ansi1 + "55")
+                                    .child(div().flex_1().min_w(0).text_size(11.5).text_color(t.ansi1).child(lg.error || "GitHub login failed"))
+                                    .child(btn("gh-login-retry", "Retry", false, (_e, cx) => this.startGhLogin(cx)))
+                                    .child(btn("gh-login-dismiss", "Dismiss", false, (_e, cx) => { this.ghLogin = null; cx.notify(); })),
+                                );
+                              }),
                           )
-                          .child(field("Username (optional)", this.ghUsernameInput))
+                          .child(field("Account login (empty = active gh account)", this.ghAccountInput))
+                          .child(field("GitHub host", this.ghHostInput))
                           .child(field("Filter Orgs (comma-separated, optional)", this.ghOrgsInput))
                           .child(field("Filter Repos (owner/repo, comma-separated, optional)", this.ghReposInput))
                           .child(
@@ -927,8 +1261,8 @@ export class ProfilesDialogController {
                                 btn("gh-test", this.testingGh ? "Testing…" : "Test GitHub", false, (_e, cx) => this.testProvider("github", cx), this.testingGh),
                               ),
                           )
-                          .when(Boolean(this.ghTestResult), (e2) => e2.child(testBadge(this.ghTestResult))),
-                      ),
+                          .when(Boolean(this.ghTestResult), (e2) => e2.child(testBadge(this.ghTestResult)));
+                      }),
                   )
                   // Bitbucket Cloud card
                   .child(
@@ -980,20 +1314,28 @@ export class ProfilesDialogController {
                                 }),
                               ),
                           )
-                          .when(bb.authMode === "env", (e2) =>
-                            e2
+                          .when(bb.authMode === "env", (e2) => {
+                            const bbUserVal = (bb.userEnvVar ?? "").trim();
+                            const isEmail = bbUserVal.includes("@");
+                            const needsEmail = !isEmail && Boolean(bb.userNeedsEmailHint);
+                            const badgeBg = isEmail || (!needsEmail && bb.userEnvFound) ? t.ansi2 + "22" : needsEmail ? t.blocked + "22" : t.raised;
+                            const badgeCol = isEmail || (!needsEmail && bb.userEnvFound) ? t.ansi2 : needsEmail ? t.blocked : t.dim;
+                            const badgeText = isEmail ? "Email" : needsEmail ? "Needs email (ATATT)" : bb.userEnvFound ? "Found" : "Not set";
+                            const hintText = needsEmail ? "ATATT API tokens require your Atlassian email (e.g. you@company.com) instead of short username." : null;
+                            return e2
                               .child(
                                 field(
-                                  "User env var",
+                                  "Atlassian Email or User env var",
                                   this.bbUserEnvVarInput,
                                   div()
                                     .px(7)
                                     .py(4)
                                     .rounded(5)
                                     .text_size(10.5)
-                                    .bg(bb.userEnvFound ? t.ansi2 + "22" : t.raised)
-                                    .text_color(bb.userEnvFound ? t.ansi2 : t.dim)
-                                    .child(bb.userEnvFound ? "Found" : "Not set"),
+                                    .bg(badgeBg)
+                                    .text_color(badgeCol)
+                                    .child(badgeText),
+                                  hintText,
                                 ),
                               )
                               .child(
@@ -1009,8 +1351,8 @@ export class ProfilesDialogController {
                                     .text_color(bb.tokenEnvFound ? t.ansi2 : t.dim)
                                     .child(bb.tokenEnvFound ? "Found" : "Not set"),
                                 ),
-                              ),
-                          )
+                              );
+                          })
                           .when(bb.authMode === "basic", (e2) => e2.child(field("User / Atlassian Email", this.bbBasicUserInput)))
                           .when(bb.authMode === "basic" || bb.authMode === "bearer", (e2) =>
                             e2.child(
@@ -1046,6 +1388,26 @@ export class ProfilesDialogController {
                           )
                           .child(field("Username / Nickname filter (optional)", this.bbUsernameInput))
                           .child(field("Filter Repos (comma-separated, optional)", this.bbReposInput))
+                          .child(
+                            v_flex()
+                              .gap(3)
+                              .px(10)
+                              .py(8)
+                              .rounded(6)
+                              .border_1()
+                              .border_color(t.border)
+                              .child(div().text_size(11.5).text_color(t.muted).child("How to create a Bitbucket token"))
+                              .children(
+                                [
+                                  "1. id.atlassian.com → Security → Create API token with scopes.",
+                                  "2. App: Bitbucket. Scopes: read:user, read:repository, read:pullrequest (+ read:pipeline for CI).",
+                                  "3. Use the Atlassian account that can access the workspace; its email is the user.",
+                                  "4. Put the token in ~/.env as BB_TOKEN=ATATT… (a BB_TOKEN exported in the shell wins over the file).",
+                                  "5. Set 'Atlassian Email or User env var' to that email (or an env var holding it), then restart herdr.",
+                                  "Tokens without scopes, or with the wrong email, return HTTP 401. Workspace/Repo Access Tokens: use Bearer.",
+                                ].map((line) => div().text_size(10.5).text_color(t.dim).child(line)),
+                              ),
+                          )
                           .child(
                             h_flex()
                               .gap(8)

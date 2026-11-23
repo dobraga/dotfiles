@@ -68,6 +68,17 @@
               "content": {
                 "mod": "agents"
               }
+            },
+            {
+              "id": "pr-notifs",
+              "type": "block",
+              "size": {
+                "px": 150
+              },
+              "min": 90,
+              "content": {
+                "mod": "pr-notifs"
+              }
             }
           ]
         },
