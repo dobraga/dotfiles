@@ -73,6 +73,16 @@
         ]
       },
       {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/revu-plan.sh",
+            "timeout": 86400
+          }
+        ]
+      },
+      {
         "matcher": "*",
         "hooks": [
           {
@@ -231,7 +241,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/dobraga/.local/bin/revu hook claude",
+            "command": "$HOME/.local/bin/revu hook claude",
             "timeout": 86400
           }
         ]
