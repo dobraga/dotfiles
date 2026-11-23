@@ -11,6 +11,41 @@ sudo apt install -y kitty
 # Install Herdr (config is linked by install_dotfiles.sh)
 curl -fsSL https://releases.herdr.dev/app/install.sh | sh
 
+# Install herdr-automations, the scheduler behind the Automations panel (herdr-app/mods/automations).
+# Prebuilt release binary, checksum verified; skipped when already installed or on any failure.
+install_herdr_automations() {
+  command -v herdr-automations >/dev/null 2>&1 && return 0
+  local os arch tag asset base tmp expected actual
+  case "$(uname -s)" in Darwin) os=darwin ;; Linux) os=linux ;; *) return 0 ;; esac
+  case "$(uname -m)" in arm64 | aarch64) arch=arm64 ;; x86_64 | amd64) arch=amd64 ;; *) return 0 ;; esac
+  tag=$(curl -fsSL https://api.github.com/repos/DnzzL/herdr-automations/releases/latest |
+    sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1) || return 0
+  [ -n "$tag" ] || return 0
+  asset="herdr-automations_${os}_${arch}"
+  base="https://github.com/DnzzL/herdr-automations/releases/download/${tag}"
+  tmp=$(mktemp -d)
+  if curl -fsSL "${base}/${asset}" -o "${tmp}/${asset}" && curl -fsSL "${base}/checksums.txt" -o "${tmp}/checksums.txt"; then
+    expected=$(grep " ${asset}\$" "${tmp}/checksums.txt" | cut -d' ' -f1)
+    actual=$( (sha256sum "${tmp}/${asset}" 2>/dev/null || shasum -a 256 "${tmp}/${asset}") | cut -d' ' -f1)
+    if [ -n "$expected" ] && [ "$expected" = "$actual" ]; then
+      # The service writes its log under the state dir and fails to start (209/STDOUT) if it is missing;
+      # `backend: hc` makes runs open in the Herdr app.
+      mkdir -p "$HOME/.local/bin" "$HOME/.local/state/herdr/plugins/dnzzl.automations" "$HOME/.config/herdr/plugins/config/dnzzl.automations"
+      [ -e "$HOME/.config/herdr/plugins/config/dnzzl.automations/automations.yaml" ] ||
+        printf 'backend: hc\nautomations: []\n' > "$HOME/.config/herdr/plugins/config/dnzzl.automations/automations.yaml"
+      install -m 755 "${tmp}/${asset}" "$HOME/.local/bin/herdr-automations" &&
+        "$HOME/.local/bin/herdr-automations" service install || echo "herdr-automations: install step failed, skipping" >&2
+    else
+      echo "herdr-automations: checksum mismatch, not installing" >&2
+    fi
+  else
+    echo "herdr-automations: download failed, skipping" >&2
+  fi
+  rm -rf "$tmp"
+  return 0
+}
+install_herdr_automations
+
 # Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source $HOME/.cargo/env
