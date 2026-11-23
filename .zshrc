@@ -97,11 +97,16 @@ export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
 
 # Open native herdr-chat tab when running bare `agy`/`claude`/`codex` inside a Herdr terminal
-# Use `--tui` or `command <agent>` to force the terminal UI.
+# Use `--tui` or `command <agent>` to force the terminal UI, or toggle in Herdr Settings > Herdr Chat.
 _herdr_open_chat() {
   local provider="$1"
   shift
-  if [[ -n "$HC_TERMINAL_ID" && -t 0 && -t 1 && $# -eq 0 && -z "$ANTHROPIC_BASE_URL" ]] && command -v herdr-app >/dev/null 2>&1; then
+  local state_file="${HERDR_APP_HOME:-$HOME/.config/herdr-app}/data/herdr-chat/state.json"
+  local chat_enabled=1
+  if [[ -f "$state_file" ]] && grep -Eq '"(enabled|cliIntercept)"[[:space:]]*:[[:space:]]*false' "$state_file" 2>/dev/null; then
+    chat_enabled=0
+  fi
+  if [[ "$chat_enabled" -eq 1 && -n "$HC_TERMINAL_ID" && -t 0 && -t 1 && $# -eq 0 && -z "$ANTHROPIC_BASE_URL" ]] && command -v herdr-app >/dev/null 2>&1; then
     local id="c-$(openssl rand -hex 4)"
     local cwd="${PWD//\\/\\\\}"
     cwd="${cwd//\"/\\\"}"
