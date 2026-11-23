@@ -202,32 +202,32 @@ export default class ChangesTabs extends View {
             hasUpstream = true;
           }
         }
-        const stats = {};
-        const results = head.code === 0
-          ? [await git(["diff", "HEAD", "--numstat", "-z", "--no-renames"])]
-          : [await git(["diff", "--cached", "--numstat", "-z", "--no-renames"]), await git(["diff", "--numstat", "-z", "--no-renames"])];
-        for (const result of results) {
-          if (result.code !== 0) throw new Error(result.stderr);
-          for (const entry of result.stdout.split("\0")) {
+        const readStats = async (args) => {
+          const r = await git(["diff", ...args, "--numstat", "-z", "--no-renames"]);
+          if (r.code !== 0) throw new Error(r.stderr);
+          const out = {};
+          for (const entry of r.stdout.split("\0")) {
             const [a, d, ...parts] = entry.split("\t");
-            if (!parts.length) continue;
-            const path = parts.join("\t"), old = stats[path] ?? { add: 0, del: 0 };
-            stats[path] = { add: old.add + (Number(a) || 0), del: old.del + (Number(d) || 0), binary: a === "-" };
+            if (parts.length) out[parts.join("\t")] = { add: Number(a) || 0, del: Number(d) || 0, binary: a === "-" };
           }
-        }
+          return out;
+        };
+        const stagedStats = await readStats(["--cached"]), workStats = await readStats([]);
+        const letter = (c, fresh) => (c === "D" ? "D" : fresh || c === "A" ? "A" : "M");
         const files = [];
         const entries = status.stdout.split("\0").filter(Boolean);
         for (const entry of entries.slice(0, 1000)) {
           const xy = entry.slice(0, 2), path = entry.slice(3), fresh = xy === "??";
           const conflict = xy.includes("U") || xy === "AA" || xy === "DD";
-          const s = conflict ? "U" : xy.includes("D") ? "D" : fresh || xy.includes("A") ? "A" : "M";
-          const stat = stats[path] ?? { add: 0, del: 0 };
-          files.push({ path, status: s, fresh, ...stat });
+          if (conflict) { files.push({ path, status: "U", section: "changes", fresh, add: 0, del: 0 }); continue; }
+          if (!fresh && xy[0] !== " ") files.push({ path, status: letter(xy[0], false), section: "staged", fresh: false, add: 0, del: 0, ...stagedStats[path] });
+          if (fresh || xy[1] !== " ") files.push({ path, status: letter(xy[1], fresh), section: "changes", fresh, add: 0, del: 0, ...workStats[path] });
         }
         if (key() !== context) return;
         this.root = root;
         this.on = on;
         this.files = files;
+        this.hasHead = head.code === 0;
         this.branch = branch;
         this.repoSlug = repoSlug;
         this.ahead = ahead;
@@ -293,18 +293,38 @@ export default class ChangesTabs extends View {
     cx.notify();
   }
 
+  gitOp(args, cx, failLabel) {
+    if (!this.root || this.busy || this.loading || this.context !== key()) return;
+    const root = this.root, on = this.on, context = this.context;
+    this.busy = true;
+    this.note = null;
+    cx.spawn(async (cx) => {
+      try {
+        const r = await exec("git", args, { cwd: root, on });
+        if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim());
+      } catch (e) { if (key() === context) this.note = `${failLabel} failed: ${e}`; }
+      finally { this.busy = false; this.refresh(cx); cx.notify(); }
+    });
+    cx.notify();
+  }
+
+  stage(path, cx) { this.gitOp(path ? ["add", "--", path] : ["add", "-A"], cx, "Stage"); }
+
+  unstage(path, cx) {
+    const args = this.hasHead ? ["restore", "--staged", "--"] : ["rm", "--cached", "-r", "-q", "--"];
+    this.gitOp(path ? [...args, path] : [...args, "."], cx, "Unstage");
+  }
+
   commit(cx) {
-    if (!this.message.trim() || !this.root || this.busy || this.loading || this.context !== key()) return;
+    if (!this.message.trim() || !this.files.some((f) => f.section === "staged") || !this.root || this.busy || this.loading || this.context !== key()) return;
     const root = this.root, on = this.on, context = this.context, message = this.message.trim();
     this.busy = true;
     this.syncAction = "commit";
     this.note = null;
     cx.spawn(async (cx) => {
       try {
-        for (const args of [["add", "-A"], ["commit", "-m", message]]) {
-          const r = await exec("git", args, { cwd: root, on });
-          if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim());
-        }
+        const r = await exec("git", ["commit", "-m", message], { cwd: root, on });
+        if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim());
         if (key() === context) { this.message = ""; this.input.set_value(""); }
       } catch (e) { if (key() === context) this.note = `Commit failed: ${e}`; }
       finally { this.busy = false; this.syncAction = null; this.refresh(cx); cx.notify(); }
@@ -364,7 +384,8 @@ export default class ChangesTabs extends View {
     if (key() !== this.context) this.refresh(cx);
     const add = this.files.reduce((n, f) => n + f.add, 0);
     const del = this.files.reduce((n, f) => n + f.del, 0);
-    const enabled = Boolean(this.message.trim() && this.root && !this.busy && !this.loading);
+    const staged = this.files.filter((f) => f.section === "staged"), changes = this.files.filter((f) => f.section === "changes");
+    const enabled = Boolean(this.message.trim() && staged.length && this.root && !this.busy && !this.loading);
     const activePath = activeOpenDiff(this.spaceId ?? spaces().find((s) => s.active)?.id, this.root, this.on);
 
     return v_flex()
@@ -392,7 +413,7 @@ export default class ChangesTabs extends View {
           .border_b(1)
           .border_color(t.border)
           .child(div().font_semibold().child("Changes"))
-          .child(div().px(5).py(1).rounded(4).border_1().border_color(t.border).text_size(10).text_color(t.muted).child(`${this.files.length} files`))
+          .child(div().px(5).py(1).rounded(4).border_1().border_color(t.border).text_size(10).text_color(t.muted).child(`${new Set(this.files.map((f) => f.path)).size} files`))
           .child(div().flex_1())
           .child(div().text_size(11).text_color(t.ansi2).child(`+${add}`))
           .child(div().text_size(11).text_color(t.ansi1).child(`−${del}`)),
@@ -480,43 +501,79 @@ export default class ChangesTabs extends View {
               .overflow_y_scroll()
               .p(6)
               .children(
-                this.files.map((f) => {
-                  const parts = f.path.split("/"), name = parts.pop();
-                  return h_flex()
-                    .id(`change-${f.path}`)
-                    .h(28)
+                [["staged", "Staged", staged], ["changes", "Changes", changes]].flatMap(([section, title, list]) => {
+                  if (!list.length) return [];
+                  const canAct = !this.busy && !this.loading;
+                  const actBtn = (id, label, tip, fn) =>
+                    div()
+                      .id(id)
+                      .w(20)
+                      .h(20)
+                      .flex_none()
+                      .flex()
+                      .items_center()
+                      .justify_center()
+                      .rounded(5)
+                      .text_size(14)
+                      .text_color(canAct ? t.muted : t.dim)
+                      .tooltip(tip)
+                      .when(canAct, (b) => b.cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)))
+                      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+                      .on_click((_e, cx) => { cx.stop_propagation(); fn(cx); })
+                      .child(label);
+                  const header = h_flex()
+                    .id(`section-${section}`)
+                    .h(26)
                     .flex_none()
                     .px(8)
-                    .gap(8)
+                    .gap(6)
                     .items_center()
-                    .rounded(7)
-                    .cursor_pointer()
-                    .when(activePath === f.path, (e) => e.bg(t.selected))
-                    .hover((s) => s.bg(t.hover))
-                    .on_click((e) => this.pick(f.path, e.click_count >= 2))
-                    .on_mouse_down("right", (_e, cx) => {
-                      cx.stop_propagation();
-                      openOverlay({
-                        mod: "changes-tabs",
-                        kind: "popup",
-                        width: 190,
-                        height: !this.on ? 108 : 76,
-                        props: {
-                          contextMenu: {
-                            path: f.path,
-                            fullPath: joinPath(this.root, f.path),
-                            spaceId: this.spaceId ?? spaces().find((s) => s.active)?.id,
-                            root: this.root,
-                            on: this.on,
-                            name,
+                    .child(div().flex_1().text_size(11).font_semibold().text_color(t.muted).child(`${title.toUpperCase()}  ${list.length}`))
+                    .child(section === "staged"
+                      ? actBtn("unstage-all", "−", "Unstage all", (cx) => this.unstage(null, cx))
+                      : actBtn("stage-all", "+", "Stage all", (cx) => this.stage(null, cx)));
+                  const rows = list.map((f) => {
+                    const parts = f.path.split("/"), name = parts.pop();
+                    return h_flex()
+                      .id(`change-${section}-${f.path}`)
+                      .h(28)
+                      .flex_none()
+                      .px(8)
+                      .gap(8)
+                      .items_center()
+                      .rounded(7)
+                      .cursor_pointer()
+                      .when(activePath === f.path, (e) => e.bg(t.selected))
+                      .hover((s) => s.bg(t.hover))
+                      .on_click((e) => this.pick(f.path, e.click_count >= 2))
+                      .on_mouse_down("right", (_e, cx) => {
+                        cx.stop_propagation();
+                        openOverlay({
+                          mod: "changes-tabs",
+                          kind: "popup",
+                          width: 190,
+                          height: !this.on ? 108 : 76,
+                          props: {
+                            contextMenu: {
+                              path: f.path,
+                              fullPath: joinPath(this.root, f.path),
+                              spaceId: this.spaceId ?? spaces().find((s) => s.active)?.id,
+                              root: this.root,
+                              on: this.on,
+                              name,
+                            },
                           },
-                        },
-                      });
-                    })
-                    .child(div().w(14).text_size(11).text_color(f.status === "A" ? t.ansi2 : f.status === "D" ? t.ansi1 : f.status === "U" ? t.ansi1 : t.blocked).child(f.status))
-                    .child(h_flex().flex_1().min_w(0).child(div().text_color(t.dim).truncate().child(parts.length ? parts.join("/") + "/" : "")).child(div().max_w(260).min_w(0).truncate().child(name)))
-                    .when(f.add > 0, (e) => e.child(div().text_size(11).text_color(t.ansi2).child(`+${f.add}`)))
-                    .when(f.del > 0, (e) => e.child(div().text_size(11).text_color(t.ansi1).child(`−${f.del}`)));
+                        });
+                      })
+                      .child(div().w(14).text_size(11).text_color(f.status === "A" ? t.ansi2 : f.status === "D" ? t.ansi1 : f.status === "U" ? t.ansi1 : t.blocked).child(f.status))
+                      .child(h_flex().flex_1().min_w(0).child(div().text_color(t.dim).truncate().child(parts.length ? parts.join("/") + "/" : "")).child(div().max_w(260).min_w(0).truncate().child(name)))
+                      .when(f.add > 0, (e) => e.child(div().text_size(11).text_color(t.ansi2).child(`+${f.add}`)))
+                      .when(f.del > 0, (e) => e.child(div().text_size(11).text_color(t.ansi1).child(`−${f.del}`)))
+                      .child(section === "staged"
+                        ? actBtn(`unstage-${f.path}`, "−", "Unstage", (cx) => this.unstage(f.path, cx))
+                        : actBtn(`stage-${f.path}`, "+", "Stage", (cx) => this.stage(f.path, cx)));
+                  });
+                  return [header, ...rows];
                 }),
               )
               .when(!this.files.length, (e) =>
