@@ -94,9 +94,10 @@ export default class TabsFolders extends View {
   init(_props, cx) {
     this.pressed = null;
     this.scroll = ScrollHandle.new();
+    this.swipe = { acc: 0, at: 0 };
+    this.w = []; this.barW = 0; this.off = 0;
     try { this.panels = JSON.parse(localStorage.getItem("panels") ?? "{}"); } catch { this.panels = {}; }
     if (!this.panels || typeof this.panels !== "object" || Array.isArray(this.panels)) this.panels = {};
-    this.swipe = { acc: 0, steps: 0, at: 0, last: 0 };
     if (!checking()) {
       cx.spawn(async (cx) => {
         for (;;) {
@@ -135,27 +136,44 @@ export default class TabsFolders extends View {
     }
   }
 
-  // One tab per wheel notch. A touchpad or smooth-scrolling mouse sends many
-  // small events per gesture: a short swipe or one smoothed notch (about
-  // 25 px) switches one tab, a longer swipe keeps going a tab per 60 px, at
-  // most one every 100 ms so each shows.
+  // The wheel only pans the tab bar, one tab per notch (or per 40 px of
+  // touchpad swipe); it never selects a tab.
   wheel(e) {
-    if (e.delta_lines) {
-      if (e.delta_lines.y) this.step(e.delta_lines.y > 0 ? -1 : 1);
-      return;
+    const { shown } = this.computeShown();
+    if (shown.length < 2) return;
+    let d = e.delta_lines ? (e.delta_lines.y || e.delta_lines.x) : (e.delta.y || e.delta.x);
+    if (!d) return;
+    if (!e.delta_lines) {
+      const s = this.swipe;
+      if (e.touch_phase === "started" || Date.now() - s.at > 250) s.acc = 0;
+      s.at = Date.now(); s.acc += d;
+      if (Math.abs(s.acc) < 40) return;
+      d = s.acc; s.acc = 0;
     }
-    const s = this.swipe, now = Date.now();
-    // Phases often arrive only as moves (a macOS touchpad included): a pause
-    // or a turn starts a new gesture.
-    if (e.touch_phase === "started" || now - s.at > 250 || e.delta.y * s.acc < 0) Object.assign(s, { acc: 0, steps: 0 });
-    s.at = now;
-    s.acc += e.delta.y;
-    const need = s.steps ? 60 : 20;
-    if (Math.abs(s.acc) < need || now - s.last < 100) return;
-    s.acc -= Math.sign(s.acc) * need;
-    s.steps++;
-    s.last = now;
-    this.step(e.delta.y > 0 ? -1 : 1);
+    // scroll_to_item leaves visible items alone, so track the pixel offset
+    // ourselves and reveal the first hidden tab on the wanted side.
+    const gap = 3, w = (i) => this.w[i] ?? 100;
+    const left = (i) => { let x = 0; for (let k = 0; k < i; k++) x += w(k) + gap; return x; };
+    const off = this.off, end = off + this.barW;
+    let target;
+    if (d < 0) { // right
+      target = shown.findIndex((_, i) => left(i) + w(i) > end + 1);
+      if (target < 0) return;
+      this.off = left(target) + w(target) - this.barW;
+    } else {
+      target = -1;
+      for (let i = 0; i < shown.length; i++) if (left(i) < off - 1) target = i;
+      if (target < 0) return;
+      this.off = left(target);
+    }
+    this.scroll.scroll_to_item(target);
+  }
+
+  // Mirror scroll_to_item's smallest-scroll rule for the tracked offset.
+  reveal(i) {
+    let x = 0; for (let k = 0; k < i; k++) x += (this.w[k] ?? 100) + 3;
+    const r = x + (this.w[i] ?? 100);
+    if (x < this.off) this.off = x; else if (r > this.off + this.barW) this.off = r - this.barW;
   }
 
   // The side panel is remembered per space: switching shows that space's choice
@@ -228,7 +246,7 @@ export default class TabsFolders extends View {
             : t.chrome;
       return h_flex().id(`tab-${c.id}`).h(29).px(10).gap(7).rounded(7).items_center().flex_none().text_size(12.8)
         // A rename or status dot on this or an earlier tab can push the active one out.
-        .when(i <= active, el => el.on_size_change((_size, cx) => { this.scroll.scroll_to_item(active); cx.notify(); }))
+        .on_size_change((size, cx) => { this.w[i] = size.width; if (i <= active) { this.scroll.scroll_to_item(active); this.reveal(active); cx.notify(); } })
         .border(1).border_color(borderColor).bg(isActive ? t.raised : t.chrome).text_color(isPreview ? (isActive ? t.muted : t.dim) : (isActive ? t.foreground : t.muted))
         .hover(s => s.bg(t.hover))
         .on_mouse_down("left", (e, cx) => {
@@ -316,9 +334,9 @@ export default class TabsFolders extends View {
       : null;
     return h_flex().size_full().min_w(0).px(10).pl(lightsPadding).gap(3).items_center().bg(t.chrome).border_b(1).border_color(t.border)
       .on_mouse_up("left", () => { this.pressed = null; })
-      .on_scroll_wheel(e => this.wheel(e))
+      .on_scroll_wheel((e, cx) => { this.wheel(e); cx?.notify?.(); })
       .child(h_flex().id("tab-scroll").flex_1().min_w(0).h_full().items_center().gap(3).overflow_x_scrollbar().track_scroll(this.scroll)
-        .on_size_change((_size, cx) => { if (active >= 0) { this.scroll.scroll_to_item(active); cx.notify(); } })
+        .on_size_change((size, cx) => { this.barW = size.width; if (active >= 0) { this.scroll.scroll_to_item(active); this.reveal(active); cx.notify(); } })
         .children(shown.map(item)))
       .child(button("tab-new", "+", () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 })))
       .when(enabled.includes("files"), el => el.child(panelButton("files", "Files", "mods/files/file.svg")))
