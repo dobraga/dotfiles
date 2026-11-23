@@ -271,7 +271,9 @@ export default class TabsFolders extends View {
       ? Math.max(10, (root.traffic_lights[0] + 64) / settings().zoom - (sidebar?.hidden ? 0 : sidebar?.size?.px ?? 0))
       : 10;
     const panel = find(root, "panel"), body = find(root, "panel-body");
-    const basePanels = shared("workspace.panels") ?? ["files", "changes"];
+    // The welcome flow saves [] before any panel is picked; treat that as the default.
+    const picked = shared("workspace.panels");
+    const basePanels = Array.isArray(picked) && picked.length ? picked : ["files", "changes"];
     const enabled = basePanels.includes("prs") ? basePanels : [...basePanels, "prs"];
     this.syncPanel(space, panel, body, enabled);
     const forgeState = shared("forge.state");
