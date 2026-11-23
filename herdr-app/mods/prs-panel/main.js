@@ -3,38 +3,12 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar } from "gpui-base";
 import { appHome, checking, exec, focused, openOverlay, panes, setShared, shared, spaces, theme } from "herdr";
 import { formatRelTime, renderDetailView } from "./detail-view.js";
+import { normalizeRemoteSlug, discoverRepoRoots, repoName } from "./repos.js";
 
 const DEFAULT_PROFILES = [
   { id: "personal", name: "Personal" },
   { id: "work", name: "Work" },
 ];
-
-export function normalizeRemoteSlug(url) {
-  const s = (url ?? "").trim();
-  if (!s) return null;
-  let host = "";
-  let path = "";
-  const idx = s.indexOf("://");
-  if (idx >= 0) {
-    const rest = s.slice(idx + 3);
-    const slash = rest.indexOf("/");
-    if (slash < 0) return null;
-    const hostPart = rest.slice(0, slash);
-    host = (hostPart.includes("@") ? hostPart.split("@").pop() : hostPart).split(":")[0].toLowerCase();
-    path = rest.slice(slash + 1);
-  } else {
-    const m = /^(?:[^@]+@)?([^:/]+):(.+)$/.exec(s);
-    if (!m) return null;
-    host = m[1].toLowerCase();
-    path = m[2];
-  }
-  const provider = host.includes("github") ? "github" : host.includes("bitbucket") ? "bitbucket" : null;
-  if (!provider) return null;
-  path = path.replace(/^\/+|\/+$/g, "").replace(/\.git$/, "");
-  const parts = path.split("/").filter(Boolean);
-  if (parts.length < 2) return null;
-  return `${provider}:${parts[0].toLowerCase()}/${parts[1].toLowerCase()}`;
-}
 
 export default class PrsPanel extends View {
   init(_props, cx) {
@@ -43,10 +17,10 @@ export default class PrsPanel extends View {
     this.detailCache = {};
     this.detailLoading = false;
     this.lastFocusSeq = 0;
-    this.repoByKey = {};
-    this.repoLoading = new Set();
-    this.branchByKey = {};
-    this.branchLoading = new Set();
+    this.sessionRepos = []; // repos of the workspace: [{ root, name, repoSlug, branch }]
+    this.sessionKey = null;
+    this.sessionLoading = false;
+    this.repoFilter = null; // repoSlug or null (all)
     this.copiedField = null;
     this.wtBusy = false;
     this.wtStatus = null;
@@ -59,6 +33,7 @@ export default class PrsPanel extends View {
       this.searchQuery = this.searchInput.value().trim().toLowerCase();
       cx.notify();
     });
+    cx.timer.every(10000, (cx) => this.refreshSession(cx, true));
   }
 
   profileList() {
@@ -112,50 +87,49 @@ export default class PrsPanel extends View {
     });
   }
 
-  resolveActiveRepoBranch(cx) {
+  focusLocation() {
     const space = spaces().find((s) => s.active);
     const f = focused();
     const allPanes = panes();
     const pane = f?.pane ? allPanes.find((p) => p.pane === f.pane) : null;
     const spaceTabIds = new Set((space?.tabs ?? []).map((t) => t.id));
     const cwd = pane?.cwd || f?.cwd || allPanes.find((p) => spaceTabIds.has(p.tab) && p.cwd)?.cwd || space?.folder || null;
-    const on = space?.machine ?? null;
-    let branch = space?.branch || pane?.branch || allPanes.find((p) => spaceTabIds.has(p.tab) && p.branch)?.branch || null;
-    const cacheKey = `${on ?? ""}:${cwd ?? ""}`;
-    if (cwd && !checking()) {
-      if (!(cacheKey in this.repoByKey) && !this.repoLoading.has(cacheKey)) {
-        this.repoLoading.add(cacheKey);
-        cx.spawn(async (cx) => {
-          try {
-            const r = await exec("git", ["config", "--get", "remote.origin.url"], { cwd, on });
-            this.repoByKey[cacheKey] = r.code === 0 ? normalizeRemoteSlug(r.stdout) : null;
-          } catch {
-            this.repoByKey[cacheKey] = null;
-          } finally {
-            this.repoLoading.delete(cacheKey);
-            cx.notify();
-          }
-        });
+    return { cwd, folder: space?.folder ?? null, on: space?.machine ?? null };
+  }
+
+  // Every repo of the workspace with its current branch (one entry for a single-repo space).
+  // Re-reads on a focus/folder change and on the 10 s timer, because branches move.
+  refreshSession(cx, force = false) {
+    if (checking() || this.sessionLoading) return;
+    const { cwd, folder, on } = this.focusLocation();
+    if (!cwd) return;
+    const key = JSON.stringify([cwd, folder, on]);
+    if (!force && key === this.sessionKey) return;
+    this.sessionKey = key;
+    this.sessionLoading = true;
+    const git = (root, args) => exec("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", ...args], { cwd: root, on });
+    cx.spawn(async (cx) => {
+      try {
+        const roots = await discoverRepoRoots(exec, { cwd, folder, on });
+        const list = await Promise.all(
+          roots.map(async (root) => {
+            const [url, br] = await Promise.all([git(root, ["config", "--get", "remote.origin.url"]), git(root, ["rev-parse", "--abbrev-ref", "HEAD"])]);
+            return {
+              root,
+              name: repoName(root),
+              repoSlug: url.code === 0 ? normalizeRemoteSlug(url.stdout) : null,
+              branch: br.code === 0 ? br.stdout.trim() || null : null,
+            };
+          }),
+        );
+        if (this.sessionKey === key) this.sessionRepos = list;
+      } catch {
+        if (this.sessionKey === key) this.sessionRepos = [];
+      } finally {
+        this.sessionLoading = false;
+        cx.notify();
       }
-      if (!branch && !(cacheKey in this.branchByKey) && !this.branchLoading.has(cacheKey)) {
-        this.branchLoading.add(cacheKey);
-        cx.spawn(async (cx) => {
-          try {
-            const r = await exec("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "rev-parse", "--abbrev-ref", "HEAD"], { cwd, on });
-            this.branchByKey[cacheKey] = r.code === 0 ? r.stdout.trim() || null : null;
-          } catch {
-            this.branchByKey[cacheKey] = null;
-          } finally {
-            this.branchLoading.delete(cacheKey);
-            cx.notify();
-          }
-        });
-      }
-    }
-    return {
-      repoSlug: cwd ? this.repoByKey[cacheKey] ?? null : null,
-      branch: branch || (cwd ? this.branchByKey[cacheKey] ?? null : null),
-    };
+    });
   }
 
   renderPrCard(pr, t, showProfilePill, isActiveBranch, cx) {
@@ -267,12 +241,20 @@ export default class PrsPanel extends View {
     const mineCount = scopedPrs.filter((p) => p.isMine).length;
     const revCount = scopedPrs.filter((p) => p.isReviewRequested && !p.isMine).length;
 
-    const { repoSlug, branch } = this.resolveActiveRepoBranch(cx);
-    const activeBranchKey = repoSlug && branch ? state.byBranch?.[`${repoSlug}::${branch}`]?.key ?? null : null;
+    this.refreshSession(cx);
+    const sessionRepos = this.sessionRepos;
+    const multiRepo = sessionRepos.length > 1;
+    if (this.repoFilter && !sessionRepos.some((r) => r.repoSlug === this.repoFilter)) this.repoFilter = null;
+    // One PR per repo whose current branch has one open (a card that touches 3 repos shows 3 PRs here).
+    const activeKeys = new Set(
+      sessionRepos.map((r) => (r.repoSlug && r.branch ? state.byBranch?.[`${r.repoSlug}::${r.branch}`]?.key ?? null : null)).filter(Boolean),
+    );
+    const prSlug = (p) => `${p.provider}:${String(p.repo ?? "").toLowerCase()}`;
 
     const filtered = scopedPrs.filter((p) => {
       if (this.tab === "mine" && !p.isMine) return false;
       if (this.tab === "review" && !(p.isReviewRequested && !p.isMine)) return false;
+      if (this.repoFilter && prSlug(p) !== this.repoFilter) return false;
       if (this.searchQuery) {
         const hay = `${p.title} ${p.repo} ${p.sourceBranch} ${p.author} #${p.number}`.toLowerCase();
         if (!hay.includes(this.searchQuery)) return false;
@@ -280,8 +262,8 @@ export default class PrsPanel extends View {
       return true;
     });
 
-    const activeBranchPr = activeBranchKey ? allPrs.find((p) => p.key === activeBranchKey) ?? null : null;
-    const restPrs = activeBranchPr ? filtered.filter((p) => p.key !== activeBranchPr.key) : filtered;
+    const activeBranchPrs = allPrs.filter((p) => activeKeys.has(p.key) && (!this.repoFilter || prSlug(p) === this.repoFilter));
+    const restPrs = filtered.filter((p) => !activeKeys.has(p.key));
     const selectedPr = this.selectedKey ? allPrs.find((p) => p.key === this.selectedKey) ?? null : null;
 
     const scopedErrors = Object.entries(state.errors ?? {}).filter(([k]) => !effectiveProf || k.startsWith(`${effectiveProf}:`));
@@ -380,6 +362,19 @@ export default class PrsPanel extends View {
                   .child(filterChip("prs-tab-mine", `Mine (${mineCount})`, this.tab === "mine", (_e, cx) => { this.tab = "mine"; cx.notify(); }))
                   .child(filterChip("prs-tab-rev", `Review (${revCount})`, this.tab === "review", (_e, cx) => { this.tab = "review"; cx.notify(); })),
               )
+              .when(multiRepo, (e2) =>
+                e2.child(
+                  h_flex()
+                    .gap(6)
+                    .flex_wrap()
+                    .child(filterChip("prs-repo-all", "All repos", !this.repoFilter, (_e, cx) => { this.repoFilter = null; cx.notify(); }))
+                    .children(
+                      sessionRepos
+                        .filter((r) => r.repoSlug)
+                        .map((r) => filterChip(`prs-repo-${r.root}`, r.name, this.repoFilter === r.repoSlug, (_e, cx) => { this.repoFilter = this.repoFilter === r.repoSlug ? null : r.repoSlug; cx.notify(); })),
+                    ),
+                ),
+              )
               .child(
                 div()
                   .h(30)
@@ -473,7 +468,7 @@ export default class PrsPanel extends View {
                         ),
                     ),
                   )
-                  .when(inScopeConfigured && filtered.length === 0 && !activeBranchPr, (e2) =>
+                  .when(inScopeConfigured && filtered.length === 0 && activeBranchPrs.length === 0, (e2) =>
                     e2.child(
                       div()
                         .p(12)
@@ -482,12 +477,12 @@ export default class PrsPanel extends View {
                         .child(loading ? "Syncing pull requests…" : "No matching open pull requests"),
                     ),
                   )
-                  .when(Boolean(activeBranchPr), (e2) =>
+                  .when(activeBranchPrs.length > 0, (e2) =>
                     e2
-                      .child(div().px(4).text_size(10.5).font_semibold().text_color(t.accent).child("ACTIVE BRANCH"))
-                      .child(this.renderPrCard(activeBranchPr, t, !effectiveProf, true, cx)),
+                      .child(div().px(4).text_size(10.5).font_semibold().text_color(t.accent).child(multiRepo ? "ACTIVE BRANCHES" : "ACTIVE BRANCH"))
+                      .children(activeBranchPrs.map((pr) => this.renderPrCard(pr, t, !effectiveProf, true, cx))),
                   )
-                  .when(Boolean(activeBranchPr) && restPrs.length > 0, (e2) =>
+                  .when(activeBranchPrs.length > 0 && restPrs.length > 0, (e2) =>
                     e2.child(div().px(4).pt(4).text_size(10.5).font_semibold().text_color(t.dim).child("OTHER PULL REQUESTS")),
                   )
                   .children(restPrs.map((pr) => this.renderPrCard(pr, t, !effectiveProf, false, cx))),
