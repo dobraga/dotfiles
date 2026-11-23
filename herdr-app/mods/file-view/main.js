@@ -1,6 +1,6 @@
 // Fast file editor, media previewer (image/SVG/audio/video), git diff viewer, and inline Open With screen.
 import { View, div, svg } from "gpui-kit";
-import { v_flex, h_flex, Editor, EditorState, TextView, Scrollbar, v_virtual_list, InputState, SliderState } from "gpui-base";
+import { v_flex, h_flex, Editor, EditorState, TextView, Scrollbar, v_virtual_list, Input, InputState, SliderState, ScrollHandle, VirtualListScrollHandle } from "gpui-base";
 import { props, shared, setShared, spaces, panes, focused, run, exec, readTextFile, writeTextFile, watchFolder, theme, settings, home, checking, notify } from "herdr";
 import { inspectFile, launchApp, setDefaultApp, revealInFolder, visibleApps, renderOpenWithScreen } from "./open-with-ui.js";
 import {
@@ -60,6 +60,144 @@ function diffRows(lines) {
     if (kind === " ") { old++; return { kind, number: next++, text: untab(line.slice(1)) || " " }; }
     return { kind: "", text: line };
   });
+}
+
+// Splits markdown into blank-line separated blocks, keeping fenced code intact.
+function splitMdBlocks(text) {
+  const blocks = [];
+  let cur = [];
+  let fence = null;
+  const flush = () => {
+    if (cur.length) blocks.push(cur.join("\n"));
+    cur = [];
+  };
+  for (const line of text.split("\n")) {
+    const f = /^\s*(```|~~~)/.exec(line);
+    if (f) fence = fence ? (fence === f[1] ? null : fence) : f[1];
+    if (!fence && !f && line.trim() === "") flush();
+    else cur.push(line);
+  }
+  flush();
+  return blocks;
+}
+
+const isFencedBlock = (b) => /^\s*(```|~~~)/.test(b);
+
+function countOccurrences(text, q) {
+  let n = 0;
+  let pos = 0;
+  while ((pos = text.indexOf(q, pos)) !== -1) {
+    n++;
+    pos += q.length;
+  }
+  return n;
+}
+
+const HIT_BG = "#fde047";
+const HIT_CUR_BG = "#fb923c";
+const HIT_FG = "#1c1917";
+
+// --- Lightweight markdown model used to draw blocks that contain matches ---------------------
+// TextView cannot colour text, so blocks with hits are drawn by hand. Only the common syntax is
+// handled (headings, lists, quotes, tables, **bold**, `code`); anything else shows as plain text.
+function parseInline(text) {
+  return text
+    .split(/(\*\*[^*]+\*\*|`[^`]+`)/)
+    .filter(Boolean)
+    .map((tok) =>
+      tok.startsWith("**") && tok.endsWith("**") && tok.length > 4
+        ? { text: tok.slice(2, -2), bold: true }
+        : tok.startsWith("`") && tok.endsWith("`") && tok.length > 2
+          ? { text: tok.slice(1, -1), code: true }
+          : { text: tok },
+    );
+}
+
+function parseMdBlockLines(block) {
+  const out = [];
+  for (const line of block.split("\n")) {
+    let m;
+    if ((m = /^(#{1,6})\s+(.*)$/.exec(line))) out.push({ kind: "h", level: m[1].length, segs: parseInline(m[2]) });
+    else if (/^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$/.test(line) && line.includes("|")) out.push({ kind: "sep" });
+    else if (/^\s*\|/.test(line)) {
+      const cells = line.trim().replace(/^\||\|$/g, "").split("|");
+      out.push({ kind: "row", cells: cells.map((c) => parseInline(c.trim())) });
+    } else if ((m = /^(\s*)([-*+]|\d+\.)\s+(.*)$/.exec(line)))
+      out.push({ kind: "li", indent: m[1].length, marker: /\d/.test(m[2]) ? m[2] : "•", segs: parseInline(m[3]) });
+    else if ((m = /^\s*>\s?(.*)$/.exec(line))) out.push({ kind: "quote", segs: parseInline(m[1]) });
+    else out.push({ kind: "p", segs: parseInline(line.trim()) });
+  }
+  return out;
+}
+
+function mdLineSegs(l) {
+  return l.kind === "row" ? l.cells.flat() : (l.segs ?? []);
+}
+
+function countBlockHits(block, q) {
+  if (isFencedBlock(block)) return 0;
+  let n = 0;
+  for (const l of parseMdBlockLines(block)) for (const sg of mdLineSegs(l)) n += countOccurrences(sg.text.toLowerCase(), q);
+  return n;
+}
+
+function renderMdMatchBlock(block, q, currentLocal, t) {
+  let i = 0;
+  const inline = (segs) => {
+    const row = h_flex().flex_wrap().min_w(0);
+    for (const sg of segs) {
+      const style = (e) =>
+        e
+          .when(sg.bold, (x) => x.font_bold())
+          .when(sg.code, (x) => x.bg(t.raised).rounded(3).px(3).font_family(settings().font_family ?? "JetBrains Mono"));
+      const lower = sg.text.toLowerCase();
+      const pieces = [];
+      let pos = 0;
+      let at;
+      while (q && (at = lower.indexOf(q, pos)) !== -1) {
+        if (at > pos) pieces.push({ text: sg.text.slice(pos, at) });
+        pieces.push({ text: sg.text.slice(at, at + q.length), hit: true });
+        pos = at + q.length;
+      }
+      if (pos < sg.text.length) pieces.push({ text: sg.text.slice(pos) });
+      for (const pc of pieces) {
+        if (pc.hit) {
+          const cur = i++ === currentLocal;
+          row.child(style(div()).rounded(3).bg(cur ? HIT_CUR_BG : HIT_BG).text_color(HIT_FG).child(pc.text));
+        } else {
+          for (const w of pc.text.match(/\S+\s*|\s+/g) ?? []) row.child(style(div()).child(w));
+        }
+      }
+    }
+    return row;
+  };
+  const col = v_flex().gap(4);
+  const lines = parseMdBlockLines(block);
+  lines.forEach((l) => {
+    if (l.kind === "sep") return;
+    if (l.kind === "h")
+      col.child(inline(l.segs).text_size([0, 22, 18, 15, 14, 13, 13][l.level]).font_bold().mt(l.level < 3 ? 4 : 0));
+    else if (l.kind === "li")
+      col.child(
+        h_flex()
+          .gap(6)
+          .pl(l.indent * 6 + 4)
+          .items_start()
+          .child(div().flex_none().text_color(t.dim).child(l.marker))
+          .child(inline(l.segs).flex_1()),
+      );
+    else if (l.kind === "quote")
+      col.child(div().pl(10).border_l(3).border_color(t.border).text_color(t.muted).child(inline(l.segs)));
+    else if (l.kind === "row")
+      col.child(
+        h_flex()
+          .border_b(1)
+          .border_color(t.border)
+          .children(l.cells.map((c) => div().flex_1().min_w(0).px(6).py(3).child(inline(c)))),
+      );
+    else col.child(inline(l.segs));
+  });
+  return col;
 }
 
 export default class FileView extends View {
@@ -170,6 +308,15 @@ export default class FileView extends View {
     this.audioVolSlider = SliderState.new({ min: 0, max: 100, step: 1, value: 100 });
     this.videoSeekSlider = SliderState.new({ min: 0, max: 1000, step: 1, value: 0 });
     this.pdfSearchInput = InputState.new({ placeholder: "Search text in PDF…" });
+    this.fileSearchOpen = false;
+    this.fileSearchQuery = "";
+    this.fileMatches = [];
+    this.fileMatchIdx = 0;
+    this.mdScroll = ScrollHandle.new();
+    this.codeScroll = VirtualListScrollHandle.new();
+    this.searchLines = [];
+    this.mdBlocks = [];
+    this.fileSearchInput = InputState.new({ placeholder: "Find in file…" });
     this.pdfPageSlider = SliderState.new({ min: 1, max: 1000, step: 1, value: 1 });
 
     this.openWithInput.on("change", (_e, cx) => {
@@ -190,6 +337,15 @@ export default class FileView extends View {
       if (this.mediaMode === "pdf" && this.pdfSearchOpen) {
         this.stepPdfMatch(e?.shift || e?.modifiers?.shift ? -1 : 1, cx);
       }
+    });
+
+    this.fileSearchInput.on("change", (_e, cx) => {
+      this.fileSearchQuery = this.fileSearchInput.value();
+      this.recomputeFileMatches(cx, { jump: true });
+      cx.notify();
+    });
+    this.fileSearchInput.on("submit", (e, cx) => {
+      if (this.fileSearchOpen) this.stepFileMatch(e?.shift || e?.modifiers?.shift ? -1 : 1, cx);
     });
 
     this.pdfPageSlider.on("change", (val, cx) => {
@@ -527,6 +683,11 @@ export default class FileView extends View {
     this.pdfSearchQuery = "";
     this.pdfMatches = [];
     this.pdfMatchIdx = 0;
+    this.fileSearchOpen = false;
+    this.fileSearchQuery = "";
+    this.fileMatches = [];
+    this.fileMatchIdx = 0;
+    this.fileSearchInput?.set_value("");
     this.audioStatus = null;
     this.audioError = null;
     this.audioScrubPos = null;
@@ -1453,6 +1614,155 @@ export default class FileView extends View {
     cx.notify();
   }
 
+  inMdPreview() {
+    return Boolean(this.mdPreview && this.markdownText);
+  }
+
+  recomputeFileMatches(cx, { jump = false } = {}) {
+    const q = (this.fileSearchQuery || "").toLowerCase();
+    if (this.inMdPreview()) {
+      this.mdBlocks = splitMdBlocks(this.markdownText);
+      this.fileMatches = [];
+      this.fileMatchIdx = 0;
+      if (q) {
+        this.mdBlocks.forEach((b, block) => {
+          const n = countBlockHits(b, q);
+          for (let local = 0; local < n; local++) this.fileMatches.push({ block, local });
+        });
+      }
+      if (jump) this.showFileMatch(cx);
+      return;
+    }
+    const lines = (this.code?.value() ?? "").split("\n");
+    this.searchLines = lines;
+    this.fileMatches = [];
+    this.fileMatchIdx = 0;
+    if (q) {
+      lines.forEach((l, line) => {
+        const lower = l.toLowerCase();
+        let col = 0;
+        while ((col = lower.indexOf(q, col)) !== -1) {
+          this.fileMatches.push({ line, col });
+          col += q.length;
+        }
+      });
+    }
+    if (jump) this.showFileMatch(cx);
+  }
+
+  showFileMatch(cx) {
+    if (this.inMdPreview()) {
+      const m = this.fileMatches[this.fileMatchIdx];
+      if (m) this.mdScroll?.scroll_to_item(m.block);
+      cx.notify();
+      return;
+    }
+    const m = this.fileMatches[this.fileMatchIdx];
+    if (m) this.codeScroll?.scroll_to_item(m.line, "center");
+    cx.notify();
+  }
+
+  stepFileMatch(delta, cx) {
+    const n = this.fileMatches.length;
+    if (!n) return;
+    this.fileMatchIdx = (this.fileMatchIdx + delta + n) % n;
+    this.showFileMatch(cx);
+  }
+
+  openFileSearch(cx) {
+    this.fileSearchOpen = true;
+    this.fileSearchInput.focus();
+    if (this.fileSearchQuery) this.recomputeFileMatches(cx);
+    cx.notify();
+  }
+
+  closeFileSearch(cx) {
+    this.fileSearchOpen = false;
+    this.focusHandle.focus();
+    cx.notify();
+  }
+
+  // While searching code, draw lines ourselves (the Editor cannot show or scroll to a match).
+  renderCodeSearchView(t) {
+    const q = this.fileSearchQuery.toLowerCase();
+    if (!this.searchLines.length) this.recomputeFileMatches({ notify() {} });
+    const lines = this.searchLines;
+    const cur = this.fileMatches[this.fileMatchIdx];
+    const byLine = new Map();
+    this.fileMatches.forEach((m, idx) => {
+      if (!byLine.has(m.line)) byLine.set(m.line, []);
+      byLine.get(m.line).push({ col: m.col, cur: idx === this.fileMatchIdx });
+    });
+    const row = (i) => {
+      const text = lines[i] ?? "";
+      const body = h_flex().flex_1().min_w(0).whitespace_nowrap();
+      let pos = 0;
+      for (const h of byLine.get(i) ?? []) {
+        if (h.col > pos) body.child(div().child(text.slice(pos, h.col)));
+        body.child(
+          div().bg(h.cur ? HIT_CUR_BG : HIT_BG).text_color(HIT_FG).child(text.slice(h.col, h.col + q.length)),
+        );
+        pos = h.col + q.length;
+      }
+      if (pos < text.length || pos === 0) body.child(div().child(text.slice(pos) || " "));
+      return h_flex()
+        .w_full()
+        .h(20)
+        .flex_none()
+        .gap(12)
+        .px(8)
+        .items_center()
+        .child(div().w(40).flex_none().text_right().text_color(t.dim).child(String(i + 1)))
+        .child(body);
+    };
+    return div()
+      .flex_1()
+      .min_h(0)
+      .relative()
+      .font_family(settings().font_family ?? "JetBrains Mono")
+      .text_size(12.5)
+      .child(
+        v_virtual_list(
+          `fv-code-search-${this.slotId}`,
+          lines.length,
+          20,
+          (i) => `${i}-${cur && cur.line === i ? cur.col : ""}-${this.fileSearchQuery}`,
+          (range) => {
+            const out = [];
+            for (let i = range.start; i < range.end; i++) out.push(row(i));
+            return out;
+          },
+        )
+          .track_scroll(this.codeScroll)
+          .size_full(),
+      )
+      .child(Scrollbar.vertical(`fv-code-search-${this.slotId}`).viewport_from_layout().absolute().inset_0());
+  }
+
+  renderMdSearchView(t) {
+    const q = this.fileSearchQuery.toLowerCase();
+    if (!this.mdBlocks.length) this.mdBlocks = splitMdBlocks(this.markdownText);
+    const cur = this.fileMatches[this.fileMatchIdx];
+    const el = v_flex()
+      .id("fv-markdown-scroll-search")
+      .track_scroll(this.mdScroll)
+      .flex_1()
+      .min_h(0)
+      .overflow_y_scrollbar()
+      .p(20)
+      .gap(12);
+    this.mdBlocks.forEach((b, i) => {
+      const local = cur && cur.block === i ? cur.local : -1;
+      const hasHit = countBlockHits(b, q) > 0;
+      el.child(
+        hasHit
+          ? renderMdMatchBlock(b, q, local, t).id(`fv-md-hit-${this.slotId}-${i}`)
+          : TextView.markdown(`fv-md-${this.slotId}-s${i}`, b),
+      );
+    });
+    return el;
+  }
+
   copyPdfPageText(fullPath, cx) {
     const seq = this.loadSeq;
     const page = this.pdfPage;
@@ -1508,6 +1818,12 @@ export default class FileView extends View {
     this.openWithInput = null;
     this.pdfSearchInput?.release();
     this.pdfSearchInput = null;
+    this.fileSearchInput?.release();
+    this.fileSearchInput = null;
+    this.mdScroll?.release();
+    this.mdScroll = null;
+    this.codeScroll?.release();
+    this.codeScroll = null;
     this.audioSeekSlider?.release();
     this.audioSeekSlider = null;
     this.audioVolSlider?.release();
@@ -1612,6 +1928,23 @@ export default class FileView extends View {
           this.save(cx);
           cx.stop_propagation();
           return;
+        }
+        if (mode === "file" && !showingOpenWith && !this.mediaMode && this.code) {
+          if (k === "f" && (e.modifiers?.control || e.modifiers?.platform) && !e.modifiers?.alt) {
+            this.openFileSearch(cx);
+            cx.stop_propagation();
+            return;
+          }
+          if (k === "f3" && this.fileSearchOpen) {
+            this.stepFileMatch(e.modifiers?.shift ? -1 : 1, cx);
+            cx.stop_propagation();
+            return;
+          }
+          if (k === "escape" && this.fileSearchOpen) {
+            this.closeFileSearch(cx);
+            cx.stop_propagation();
+            return;
+          }
         }
         if (showingOpenWith) {
           const { flat } = visibleApps(this.openWithData, this.openWithQuery, this.openWithShowAll);
@@ -1953,6 +2286,50 @@ export default class FileView extends View {
             : renderPdfView(this, slot, fullPath, t),
         ),
       )
+      .when(!showingOpenWith && mode === "file" && !this.mediaMode && this.fileSearchOpen, (el) =>
+        el.child(
+          h_flex()
+            .h(38)
+            .flex_none()
+            .px(12)
+            .gap(8)
+            .items_center()
+            .bg(t.chrome)
+            .border_b(1)
+            .border_color(t.border)
+            .child(svg("mods/workspace-chrome/search.svg").size(14).flex_none().text_color(t.dim))
+            .child(
+              div()
+                .flex_1()
+                .max_w(320)
+                .h(26)
+                .px(8)
+                .flex()
+                .items_center()
+                .rounded(6)
+                .bg(t.background)
+                .border(1)
+                .border_color(t.border)
+                .child(Input.new(this.fileSearchInput).w_full().h_full().text_size(12).text_color(t.foreground)),
+            )
+            .child(
+              div()
+                .text_size(11.5)
+                .text_color(t.muted)
+                .child(
+                  !this.fileSearchQuery
+                    ? ""
+                    : this.fileMatches.length
+                      ? `${this.fileMatchIdx + 1} / ${this.fileMatches.length}`
+                      : "No matches",
+                ),
+            )
+            .child(chip("fv-find-prev", "Prev", false, (_e, cx) => this.stepFileMatch(-1, cx)))
+            .child(chip("fv-find-next", "Next", false, (_e, cx) => this.stepFileMatch(1, cx)))
+            .child(div().flex_1())
+            .child(chip("fv-find-close", "×", false, (_e, cx) => this.closeFileSearch(cx))),
+        ),
+      )
       .when(!showingOpenWith && (mode === "file") && !this.mediaMode, (el) =>
         el.child(
           this.error
@@ -1960,14 +2337,18 @@ export default class FileView extends View {
             : isSvg && this.svgPreview
               ? renderImageView(this, slot, fullPath, t)
               : this.mdPreview && this.markdownText
-                ? v_flex()
+                ? this.fileSearchOpen && this.fileSearchQuery.trim()
+                  ? this.renderMdSearchView(t)
+                  : v_flex()
                     .id("fv-markdown-scroll")
                     .flex_1()
                     .min_h(0)
                     .overflow_y_scrollbar()
                     .p(20)
                     .child(TextView.markdown(`fv-md-${this.slotId}`, this.markdownText))
-                : this.code
+                : this.code && this.fileSearchOpen && this.fileSearchQuery.trim()
+                  ? this.renderCodeSearchView(t)
+                  : this.code
                   ? Editor.new(this.code).flex_1().min_h(0)
                   : div().p(16).text_color(t.dim).child(this.loading ? "Loading file…" : ""),
         ),
