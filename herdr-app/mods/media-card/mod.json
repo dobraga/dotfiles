@@ -1,0 +1,9 @@
+{
+  "place": "none",
+  "title": "Media Controller",
+  "overlay": {
+    "kind": "window",
+    "frame": "none",
+    "width": 340
+  }
+}

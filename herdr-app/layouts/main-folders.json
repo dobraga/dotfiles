@@ -78,7 +78,7 @@
             "px": 69
           },
           "content": {
-            "mod": "workspace-chrome",
+            "mod": "workspace-chrome-custom",
             "props": {
               "footer": true
             }
@@ -164,6 +164,13 @@
                       "type": "block",
                       "content": {
                         "mod": "changes-tabs"
+                      }
+                    },
+                    {
+                      "id": "prs",
+                      "type": "block",
+                      "content": {
+                        "mod": "prs-panel"
                       }
                     }
                   ]
