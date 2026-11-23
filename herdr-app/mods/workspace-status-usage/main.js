@@ -90,10 +90,19 @@ function matchAgyGroup(groups, modelName) {
   return groups.find((g) => /gemini models/i.test(g.name)) ?? groups[0];
 }
 
+async function readKeychainCredentials() {
+  try {
+    const res = await exec("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"], { timeout: 5000 });
+    return res.code === 0 ? res.stdout.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchClaudeUsage() {
   try {
-    const raw = await readTextFile(`${home()}/.claude/.credentials.json`);
-    if (!raw) return { error: "No ~/.claude/.credentials.json" };
+    const raw = (await readTextFile(`${home()}/.claude/.credentials.json`)) || (await readKeychainCredentials());
+    if (!raw) return { error: "No Claude credentials (file or macOS Keychain)" };
     const oauth = JSON.parse(raw)?.claudeAiOauth;
     if (!oauth?.accessToken) return { error: "Not logged in to Claude" };
     if (oauth.expiresAt && Date.now() > oauth.expiresAt) {
