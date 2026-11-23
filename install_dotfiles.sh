@@ -240,6 +240,10 @@ if [ -d "${HERDR_SRC}" ]; then
   if [ -f "${HERDR_SRC}/data/herdr-chat/keys.json" ]; then
     link_herdr "${HERDR_SRC}/data/herdr-chat/keys.json" "${HERDR_HOME}/data/herdr-chat/keys.json"
   fi
+  # Single Tasks config (commands, prompts, sets, schedules); jobs/ next to it is generated.
+  if [ -f "${HERDR_SRC}/data/tasks/tasks.json" ]; then
+    link_herdr "${HERDR_SRC}/data/tasks/tasks.json" "${HERDR_HOME}/data/tasks/tasks.json"
+  fi
   echo "  - Linked Herdr config, layouts, and mods -> ${HERDR_SRC}"
 
   # herdr-chat fork (Antigravity ACP provider + unified Ctrl+T launcher)

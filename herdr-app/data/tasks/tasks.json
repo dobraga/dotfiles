@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "folders": {
+    "/home/dobraga/src/health-cockpit": [
+      {
+        "id": "tmwtvdt6etn5",
+        "name": "avaliar treino",
+        "kind": "prompt",
+        "prompt": "avalia meu ultimo treino",
+        "agent": "agy",
+        "model": "gemini-4-hydrogen-high",
+        "effort": "high",
+        "workspace": "worktree",
+        "schedule": null,
+        "paused": false
+      }
+    ]
+  }
+}
