@@ -206,6 +206,12 @@ link_path "${DOTFILES_DIR}/starship.toml" "${HOME}/.config/starship.toml"
 link_path "${DOTFILES_DIR}/kitty" "${HOME}/.config/kitty"
 echo "  - Linked .zshrc, .gitconfig, starship.toml, and kitty"
 
+# Karabiner-Elements (macOS only): link the single file, not the dir (it holds assets and backups)
+if [ "$(uname -s)" = "Darwin" ]; then
+  link_path "${DOTFILES_DIR}/karabiner/karabiner.json" "${HOME}/.config/karabiner/karabiner.json"
+  echo "  - Linked karabiner.json"
+fi
+
 # Herdr app personal config, layout, and custom/cloned mods
 HERDR_SRC="${DOTFILES_DIR}/herdr-app"
 HERDR_HOME="${HOME}/.config/herdr-app"
