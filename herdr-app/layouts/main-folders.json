@@ -190,6 +190,13 @@
                       "content": {
                         "mod": "loadout"
                       }
+                    },
+                    {
+                      "id": "tasks",
+                      "type": "block",
+                      "content": {
+                        "mod": "tasks"
+                      }
                     }
                   ]
                 }

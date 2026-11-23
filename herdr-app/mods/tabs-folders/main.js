@@ -317,7 +317,7 @@ export default class TabsFolders extends View {
     // The welcome flow saves [] before any panel is picked; treat that as the default.
     const picked = shared("workspace.panels");
     const basePanels = Array.isArray(picked) && picked.length ? picked : ["files", "changes"];
-    const enabled = ["prs", "loadout"].reduce((acc, id) => (acc.includes(id) ? acc : [...acc, id]), basePanels);
+    const enabled = ["prs", "loadout", "tasks"].reduce((acc, id) => (acc.includes(id) ? acc : [...acc, id]), basePanels);
     this.syncPanel(space, panel, body, enabled);
     const forgeState = shared("forge.state");
     const activeProf = shared("space-folders.profile") || null;
@@ -368,6 +368,7 @@ export default class TabsFolders extends View {
       .when(enabled.includes("changes"), el => el.child(panelButton("changes", "Changes", "mods/changes/changes.svg")))
       .when(enabled.includes("prs"), el => el.child(panelButton("prs", "PRs", "mods/prs-panel/pull-request.svg", prBadge)))
       .when(enabled.includes("loadout"), el => el.child(panelButton("loadout", "Loadout", "mods/loadout/loadout.svg")))
+      .when(enabled.includes("tasks"), el => el.child(panelButton("tasks", "Tasks", "mods/tasks/tasks.svg")))
       .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/tabs-folders/win-min.svg").size(16) : "−", () => run("window.minimize")))
         .child(button("maximize", w.platform === "windows" ? svg(`mods/tabs-folders/${w.maximized ? "win-restore" : "win-max"}.svg`).size(16) : "□", () => run("window.maximize")))
         .child(button("close-window", w.platform === "windows" ? svg("mods/tabs-folders/win-close.svg").size(16) : svg("mods/pane/close.svg").size(13), () => run("window.close"))));
