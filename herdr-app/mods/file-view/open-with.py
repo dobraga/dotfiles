@@ -253,6 +253,16 @@ def spawn_detached(cmd):
     )
 
 
+def _default_opener():
+    if sys.platform == "darwin":
+        return ["open"]
+    if shutil.which("gio"):
+        return ["gio", "open"]
+    if shutil.which("xdg-open"):
+        return ["xdg-open"]
+    raise RuntimeError("No opener available (open, gio or xdg-open)")
+
+
 def find_desktop_app(target):
     if "/" in target:
         return Gio.DesktopAppInfo.new_from_filename(target)
@@ -264,12 +274,7 @@ def cmd_launch(target, path):
         raise FileNotFoundError(f"File not found: {path}")
 
     if target == "--default":
-        if shutil.which("gio"):
-            spawn_detached(["gio", "open", path])
-        elif shutil.which("xdg-open"):
-            spawn_detached(["xdg-open", path])
-        else:
-            raise RuntimeError("Neither gio nor xdg-open is available")
+        spawn_detached(_default_opener() + [path])
         return {"ok": True, "app": "System Default"}
 
     if HAS_GI:
@@ -344,14 +349,11 @@ def cmd_reveal(path):
         except Exception:
             pass
 
-    parent = str(resolved.parent)
-    if shutil.which("gio"):
-        spawn_detached(["gio", "open", parent])
+    if sys.platform == "darwin":
+        spawn_detached(["open", "-R", str(resolved)])
         return {"ok": True}
-    if shutil.which("xdg-open"):
-        spawn_detached(["xdg-open", parent])
-        return {"ok": True}
-    raise RuntimeError("Cannot reveal file in file manager")
+    spawn_detached(_default_opener() + [str(resolved.parent)])
+    return {"ok": True}
 
 
 def main(argv=None):
