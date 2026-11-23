@@ -13,8 +13,18 @@ plugins=(
   zsh-syntax-highlighting
 )
 
-source $HOME/.cargo/env
-source $ZSH/oh-my-zsh.sh
+[[ -f $HOME/.cargo/env ]] && source $HOME/.cargo/env
+
+if [[ -f $ZSH/oh-my-zsh.sh ]]; then
+  # Linux: oh-my-zsh
+  source $ZSH/oh-my-zsh.sh
+else
+  # macOS: no oh-my-zsh; plugins come from brew
+  autoload -Uz compinit && compinit -C
+  for p in zsh-autosuggestions zsh-syntax-highlighting; do
+    [[ -f /opt/homebrew/share/$p/$p.zsh ]] && source /opt/homebrew/share/$p/$p.zsh
+  done
+fi
 eval "$(starship init zsh)"
 
 alias g="git"
@@ -26,15 +36,17 @@ alias d=docker
 alias dc="docker compose"
 alias top=ytop
 alias cat=bat
-alias ls="exa --icons --git"
-alias ll="exa -l --icons --git"
+if command -v eza >/dev/null; then _ls=eza; else _ls=exa; fi
+alias ls="$_ls --icons --git"
+alias ll="$_ls -l --icons --git"
+unset _ls
 
 alias cls="clear"
 alias ..="cd .."
 alias ...="cd ../.."
 alias cd..="cd .."
 
-export $(grep -v '^#' ~/.env | xargs)
+[[ -f ~/.env ]] && { set -a; source ~/.env; set +a; }
 
 openrouter() {
   if [[ -z "$OPENROUTER_API_KEY" ]]; then
@@ -56,8 +68,8 @@ openrouter() {
 }
 
 glm() {
-  if [[ -z "$MINIMAX_API_KEY" ]]; then
-    echo "Error: MINIMAX_API_KEY is not set." >&2
+  if [[ -z "$GLM_API_KEY" ]]; then
+    echo "Error: GLM_API_KEY is not set." >&2
     echo "Please export it or add it to your .env file." >&2
     return 1
   fi
@@ -65,8 +77,8 @@ glm() {
   local -x ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
   local -x ANTHROPIC_AUTH_TOKEN="$GLM_API_KEY"
   local -x ANTHROPIC_API_KEY=""
-  local -x API_TIMEOUT_MS="3000000",
-  local -x ANTHROPIC_MODEL="glm-5.2",
+  local -x API_TIMEOUT_MS="3000000"
+  local -x ANTHROPIC_MODEL="glm-5.2"
   local -x ANTHROPIC_DEFAULT_OPUS_MODEL="glm-5.2"
   local -x ANTHROPIC_DEFAULT_SONNET_MODEL="glm-4.7"
   local -x ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.7"
@@ -84,17 +96,25 @@ minimax() {
   local -x ANTHROPIC_BASE_URL="https://api.minimax.io/anthropic"
   local -x ANTHROPIC_AUTH_TOKEN="$MINIMAX_API_KEY"
   local -x ANTHROPIC_API_KEY=""
-  local -x API_TIMEOUT_MS="3000000",
-  local -x ANTHROPIC_MODEL="MiniMax-M2.7",
-  local -x ANTHROPIC_DEFAULT_OPUS_MODEL="MiniMax-M2.7",
-  local -x ANTHROPIC_DEFAULT_SONNET_MODEL="MiniMax-M2.7",
+  local -x API_TIMEOUT_MS="3000000"
+  local -x ANTHROPIC_MODEL="MiniMax-M2.7"
+  local -x ANTHROPIC_DEFAULT_OPUS_MODEL="MiniMax-M2.7"
+  local -x ANTHROPIC_DEFAULT_SONNET_MODEL="MiniMax-M2.7"
   local -x ANTHROPIC_DEFAULT_HAIKU_MODEL="MiniMax-M2.7"
   
   command claude "$@"
 }
 
 export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
+# Lazy nvm: put the newest installed node on PATH now, load nvm.sh only when `nvm` is called
+_nvm_bin=($NVM_DIR/versions/node/*/bin(N[-1]))
+[[ -n $_nvm_bin ]] && export PATH="$_nvm_bin:$PATH"
+unset _nvm_bin
+nvm() {
+  unfunction nvm
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+  nvm "$@"
+}
 
 # Open native herdr-chat tab when running bare `agy`/`claude`/`codex` inside a Herdr terminal
 # Use `--tui` or `command <agent>` to force the terminal UI, or toggle in Herdr Settings > Herdr Chat.
@@ -124,6 +144,3 @@ codex()  { _herdr_open_chat codex "$@"; }
 
 # Added by Antigravity CLI installer & user tools
 export PATH="${HOME}/.local/bin:${HOME}/.bun/bin:${HOME}/bin:$PATH"
-
-# claude-mem background daemon
-pgrep -f "worker-service.cjs" > /dev/null 2>&1 || (claude-mem >/dev/null 2>&1 &)
