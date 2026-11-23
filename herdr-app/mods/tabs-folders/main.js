@@ -1,5 +1,6 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, ScrollHandle } from "gpui-base";
+import { iconFor, iconPath } from "./icon-for.js";
 import { spaces, agents, panes, run, openOverlay, theme, window, shared, setShared, layout, settings, nextCommand, checking } from "herdr";
 
 function tabStatusBadge(t, kind, count) {
@@ -285,7 +286,10 @@ export default class TabsFolders extends View {
           }
           openOverlay({ mod: "menu", kind: "popup", width: 200, props: { tab: "tab", target } });
         })
-        .when(isFileTab, el => el.child(svg(fileSlot?.kind === "diff" ? "mods/changes/changes.svg" : "mods/files/file.svg").size(13).flex_none().text_color(isPreview ? t.dim : t.muted)))
+        .when(isFileTab, el => el.child(
+          fileSlot?.kind === "file" && fileSlot?.path && shared("files-tabs.settings")?.materialIcons !== false
+            ? image(iconPath(iconFor(fileSlot.path.split("/").pop(), false, false))).size(14).flex_none().opacity(isPreview ? 0.65 : 1)
+            : svg(fileSlot?.kind === "diff" ? "mods/changes/changes.svg" : "mods/files/file.svg").size(13).flex_none().text_color(isPreview ? t.dim : t.muted)))
         .when(!isFileTab && Boolean(program?.icon), el => el.child(program.tint ? svg(program.icon).size(14).text_color(t.muted) : image(program.icon).size(14)))
         .child(div().max_w(170).truncate().child(c.zoomed ? `${name} Z` : name))
         .when(isPreview, el => el.child(div().px(4).rounded(3).bg(t.hover).text_size(9.5).text_color(t.dim).child("preview")))

@@ -97,4 +97,9 @@ writeFileSync(
     `export const FOLDERS = ${JSON.stringify(folders)};\n` +
     `export const HAS_OPEN = ${JSON.stringify(hasOpen)};\n`,
 );
+// tabs-folders shows the same icons in the tab bar. Mods are loaded from separate directories, so
+// it gets its own copy of the lookup instead of a cross-mod import (icon files are shared by path).
+const tabsDir = join(out, "..", "tabs-folders");
+copyFileSync(join(out, "icon-map.js"), join(tabsDir, "icon-map.js"));
+copyFileSync(join(out, "icon-for.js"), join(tabsDir, "icon-for.js"));
 console.log(`icons: ${used.size}, ext: ${Object.keys(ext).length}, names: ${Object.keys(names).length}, folders: ${Object.keys(folders).length}`);
