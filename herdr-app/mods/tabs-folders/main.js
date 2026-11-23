@@ -208,6 +208,16 @@ export default class TabsFolders extends View {
   render() {
     const t = theme();
     const { activeSpace: space, allSpaces, ps, groupSpaces, shown } = this.computeShown();
+    // A preview file tab (italic, unpinned) is temporary: close it as soon as another tab becomes active
+    // in its space. Editing pins a tab, so a preview never holds unsaved changes.
+    this.lastActiveBySpace ??= new Map();
+    for (const sp of allSpaces) {
+      const cur = sp.tabs?.find((tb) => tb.active)?.id;
+      const was = this.lastActiveBySpace.get(sp.id);
+      if (cur) this.lastActiveBySpace.set(sp.id, cur);
+      if (shared("files-tabs.settings")?.closePreview === false || !was || !cur || was === cur || !sp.tabs?.some((tb) => tb.id === was)) continue;
+      if (Object.values(shared("file-view.slots") ?? {}).some((sl) => sl?.tabId === was && sl.preview)) run("tab.close", { id: was });
+    }
     const active = shown.findIndex((e) => e.space.active && e.tab.active);
     const selected = shown[active]?.tab?.id;
     if (selected !== this.selected || active !== this.selectedIndex) {

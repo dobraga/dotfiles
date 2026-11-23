@@ -149,19 +149,20 @@ export default class SettingsCustom extends View {
   }
 
   async loadFilesSettings() {
-    const next = { accordion: true, followActive: true, materialIcons: true };
+    const next = { accordion: true, followActive: true, materialIcons: true, closePreview: true };
     try {
       const parsed = JSON.parse((await readTextFile(this.filesSettingsFile())) || "{}");
       if (typeof parsed?.accordion === "boolean") next.accordion = parsed.accordion;
       if (typeof parsed?.followActive === "boolean") next.followActive = parsed.followActive;
       if (typeof parsed?.materialIcons === "boolean") next.materialIcons = parsed.materialIcons;
+      if (typeof parsed?.closePreview === "boolean") next.closePreview = parsed.closePreview;
     } catch {}
     this.filesSettings = next;
     setShared("files-tabs.settings", next);
   }
 
   updateFilesSettings(patch, cx) {
-    const next = { ...(this.filesSettings ?? { accordion: true, followActive: true, materialIcons: true }), ...patch };
+    const next = { ...(this.filesSettings ?? { accordion: true, followActive: true, materialIcons: true, closePreview: true }), ...patch };
     this.filesSettings = next;
     this.filesError = null;
     setShared("files-tabs.settings", next);
@@ -487,7 +488,7 @@ export default class SettingsCustom extends View {
   // Files ----------------------------------------------------------------
 
   filesTab(t) {
-    const st = this.filesSettings ?? { accordion: true, followActive: true, materialIcons: true };
+    const st = this.filesSettings ?? { accordion: true, followActive: true, materialIcons: true, closePreview: true };
     return v_flex()
       .w_full()
       .child(this.heading(t, "Files"))
@@ -518,6 +519,16 @@ export default class SettingsCustom extends View {
           "Coloured file and folder icons from Material Icon Theme in the Files tab. Off uses the plain monochrome icons.",
           this.toggle(t, "st-files-icons", st.materialIcons, (_e, cx) =>
             this.updateFilesSettings({ materialIcons: !st.materialIcons }, cx),
+          ),
+        ),
+      )
+      .child(
+        this.row(
+          t,
+          "Close preview tabs when switching",
+          "A file opened with a single click (preview) closes as soon as you switch to another tab. Turn off to keep previews open until you close them.",
+          this.toggle(t, "st-files-close-preview", st.closePreview, (_e, cx) =>
+            this.updateFilesSettings({ closePreview: !st.closePreview }, cx),
           ),
         ),
       )
