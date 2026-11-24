@@ -137,10 +137,15 @@ _herdr_open_chat() {
   fi
   command "$provider" "$@"
 }
-agy()    { _herdr_open_chat agy "$@"; }
-claude() { _herdr_open_chat claude "$@"; }
-codex()  { _herdr_open_chat codex "$@"; }
-# [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
-
 # Added by Antigravity CLI installer & user tools
 export PATH="${HOME}/.local/bin:${HOME}/.bun/bin:${HOME}/bin:$PATH"
+
+for _agent in agy claude codex; do
+  if (( $+commands[$_agent] )); then
+    eval "${_agent}() { _herdr_open_chat ${_agent} \"\$@\"; }"
+  else
+    unfunction "$_agent" 2>/dev/null || true
+  fi
+done
+unset _agent
+# [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
