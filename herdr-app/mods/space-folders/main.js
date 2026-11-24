@@ -12,7 +12,7 @@
 // machine's name or the folder one of its spaces works in.
 
 import { View, div, svg, image } from "gpui-kit";
-import { v_flex, h_flex, InputState, Input } from "gpui-base";
+import { v_flex, h_flex, InputState, Input, ScrollHandle } from "gpui-base";
 import { spaces, agents, machines, panes, run, openOverlay, closeOverlay, props, exec, hc, theme, shared, setShared, watchFolder, window, layout, pickFolder, home, appHome, checking, nextCommand } from "herdr";
 
 function normalizeRemoteSlug(url) {
@@ -195,6 +195,27 @@ function place(s, ps) {
 const rowHeight = ({ tree }) => (tree ? 28 : 30);
 const where = (s, ps) => JSON.stringify([s.machine ?? null, place(s, ps)]);
 const base = (path) => path.replace(/\/+$/, "").split("/").pop();
+// A repo's name from its git folder: the folder holding .git, a bare repo's own
+// name, or the folder holding a hidden bare repo (<project>/.bare).
+const repoName = (common) => {
+  if (common.endsWith("/.git")) return base(common.slice(0, -5));
+  const own = base(common);
+  return own === ".bare" ? base(common.slice(0, -own.length - 1)) : own.replace(/\.git$/, "");
+};
+// A space's name and its git tail never shrink below this, so a short one ("api")
+// stays readable instead of turning into an ellipsis next to a long branch.
+const SIDE_MIN = 48;
+// Places looked at together (two git runs each). All at once, a few hundred spaces
+// run out of the app's open files or past a machine core's running execs.
+const AT_ONCE = 6;
+
+// Both runs, finished: a place isn't done while one of its runs still holds a slot.
+async function both(a, b) {
+  const done = await Promise.allSettled([a, b]);
+  const failed = done.find((d) => d.status === "rejected");
+  if (failed) throw failed.reason;
+  return done.map((d) => d.value);
+}
 // Changes made outside Herdr (an editor's save, a commit in another app): looked
 // for this often, in repos the list shows, while the window is in front.
 const FALLBACK = 60000;
@@ -312,7 +333,7 @@ export default class Spaces extends View {
     this.busy = {}; // pane -> an agent working or a program in front of its shell
     this.ready = {}; // machine -> its layout was readable at the last look
     this.at = {}; // space -> its where() at the last look
-    this.watching = new Set(); // local repos' git folders
+    this.watching = new Map(); // local repos' pending folder watches
     // Spaces made while this runs wait (at most a moment) for their git, so a
     // worktree appears under its repo instead of jumping there.
     this.shown = new Set(spaces().map((s) => s.id));
@@ -325,7 +346,12 @@ export default class Spaces extends View {
     this.pressed = null;
     this.over = null;
     this.machines = [];
-    this.folded = new Set(JSON.parse(localStorage.getItem("machines.folded") ?? "[]"));
+    try {
+      const folded = JSON.parse(localStorage.getItem("machines.folded") ?? "[]");
+      this.folded = new Set(Array.isArray(folded) ? folded.filter((m) => typeof m === "string") : []);
+    } catch { this.folded = new Set(); }
+    this.scroll = ScrollHandle.new(); // the list's position: the active space is brought into view through it
+    this.activeAt = -1; // the active space's place among the list's children, -1 when not drawn
     this.refreshMachines(cx);
     cx.timer.every(15000, cx => this.refreshMachines(cx));
     // Another screen may have changed them: read every machine's file again now and then.
@@ -380,6 +406,16 @@ export default class Spaces extends View {
     const at = {};
     for (const s of sp) at[s.id] = where(s, ps);
     const keys = new Set(Object.values(at).filter((k) => JSON.parse(k)[1]));
+    for (const k of Object.keys(this.git)) if (!keys.has(k)) {
+      delete this.git[k];
+      delete this.checked[k];
+      this.unsure.delete(k);
+    }
+    const repos = new Set(Object.values(this.git).filter(Boolean).map((g) => g.repo));
+    for (const [repo, pending] of this.watching) if (!repos.has(JSON.stringify([null, repo]))) {
+      this.watching.delete(repo);
+      pending.cancel();
+    }
     const due = new Set([...keys].filter((k) => !(k in this.git)));
     for (const [id, k] of Object.entries(at)) if (this.at[id] && this.at[id] !== k && keys.has(k)) due.add(k);
     this.at = at;
@@ -428,10 +464,11 @@ export default class Spaces extends View {
       while (this.pending.size) {
         const keys = [...this.pending];
         this.pending.clear();
-        for (const key of keys) await this.check(key, cx);
+        let next = 0;
+        await Promise.all(Array.from({ length: Math.min(AT_ONCE, keys.length) }, async () => {
+          while (next < keys.length) await this.check(keys[next++], cx);
+        }));
       }
-      const used = new Set(Object.values(this.git).filter(Boolean).map((g) => JSON.parse(g.repo)).filter(([on]) => !on).map(([, repo]) => repo));
-      for (const repo of this.watching) if (!used.has(repo)) this.watching.delete(repo);
       this.refreshing = false;
       cx.notify();
     });
@@ -443,30 +480,29 @@ export default class Spaces extends View {
     this.checked[key] = Date.now();
     this.unsure.delete(key);
     try {
-      // No optional locks: a status that touched the index would wake the watch again.
-      // Writes nothing under .git (index lock, fsmonitor cookie): watch() would wake on it.
-      const r = await exec("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v2", "--branch"], { cwd, on });
-      if (r.code !== 0) {
+      // Ref-only reads avoid scanning the worktree or waking its index watch.
+      // Two reads: a folder name may itself contain a newline.
+      const [r, common] = await both(
+        exec("git", ["rev-parse", "--path-format=absolute", "--show-toplevel"], { cwd, on }),
+        exec("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd, on }),
+      );
+      if (r.code !== 0 || common.code !== 0) {
         // Only git's own "no" is remembered as no repo; anything else is asked again.
-        if (!/not a git repository/i.test(r.stderr)) this.unsure.add(key);
-        this.git[key] = null;
+        if (!/not a git repository/i.test(r.code !== 0 ? r.stderr : common.stderr)) {
+          this.unsure.add(key);
+          this.git[key] ??= null;
+        } else this.git[key] = null;
         return;
       }
       // The repo's own .git folder names it; a worktree's top differs from it.
-      const top = await exec("git", ["rev-parse", "--show-toplevel"], { cwd, on });
-      const common = await exec("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd, on });
-      const remote = await exec("git", ["config", "--get", "remote.origin.url"], { cwd, on }).catch(() => null);
-      const repo = common.stdout.trim();
-      const name = repo.endsWith("/.git") ? base(repo.slice(0, -5)) : base(repo).replace(/\.git$/, "");
-      const info = { name, branch: null, ahead: 0, behind: 0, repo: JSON.stringify([on, repo]), repoSlug: remote?.code === 0 ? normalizeRemoteSlug(remote.stdout) : null, linked: repo !== `${top.stdout.trim()}/.git` };
-      for (const line of r.stdout.split("\n")) {
-        if (line.startsWith("# branch.head ")) info.branch = line.slice(14);
-        else if (line.startsWith("# branch.ab ")) {
-          const [a, b] = line.slice(12).split(" ");
-          info.ahead = Math.abs(parseInt(a, 10)) || 0;
-          info.behind = Math.abs(parseInt(b, 10)) || 0;
-        }
-      }
+      const top = r.stdout.replace(/\n$/, ""), repo = common.stdout.replace(/\n$/, "");
+      const [branch, counts, remote] = await Promise.all([
+        exec("git", ["symbolic-ref", "-q", "HEAD"], { cwd, on }),
+        exec("git", ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"], { cwd, on }),
+        exec("git", ["config", "--get", "remote.origin.url"], { cwd, on }).catch(() => null),
+      ]);
+      const [ahead, behind] = counts.code === 0 ? counts.stdout.trim().split(/\s+/).map(Number) : [0, 0];
+      const info = { name: repoName(repo), branch: branch.code === 0 ? branch.stdout.trim().replace(/^refs\/heads\//, "") : "(detached)", ahead, behind, repo: JSON.stringify([on, repo]), repoSlug: remote?.code === 0 ? normalizeRemoteSlug(remote.stdout) : null, linked: repo !== `${top}/.git` };
       this.git[key] = info;
       if (!on) this.watch(repo, cx);
     } catch {
@@ -478,15 +514,23 @@ export default class Spaces extends View {
 
   watch(repo, cx) {
     if (this.watching.has(repo)) return;
-    this.watching.add(repo);
+    const pending = watchFolder(repo);
+    this.watching.set(repo, pending);
     cx.spawn(async (cx) => {
+      let current = pending;
       try {
-        while (this.watching.has(repo)) {
-          await watchFolder(repo);
+        for (;;) {
+          await current;
+          if (this.watching.get(repo) !== current) return;
           const mine = JSON.stringify([null, repo]);
-          if (this.watching.has(repo)) this.refreshGit(Object.keys(this.git).filter((k) => this.git[k]?.repo === mine), cx);
+          const keys = Object.keys(this.git).filter((k) => this.git[k]?.repo === mine);
+          if (!keys.length) break;
+          this.refreshGit(keys, cx);
+          current = watchFolder(repo);
+          this.watching.set(repo, current);
         }
-      } catch { this.watching.delete(repo); }
+      } catch {}
+      if (this.watching.get(repo) === current) this.watching.delete(repo);
     });
   }
 
@@ -729,7 +773,10 @@ export default class Spaces extends View {
   foldered(rows, machine, t, collapsed, { guests = [], nested = false, hidden = false, seen = [] } = {}) {
     const draw = (r, away) => {
       seen.push({ id: r.w.id, shown: !away, folder: r.folder });
-      return away ? [] : [collapsed ? this.compact(r, t) : this.row(r, t)];
+      if (away) return [];
+      const el = collapsed ? this.compact(r, t) : this.row(r, t);
+      if (r.w.active) this.activeEl = el;
+      return [el];
     };
     const f = folders(machine), { list, spaceProfiles } = f, ps = panes(), prof = activeProfile();
     let parent = null, looseProf = null;
@@ -910,7 +957,7 @@ export default class Spaces extends View {
     const sp = spaces(), ps = panes();
     const ready = (w) => this.shown.has(w.id) || where(w, ps) in this.git || Date.now() - (this.born[w.id] ??= Date.now()) > 1500;
     for (const w of sp) if (!this.shown.has(w.id) && ready(w)) this.shown.add(w.id);
-    const list = sp.map((w, i) => ({ w, i, g: this.git[where(w, ps)] ?? null })).filter((r) => this.shown.has(r.w.id));
+    const list = sp.map((w, i) => ({ w, i, g: this.git[where(w, ps)] ?? null }));
     const mains = new Set(list.filter((r) => r.g && !r.g.linked).map((r) => r.g.repo));
     const nested = (r) => r.g?.linked && mains.has(r.g.repo);
     const out = [];
@@ -923,7 +970,15 @@ export default class Spaces extends View {
       const kids = list.filter((k) => nested(k) && k.g.repo === r.g.repo);
       kids.forEach((k, n) => out.push({ ...k, tree: n === kids.length - 1 ? "└─" : "├─" }));
     }
-    return out;
+    // Spaces not yet ready stay out of the list but still shape it, so a worktree
+    // doesn't jump when its checkout's space shows. A worktree whose checkout is
+    // still hidden is a plain row meanwhile (the folder logic reads `tree` as
+    // "under the row above").
+    const kept = new Set();
+    return out.filter((r) => this.shown.has(r.w.id)).map((r) => {
+      if (!r.tree) { if (r.g && !r.g.linked) kept.add(r.g.repo); return r; }
+      return kept.has(r.g.repo) ? r : { ...r, tree: null };
+    });
   }
 
   // Whether a machine's spaces are still coming in.
@@ -1014,8 +1069,8 @@ export default class Spaces extends View {
               : t.muted)
       : t.dim;
     return h_flex()
-      .flex_1()
-      .min_w(0)
+      .flex_auto()
+      .min_w(where ? SIDE_MIN : 0)
       .gap(5)
       .justify_end()
       .items_center()
@@ -1157,7 +1212,7 @@ export default class Spaces extends View {
           .gap(9)
           .items_center()
           .when(Boolean(tree), el => el.pl(22).child(svg("mods/workspace-chrome/branch.svg").size(13).text_color(t.dim)))
-          .when(showLeftName, el => el.child(div().flex_shrink(0).max_w(130).truncate().text_color(t.foreground).child(w.name)))
+          .when(showLeftName, el => el.child(div().flex_initial().min_w(SIDE_MIN).truncate().text_color(t.foreground).child(w.name)))
           .when(Boolean(tabs.length), (el) => el.child(this.openTabsStrip(w, t)))
           .child(g || tree || w.named ? this.gitTail(g, tree, w, t, folderName, !folder || Boolean(tree)) : div().flex_1())
           .when(blockedCount > 0, (el) => el.child(blockedBadge(t, blockedCount)))
@@ -1275,8 +1330,18 @@ export default class Spaces extends View {
         .child(label)
         .when(Boolean(alert), (el) => el.child(div().size(5).rounded(3).bg(t[alert])));
     };
+    this.activeEl = null;
     const seen = [], rows = this.grouped(t, collapsed, seen);
     this.seen = seen;
+    // Where the active space's row lands among the list's direct children (folder
+    // and machine headers count); -1 when folded away.
+    this.activeAt = this.activeEl ? rows.indexOf(this.activeEl) : -1;
+    const active = sp.find(p => p.active)?.id;
+    if (active !== this.revealed || this.activeAt !== this.revealedAt) {
+      this.revealed = active;
+      this.revealedAt = this.activeAt;
+      if (this.activeAt >= 0) this.scroll.scroll_to_item(this.activeAt);
+    }
     return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
       .child(h_flex().h(31).pl(16).pr(10).items_center().justify_between().text_size(11.5).text_color(t.dim)
         .when(!collapsed, el => el.child("Spaces"))
@@ -1325,7 +1390,9 @@ export default class Spaces extends View {
             ),
         ),
       )
-      .child(v_flex().flex_1().min_h(0).px(8).pb(14).overflow_y_scrollbar().mode("always")
+      .child(v_flex().flex_1().min_h(0).px(8).pb(14).overflow_y_scrollbar().mode("always").track_scroll(this.scroll)
+        // A block above growing, or the window resizing, shrinks this list and can push the active space out.
+        .on_size_change((_size, cx) => { if (this.activeAt >= 0) { this.scroll.scroll_to_item(this.activeAt); cx.notify(); } })
         // Released anywhere but on a space or a folder: out of its folder.
         .on_mouse_up("left", (_e, cx) => {
           if (this.pressed !== null) this.drop(this.pressed, null);
