@@ -318,7 +318,7 @@ export default class Loadout extends View {
       .child(
         h_flex().flex_none().px(10).pt(6).gap(4).border_b(1).border_color(t.border)
           .children(TABS.map((x) => div().id(`lo-tab-${x.id}`).h(26).px(10).flex().items_center().cursor_pointer().text_size(12)
-            .border_b(2).border_color(this.tab === x.id ? t.accent : "transparent")
+            .border_b(2).border_color(this.tab === x.id ? t.accent : t.background)
             .text_color(this.tab === x.id ? t.foreground : t.muted)
             .hover((s) => s.text_color(t.foreground)).on_click((_e, cx) => { this.tab = x.id; cx.notify(); })
             .child(`${x.title} ${counts[x.id]}`))),
