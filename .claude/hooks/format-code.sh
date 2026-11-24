@@ -16,7 +16,8 @@ json_input=$(cat)
 
 # Try to extract file path using jq if available, otherwise use grep/sed
 if command -v jq &> /dev/null; then
-    file_path=$(echo "$json_input" | jq -r '.tool_input.file_path // empty')
+    [[ -n "$(hook_tool_error "$json_input")" ]] && exit 0
+    file_path=$(hook_file_path "$json_input")
 else
     # Fallback: extract file_path using grep and sed
     file_path=$(echo "$json_input" | grep -o '"file_path"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"file_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')

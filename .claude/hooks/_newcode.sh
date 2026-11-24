@@ -26,13 +26,55 @@ snapshot_commit() {
 # baseline_ref JSON ROOT -> commit to compare against (session baseline, else HEAD)
 baseline_ref() {
   local sid f ref
-  sid=$(jq -r '.session_id // empty' <<<"$1")
+  sid=$(hook_session_id "$1")
   f=$(_baseline_file "$sid" "$2")
   if [[ -n "$sid" && -s "$f" ]]; then
     ref=$(<"$f")
     git -C "$2" cat-file -e "$ref^{commit}" 2>/dev/null && { echo "$ref"; return; }
   fi
   git -C "$2" rev-parse -q --verify HEAD 2>/dev/null
+}
+
+# is_agy_payload JSON -> 0 when stdin matches Antigravity's camelCase hook schema
+is_agy_payload() {
+  jq -e 'has("conversationId") or has("toolCall") or has("hookEventName")' <<<"$1" >/dev/null 2>&1
+}
+
+# hook_session_id JSON -> session_id (Claude) or conversationId (AGY)
+hook_session_id() {
+  jq -r '.session_id // .conversationId // empty' <<<"$1" 2>/dev/null
+}
+
+# hook_cwd JSON -> cwd or first workspacePaths entry
+hook_cwd() {
+  jq -r '.cwd // .workspacePaths[0] // empty' <<<"$1" 2>/dev/null
+}
+
+# hook_tool_error JSON -> non-empty error string if tool failed
+hook_tool_error() {
+  jq -r '.error // empty' <<<"$1" 2>/dev/null
+}
+
+# hook_file_path JSON -> file path from Claude (tool_input.file_path) or AGY (Path/TargetFile)
+hook_file_path() {
+  local f cwd
+  f=$(jq -r '.tool_input.file_path // .toolCall.args.Path // .toolCall.args.TargetFile // empty' <<<"$1" 2>/dev/null)
+  if [[ -n "$f" && "$f" != /* && ! -f "$f" ]]; then
+    cwd=$(hook_cwd "$1")
+    if [[ -n "$cwd" && -f "$cwd/$f" ]]; then
+      f="$cwd/$f"
+    fi
+  fi
+  printf '%s\n' "$f"
+}
+
+_agy_feedback_root() { printf '%s\n' "${TMPDIR:-/tmp}/agy-hook-feedback-$(id -u)"; }
+
+_agy_feedback_dir() {
+  local safe_id
+  safe_id=$(printf '%s' "$1" | tr -cd 'A-Za-z0-9._-')
+  [[ -n "$safe_id" && "$safe_id" != "." && "$safe_id" != ".." ]] || return 1
+  printf '%s/%s\n' "$(_agy_feedback_root)" "$safe_id"
 }
 
 # newcode_filter FILE REF < ruff-concise-output > only diagnostics on lines changed vs REF.

@@ -6,7 +6,7 @@ input=$(cat)
 dir="$(dirname "$0")"
 rc=0
 for s in format-code.sh complexity.sh typecheck.sh; do
-  out=$(echo "$input" | "$dir/$s" 2>&1) && continue
+  out=$(printf '%s\n' "$input" | "$dir/$s" 2>&1) && continue
   rc=2
   total=$(echo "$out" | wc -l)
   echo "$out" | head -n "$MAX_LINES" >&2

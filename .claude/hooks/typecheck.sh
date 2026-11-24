@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# PostToolUse (Edit|Write): ty type check on the edited .py file; exit 2 on errors.
-f=$(jq -r '.tool_input.file_path // empty')
+# PostToolUse (Edit|Write / AGY file tools): ty type check on the edited .py file; exit 2 on errors.
+# shellcheck source=_newcode.sh
+source "$(dirname "$0")/_newcode.sh"
+input=$(cat)
+[[ -n "$(hook_tool_error "$input")" ]] && exit 0
+f=$(hook_file_path "$input")
 [[ "$f" == *.py && -f "$f" ]] || exit 0
 command -v uvx >/dev/null || exit 0
 dir=$(dirname "$f")

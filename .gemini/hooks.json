@@ -1,0 +1,83 @@
+{
+  "rtk-rewrite": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.gemini/hooks/rtk-rewrite.sh --agy",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "session-baseline": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "~/.gemini/hooks/session-baseline.sh --agy",
+        "timeout": 15
+      }
+    ]
+  },
+  "graphify-hint": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "~/.gemini/hooks/graphify-hint.sh",
+        "timeout": 5
+      }
+    ]
+  },
+  "code-quality": {
+    "PostToolUse": [
+      {
+        "matcher": "write_file|edit_file|write_to_file|replace_file_content|multi_replace_file_content",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.gemini/hooks/agy-check-code.sh",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "~/.gemini/hooks/agy-flush-feedback.sh",
+        "timeout": 5
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "~/.gemini/hooks/stop-check.sh --agy",
+        "timeout": 120
+      }
+    ]
+  },
+  "desktop-notify": {
+    "PreToolUse": [
+      {
+        "matcher": "ask_question",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.gemini/hooks/notify.py --agy PreToolUse",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "~/.gemini/hooks/notify.py --agy Stop",
+        "timeout": 5
+      }
+    ]
+  }
+}

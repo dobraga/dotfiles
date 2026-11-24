@@ -10,6 +10,8 @@ from collections.abc import Mapping
 from logging.handlers import TimedRotatingFileHandler
 
 HERDR_ENV_VARS = ("HC_TERMINAL_ID", "HERDR_CHAT_HOST", "HERDR_PANE_ID")
+AGY_PAYLOAD_KEYS = ("conversationId", "toolCall", "hookEventName", "workspacePaths")
+AGY_NORMAL_STOP_REASONS = ("", "NO_TOOL_CALL", "model_stop")
 
 
 def is_running_in_herdr(env: Mapping[str, str] | None = None) -> bool:
@@ -37,11 +39,26 @@ def should_suppress_for_herdr(env: Mapping[str, str] | None = None) -> bool:
     return is_running_in_herdr(env) and is_herdr_app_running()
 
 
+def is_agy_payload(data: Mapping[str, object]) -> bool:
+    """Return True when the hook payload matches Antigravity's camelCase schema."""
+    return any(key in data for key in AGY_PAYLOAD_KEYS)
+
+
+def _agy_fallback(event_type: str) -> dict[str, str]:
+    if event_type == "Stop":
+        return {"decision": ""}
+    if event_type == "PreToolUse":
+        return {"decision": "allow"}
+    return {}
+
+
 class ClaudeNotify:
-    def __init__(self):
+    """Desktop notification dispatcher for Claude Code and Antigravity hooks."""
+
+    def __init__(self) -> None:
         self.setup_logging()
 
-    def setup_logging(self):
+    def setup_logging(self) -> None:
         """Simple daily rotating log to track event flow."""
         script_dir = os.path.dirname(os.path.abspath(__file__))
         log_path = os.path.join(script_dir, "notify.log")
@@ -56,17 +73,22 @@ class ClaudeNotify:
         self.logger.setLevel(logging.WARNING)
         self.logger.addHandler(handler)
 
-    def send_notification(self, title: str, message: str) -> None:
+    def send_notification(
+        self, title: str, message: str, *, app_name: str = "Claude"
+    ) -> None:
         """Sends a desktop notification: osascript on macOS, notify-send on Linux."""
         if should_suppress_for_herdr():
             self.logger.info("Suppressed desktop notification (handled by Herdr)")
             return
 
         if sys.platform == "darwin":
-            script = f"display notification {json.dumps(message, ensure_ascii=False)} with title {json.dumps(title, ensure_ascii=False)}"
+            script = (
+                f"display notification {json.dumps(message, ensure_ascii=False)} "
+                f"with title {json.dumps(title, ensure_ascii=False)}"
+            )
             command = ["osascript", "-e", script]
         else:
-            command = ["notify-send", "--app-name", "Claude", title, message]
+            command = ["notify-send", "--app-name", app_name, title, message]
 
         try:
             subprocess.run(command, check=False)
@@ -74,47 +96,133 @@ class ClaudeNotify:
         except FileNotFoundError:
             self.logger.warning(f"{command[0]} not found.")
 
-    def handle_event(self, event_type, data):
-        """Routes the event to a notification action."""
-        cwd = data.get("cwd", "Claude Task")
-        project_name = os.path.basename(cwd) if cwd else "Claude"
+    @staticmethod
+    def _resolve_project_name(data: Mapping[str, object], fallback: str) -> str:
+        cwd = data.get("cwd")
+        if not isinstance(cwd, str) or not cwd:
+            workspace_paths = data.get("workspacePaths")
+            cwd = ""
+            if isinstance(workspace_paths, list):
+                for item in workspace_paths:
+                    if isinstance(item, str) and item:
+                        cwd = item
+                        break
+        if not cwd:
+            return fallback
+        name = os.path.basename(cwd.rstrip("/"))
+        return name or fallback
+
+    def _handle_stop(
+        self,
+        agy: bool,
+        project_name: str,
+        app_name: str,
+        data: Mapping[str, object],
+    ) -> dict[str, str] | None:
+        if not agy:
+            self.send_notification(project_name, "Task completed ✅", app_name="Claude")
+            return None
+
+        fully_idle = data.get("fullyIdle")
+        term_reason = data.get("terminationReason")
+        reason_str = term_reason if isinstance(term_reason, str) else ""
+        if fully_idle is not False and reason_str in AGY_NORMAL_STOP_REASONS:
+            self.send_notification(project_name, "Task completed ✅", app_name=app_name)
+        return {"decision": ""}
+
+    def _handle_pre_tool_use(
+        self,
+        agy: bool,
+        project_name: str,
+        app_name: str,
+        data: Mapping[str, object],
+    ) -> dict[str, str] | None:
+        tool_call = data.get("toolCall")
+        tool_name = tool_call.get("name") if isinstance(tool_call, Mapping) else None
+        if tool_name == "ask_question":
+            self.send_notification(
+                project_name,
+                f"{app_name} is waiting for your input... ⌨️",
+                app_name=app_name,
+            )
+        return {"decision": "allow"} if agy else None
+
+    def _handle_notification(
+        self, project_name: str, app_name: str, data: Mapping[str, object]
+    ) -> None:
+        raw_msg = data.get("message", "")
+        msg = raw_msg.lower() if isinstance(raw_msg, str) else ""
+        if "input" in msg:
+            self.send_notification(
+                project_name,
+                f"{app_name} is waiting for your input... ⌨️",
+                app_name=app_name,
+            )
+        elif "permission" in msg or "approval" in msg:
+            self.send_notification(
+                project_name, "Action Required! ⚠️", app_name=app_name
+            )
+
+    def handle_event(
+        self,
+        event_type: str,
+        data: Mapping[str, object],
+        *,
+        is_agy: bool | None = None,
+    ) -> dict[str, str] | None:
+        """Routes the event to a notification action and optional hook response dict."""
+        agy = is_agy if is_agy is not None else is_agy_payload(data)
+        app_name = "Antigravity" if agy else "Claude"
+        project_name = self._resolve_project_name(data, app_name)
 
         if event_type == "UserPromptSubmit":
             self.logger.info(f"New prompt started in {project_name}")
-            # Optional: Notify when a long task starts
-
-        elif event_type == "Stop":
-            # Without a DB, we can't easily calculate duration unless
-            # the hook sends start_time. We'll send a simple 'Done' signal.
-            self.send_notification(project_name, "Task completed ✅")
-
-        elif event_type == "Notification":
-            msg = data.get("message", "").lower()
-            if "input" in msg:
-                self.send_notification(
-                    project_name, "Claude is waiting for your input... ⌨️"
-                )
-            elif "permission" in msg or "approval" in msg:
-                self.send_notification(project_name, "Action Required! ⚠️")
+            return {} if agy else None
+        if event_type == "Stop":
+            return self._handle_stop(agy, project_name, app_name, data)
+        if event_type == "PreToolUse":
+            return self._handle_pre_tool_use(agy, project_name, app_name, data)
+        if event_type == "Notification":
+            self._handle_notification(project_name, app_name, data)
+            return {} if agy else None
+        return {} if agy else None
 
 
-def main():
-    if len(sys.argv) < 2:
+def main() -> None:
+    is_agy_flag = False
+    positional: list[str] = []
+    for arg in sys.argv[1:]:
+        if arg == "--agy":
+            is_agy_flag = True
+        else:
+            positional.append(arg)
+
+    if not positional:
         return
 
-    event_type = sys.argv[1]
+    event_type = positional[0]
     notifier = ClaudeNotify()
 
     try:
         raw_input = sys.stdin.read().strip()
         if not raw_input:
+            if is_agy_flag:
+                print(json.dumps(_agy_fallback(event_type)))
             return
 
         data = json.loads(raw_input)
-        notifier.handle_event(event_type, data)
+        if not isinstance(data, Mapping):
+            raise TypeError("Expected JSON object in stdin payload")
+        result = notifier.handle_event(
+            event_type, data, is_agy=True if is_agy_flag else None
+        )
+        if result is not None:
+            print(json.dumps(result))
 
-    except Exception as e:
-        logging.error(f"Error: {e}")
+    except (OSError, ValueError, TypeError) as e:
+        notifier.logger.error(f"Error: {e}")
+        if is_agy_flag:
+            print(json.dumps(_agy_fallback(event_type)))
 
 
 if __name__ == "__main__":

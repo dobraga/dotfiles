@@ -184,6 +184,12 @@ PY
   echo "  - Merged Antigravity CLI defaults -> ${AGY_CLI_SETTINGS}"
 fi
 
+# Antigravity lifecycle hooks (merge tracked hooks without clobbering orca-status / revu-plan-gate)
+if [ -f "${GEMINI_DIR}/hooks.json" ] && [ -f "${GEMINI_DIR}/merge_hooks.py" ] && command -v python3 &>/dev/null; then
+  python3 "${GEMINI_DIR}/merge_hooks.py" "${GEMINI_DIR}/hooks.json" "${GEMINI_HOME}/config/hooks.json" "${HOME}"
+  echo "  - Merged Antigravity hooks -> ${GEMINI_HOME}/config/hooks.json"
+fi
+
 # Revu (local browser review CLI + Claude/AGY hooks + MCP)
 if [ -f "${DOTFILES_DIR}/tools/revu/bin/revu" ]; then
   chmod +x "${DOTFILES_DIR}/tools/revu/bin/revu"
