@@ -1,0 +1,16 @@
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Teste Inbox
+
+│ Teste do Inbox: qual opção você escolhe? (deixe aberto uns 20 s antes de responder)
+
+  1. Responder pelo card (Recommended)
+     Clique nesta opção no card do Inbox e veja se a resposta chega aqui.
+  2. Responder no terminal
+     Escolha aqui mesmo.
+  3. Cancelar o teste
+     Encerra sem testar.
+❯ 4. Type something.
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · ctrl+g to edit in VS Code · Esc to cancel

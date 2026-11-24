@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { parseDialog, lastMessage, parseStopped, parseClassifier, answerPlan, composeAnswers, decisionLine, hash, classifyPrompt } from "../asks.js";
 import { profilesOfFolder, inProfile, hiddenElsewhere, profileOf, classifierFor, buildItems, rank, normalizeSettings, pruneState, emptyState, parseState, needsYouCount, DEFAULT_SETTINGS } from "../items.js";
 
@@ -213,4 +214,32 @@ test("a task run follows the profiles of the spaces in its folder", () => {
   assert.ok(!keys.includes("task-r1"), "work task hidden under personal");
   assert.ok(keys.includes("task-r2"), "folder unknown: shown");
   assert.ok(rank(items, { profile: "work" }).some((i) => i.key === "task-r1"));
+});
+
+test("the real AskUserQuestion screen (rule between options, descriptions, built-in rows) becomes a DECISION card", () => {
+  const screen = readFileSync(new URL("./fixture-askuserquestion.txt", import.meta.url), "utf8");
+  const d = parseDialog(screen);
+  assert.ok(d, "dialog found");
+  assert.equal(d.kind, "DECISION");
+  assert.equal(d.multi, false);
+  assert.deepEqual(d.options.map((o) => o.label), ["Responder pelo card", "Responder no terminal", "Cancelar o teste"]);
+  assert.equal(d.options[0].recommended, true);
+  assert.match(d.options[0].desc, /Clique nesta/);
+  assert.match(d.question, /Teste do Inbox/);
+});
+
+test("Antigravity's dialog (> cursor, Navigate footer, Write-in row) is a card answered with arrows and Enter", () => {
+  const screen = readFileSync(new URL("./fixture-agy-question.txt", import.meta.url), "utf8");
+  const d = parseDialog(screen);
+  assert.ok(d, "dialog found");
+  assert.equal(d.question, "Qual bebida você prefere agora?");
+  assert.deepEqual(d.options.map((o) => o.label), ["Café", "Chá", "Água"]);
+  assert.equal(d.options[0].recommended, true);
+  assert.equal(d.options[0].current, true);
+  const card = { mode: "dialog", nav: "arrows", options: d.options };
+  assert.deepEqual(answerPlan(card, { option: 1 }), { keys: ["enter"] });
+  assert.deepEqual(answerPlan(card, { option: 3 }), { keys: ["down", "down", "enter"] });
+  const moved = { ...card, options: d.options.map((o) => ({ ...o, current: o.n === 3 })) };
+  assert.deepEqual(answerPlan(moved, { option: 1 }), { keys: ["up", "up", "enter"] });
+  assert.deepEqual(answerPlan({ mode: "dialog", nav: "number", options: d.options }, { option: 2 }), { keys: ["2"] });
 });

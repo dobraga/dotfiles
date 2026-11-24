@@ -1,0 +1,22 @@
+     ▀▀▀▀▀▀       douglasmartinsbraga@gmail.com (Google AI Pro)
+    ▀▀▀▀▀▀▀▀      Orchestrator (Neon)
+   ▄▀▀    ▀▀▄     ~/src/dotfiles
+  ▄▀▀      ▀▀▄
+
+────────────────────────────────────────────────────────────
+> me faz uma pergunta com opcoes so pra testar uma coisa
+
+? Qual bebida você prefere agora?
+
+Question
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Question 1/1: Qual bebida você prefere agora?
+
+> 1. (Recommended) Café
+  2. Chá
+  3. Água
+  4. Write-in...
+
+  ↑/↓ Navigate · enter Select · esc Skip
+Orchestrator (Neon) │ Auto │ dotfiles │ master │ Tool_use

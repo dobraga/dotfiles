@@ -21,36 +21,54 @@ export function hash(text) {
  * ☐/✔ steps), which is never answered from a card.
  */
 export function parseDialog(screen) {
-  const lines = tail(screen, 45).map(clean);
+  const lines = tail(screen, 45).map(clean).map((l) => l.replace(/^\s*[│┃]\s?/, "").replace(/\s*[│┃]$/, ""));
+  const isOpt = (l) => OPTION.test(l);
+  const isDesc = (l) => /^\s{3,}\S/.test(l) && !RULE.test(l);
+  const isGap = (l) => !l.trim() || RULE.test(l);
   let end = -1;
-  for (let i = lines.length - 1; i >= 0; i--) if (OPTION.test(lines[i])) { end = i; break; }
+  for (let i = lines.length - 1; i >= 0; i--) if (isOpt(lines[i])) { end = i; break; }
   if (end < 0) return null;
+  // Walk up over options, their indented descriptions and the rule/blank lines Claude Code draws between them.
   let start = end;
-  while (start - 1 >= 0 && (OPTION.test(lines[start - 1]) || (lines[start - 1].trim() && /^\s{4,}\S/.test(lines[start - 1]) && !RULE.test(lines[start - 1])) )) start--;
-  // Options in order 1..n only; a stray numbered list in prose is not a dialog.
+  for (let i = end - 1; i >= 0; i--) {
+    if (isOpt(lines[i]) || isDesc(lines[i])) { start = i; continue; }
+    if (!isGap(lines[i])) break;
+    let j = i;
+    while (j >= 0 && isGap(lines[j])) j--;
+    if (j >= 0 && (isOpt(lines[j]) || isDesc(lines[j]))) { i = j + 1; continue; }
+    break;
+  }
+  // Options in order 1..n; descriptions belong to the option above them. A stray numbered list in prose is not a dialog.
   const opts = [];
   for (let i = start; i <= end; i++) {
     const m = OPTION.exec(lines[i]);
-    if (!m) { if (opts.length) opts[opts.length - 1].label += ` ${lines[i].trim()}`; continue; }
+    if (!m) { if (opts.length && !isGap(lines[i])) opts[opts.length - 1].desc = `${opts[opts.length - 1].desc ?? ""} ${lines[i].trim()}`.trim(); continue; }
     if (Number(m[1]) !== opts.length + 1) { opts.length = 0; continue; }
-    opts.push({ n: Number(m[1]), label: m[2], current: /^\s*[❯›▶]/.test(lines[i]) });
+    opts.push({ n: Number(m[1]), label: m[2], current: /^\s*[❯›▶>]\s/.test(lines[i]) });
   }
   if (opts.length < 2) return null;
   // The dialog must be the live prompt: a footer such as "Esc to cancel" / "Enter to select" or the cursor marker near it.
   const below = lines.slice(end + 1).join("\n");
-  const live = opts.some((o) => o.current) || /Esc to|Enter to|to select|to navigate|to cancel/i.test(below);
+  const live = opts.some((o) => o.current) || /Esc to|Enter to|to select|to navigate|to cancel|Navigate|enter Select|esc Skip/i.test(below);
   if (!live) return null;
-  let q = end >= 0 ? start - 1 : -1;
+  let q = start - 1;
   const ctx = [];
-  while (q >= 0 && !RULE.test(lines[q]) && ctx.length < 6) { if (lines[q].trim()) ctx.unshift(lines[q].trim()); q--; }
-  const question = ctx.filter((l) => /\?$|^Do you|^Allow|^Would you/i.test(l)).pop() ?? ctx[ctx.length - 1] ?? "Waiting for your choice";
+  while (q >= 0 && ctx.length < 6) {
+    if (RULE.test(lines[q])) break;
+    if (lines[q].trim() && !/^\s*[☐☒✔]\s/.test(lines[q])) ctx.unshift(lines[q].trim());
+    q--;
+  }
+  const question = (ctx.filter((l) => /\?$|^Do you|^Allow|^Would you/i.test(l)).pop() ?? ctx[ctx.length - 1] ?? "Waiting for your choice").replace(/^Question \d+\/\d+:\s*/i, "");
   const above = ctx.join(" ");
   const multi = lines.some((l) => /[☐☒✔]\s.*[☐☒✔]\s|←.*☐.*→/.test(l));
-  const yesNo = opts.some((o) => /^yes\b/i.test(o.label)) && opts.some((o) => /^no\b/i.test(o.label));
+  // Claude Code adds its own "Type something." / "Chat about this" rows: they are not choices of the agent.
+  const own = (o) => /^(type something|chat about this|other|write-in)\.*$/i.test(o.label.trim());
+  const real = opts.filter((o) => !own(o));
+  const yesNo = real.some((o) => /^yes\b/i.test(o.label)) && real.some((o) => /^no\b/i.test(o.label));
   return {
     kind: yesNo || /permission|allow|proceed|approve/i.test(`${question} ${above}`) ? "APPROVAL" : "DECISION",
     question, context: ctx.filter((l) => l !== question).slice(-3).join("\n"), multi,
-    options: opts.map((o) => ({ n: o.n, label: o.label.replace(/\s*\(Recommended\)\s*/i, "").trim(), recommended: /\(Recommended\)/i.test(o.label) })),
+    options: real.map((o) => ({ n: o.n, current: o.current, label: o.label.replace(/\s*\(Recommended\)\s*/i, "").trim(), recommended: /\(Recommended\)/i.test(o.label), desc: o.desc ?? "" })),
   };
 }
 
@@ -109,7 +127,16 @@ export function parseClassifier(answer) {
 /** What to send to the terminal for an answer: a key press for a dialog option, or a message. Never both. */
 export function answerPlan(card, answer) {
   if (card.mode === "dialog") {
-    if (answer.option != null) return { keys: [String(answer.option)] };
+    if (answer.option != null) {
+      // Antigravity's dialog is moved with the arrows and confirmed with Enter; Claude Code takes the option's number.
+      if (card.nav === "arrows") {
+        const from = Math.max(0, card.options.findIndex((o) => o.current));
+        const to = card.options.findIndex((o) => o.n === answer.option);
+        const step = to >= from ? "down" : "up";
+        return { keys: [...Array(Math.abs(to - from)).fill(step), "enter"] };
+      }
+      return { keys: [String(answer.option)] };
+    }
     // Free text over a dialog: leave the dialog with Esc, then say it in the prompt.
     return { keys: ["esc"], then: { send: answer.text } };
   }

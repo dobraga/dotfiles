@@ -166,7 +166,7 @@ export default class Inbox extends View {
       const d = parseDialog(screen);
       if (!d) return;
       const key = `ask-${a.address}-${hash(d.question + d.options.map((o) => o.label).join("|"))}`;
-      this.cards.set(key, { ...base, key, mode: "dialog", kind: d.multi ? "QUESTIONS" : d.kind, question: d.question, context: d.context, options: d.options, multi: d.multi });
+      this.cards.set(key, { ...base, key, mode: "dialog", nav: /antigravity|agy/i.test(a.app ?? "") ? "arrows" : "number", kind: d.multi ? "QUESTIONS" : d.kind, question: d.question, context: d.context, options: d.options, multi: d.multi });
       return;
     }
     const stopped = parseStopped(screen);
