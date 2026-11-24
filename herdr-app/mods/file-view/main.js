@@ -2,6 +2,7 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, TextView, Scrollbar, v_virtual_list, Input, InputState, SliderState, ScrollHandle, VirtualListScrollHandle } from "gpui-base";
 import { props, shared, setShared, spaces, panes, focused, run, exec, readTextFile, writeTextFile, watchFolder, theme, settings, home, checking, notify } from "herdr";
+import { colorRows } from "./syntax.js";
 import { inspectFile, launchApp, setDefaultApp, revealInFolder, visibleApps, renderOpenWithScreen } from "./open-with-ui.js";
 import {
   AUDIO_RATES,
@@ -592,8 +593,8 @@ export default class FileView extends View {
     return this.mode ?? slot?.kind ?? "file";
   }
 
-  setLines(lines) {
-    this.rows = diffRows(lines);
+  setLines(lines, path) {
+    this.rows = colorRows(diffRows(lines), path);
     this.diffVersion = (this.diffVersion ?? 0) + 1;
     const rawWidth = Math.max(300, ...this.rows.map((row) => (row.text.length + 1) * 7.5 + 60));
     this.diffWidth = Math.min(MAX_DIFF_WIDTH, rawWidth);
@@ -843,6 +844,7 @@ export default class FileView extends View {
             lines
               .slice(0, 3000)
               .map((line) => (line.length > MAX_DIFF_LINE_CHARS ? line.slice(0, MAX_DIFF_LINE_CHARS) + "… (line truncated)" : line)),
+            relFromGit,
           );
           if (this.rows.length === 0) this.error = "No uncommitted changes for this file";
           return;
@@ -1834,7 +1836,10 @@ export default class FileView extends View {
     this.pdfPageSlider = null;
   }
 
-  diffRow({ kind, number, text }, t) {
+  diffRow({ kind, number, text, tokens }, t) {
+    const pct = Number(shared("files-tabs.settings")?.diffTint);
+    const alpha = Math.round(((Number.isFinite(pct) ? Math.min(30, Math.max(0, pct)) : 10) / 100) * 255).toString(16).padStart(2, "0");
+    const tone = { keyword: t.ansi5, string: t.ansi2, comment: t.dim, function: t.ansi4, type: t.ansi3, number: t.ansi6, constant: t.ansi6 };
     if (kind === "@") {
       return div().w_full().px(14).h(22).flex_none().flex().items_center().truncate().bg(t.raised).text_color(t.dim).child(text);
     }
@@ -1845,11 +1850,15 @@ export default class FileView extends View {
       .gap(12)
       .px(8)
       .items_center()
-      .when(kind === "+", (e) => e.bg(t.ansi2 + "18"))
-      .when(kind === "-", (e) => e.bg(t.ansi1 + "18"))
+      .when(kind === "+", (e) => e.bg(t.ansi2 + alpha))
+      .when(kind === "-", (e) => e.bg(t.ansi1 + alpha))
       .child(div().w(36).flex_none().text_right().text_color(t.dim).child(number === undefined ? "" : String(number)))
       .child(div().w(12).flex_none().text_color(kind === "+" ? t.ansi2 : kind === "-" ? t.ansi1 : t.dim).child(kind || " "))
-      .child(div().flex_1().min_w(0).truncate().child(text));
+      .child(
+        tokens
+          ? h_flex().flex_1().min_w(0).overflow_hidden().whitespace_nowrap().children(tokens.map((k) => div().flex_none().text_color(tone[k.kind] ?? t.foreground).child(k.text)))
+          : div().flex_1().min_w(0).truncate().child(text),
+      );
   }
 
   render(cx) {
