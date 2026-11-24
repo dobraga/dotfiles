@@ -1,18 +1,18 @@
 // Tasks: define what runs (a script, a shell command or an agent prompt), then run it now or schedule it, per folder.
 //
 // - Scripts are detected in the folder (package.json, Makefile, justfile, pyproject.toml); read-only.
-// - Command tasks are shell commands; scheduled ones live in a managed block of the user's crontab (schedule.js).
-// - Prompt tasks are agent prompts; scheduled ones are herdr-automations entries (https://github.com/DnzzL/herdr-automations, MIT).
+// - Command and prompt tasks are scheduled and run by one daemon, tools/herdr-tasks (CLI `herdr-tasks`): catch-up after sleep,
+//   overlap guard, history, pause. Prompts run headless (claude, agy) with a permission level, optionally in a new git worktree.
 // Definitions of commands/prompts are kept in ~/.config/herdr-app/data/tasks/tasks.json (store.js).
 // The panel runs only what you click or schedule; it runs nothing on open.
 
-import { View, div } from "gpui-kit";
+import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, TextareaState, Textarea } from "gpui-base";
-import { exec, hc, home, theme, terminals, spaces, panes, focused, run, notify, watchFolder, knownAgents, appHome, readTextFile, writeTextFile } from "herdr";
-import { norm, filterByFolder } from "./match.js";
+import { exec, home, theme, spaces, panes, focused, run, notify, shared, setShared, watchFolder, knownAgents, appHome, readTextFile, writeTextFile } from "herdr";
+import { taskVisible } from "./scope.js";
+import { assignIds, availableVars, insertionFor, validateSet } from "./sets.js";
 import { DETECT_SCRIPT, parseRecords, detect } from "./detect.js";
-import { parseStore, serializeStore, newId, slug, tasksFor, upsert, remove, scheduled, validTask } from "./store.js";
-import { paths, jobScript, renderBlock, mergeBlock, parseHistory, dryRunEntry } from "./schedule.js";
+import { parseStore, serializeStore, newId, slug, tasksFor, upsert, remove, scheduled, validTask, isPinnedScript, togglePinScript } from "./store.js";
 
 const PRESETS = [
   ["Hourly", "0 * * * *"],
@@ -21,12 +21,50 @@ const PRESETS = [
   ["Mondays 9:00", "0 9 * * 1"],
   ["Fridays 17:00", "0 17 * * 5"],
 ];
-const AGENTS = ["claude", "codex", "pi", "copilot"];
+// Agents the scheduler can run headless (see tools/herdr-tasks/src/agents.ts). Only these are offered for prompts.
+const HEADLESS_AGENTS = ["claude", "agy"];
+const PERMISSIONS = [["read-only", "Read-only"], ["edit", "Can edit files"], ["full", "Full access"]];
+const PERMISSION_NOTE = {
+  "read-only": "May read and search, not change anything. Agy cannot guarantee this, so it only runs in a new worktree.",
+  edit: "May edit files in the worktree or folder; commands that change things are still refused.",
+  full: "No safety prompts at all. Unattended runs can change or delete anything the agent can reach.",
+};
+// Used only if Herdr cannot list its agents.
+const FALLBACK_AGENTS = [["claude", "Claude Code"], ["agy", "Antigravity"], ["codex", "Codex"], ["pi", "Pi"], ["copilot", "Copilot"]];
+// Models we can name without asking the CLI (aliases the claude CLI documents); others are listed by the CLI itself.
+const STATIC_MODELS = {
+  claude: [["claude-fable-5-2", "Fable 5.2"], ["claude-opus-5-5", "Opus 5.5"], ["claude-sonnet-5-5", "Sonnet 5.5"], ["claude-haiku-5-5", "Haiku 5.5"]],
+};
+const EFFORT_ORDER = ["low", "medium", "high", "xhigh", "max"];
+
+// Some agents list one model per reasoning level ("Gemini 4 Neon (High)", id gemini-4-neon-high). Show each model once and let
+// the effort range pick the level: returns the base models and, per base id, which full id each level maps to.
+function groupVariants(models) {
+  const variants = {};
+  const bases = [];
+  for (const [id, label] of models) {
+    const m = /^(.*?)\s*\((low|medium|high|xhigh|max)\)\s*$/i.exec(label);
+    const level = m?.[2].toLowerCase();
+    if (!m || !id.toLowerCase().endsWith(`-${level}`)) { bases.push([id, label]); variants[id] = {}; continue; }
+    const baseId = id.slice(0, -(level.length + 1));
+    if (!variants[baseId]) { variants[baseId] = {}; bases.push([baseId, m[1].trim()]); }
+    variants[baseId][level] = id;
+  }
+  return Object.values(variants).some((v) => Object.keys(v).length) ? { bases, variants } : null;
+}
+// With no level chosen, the model's own default: a middle level if it has one.
+const defaultVariant = (v) => v.medium ?? v.high ?? v.low ?? Object.values(v)[0];
+// Reasoning effort ("thinking") levels, used when an agent's --help does not spell them out.
+const EFFORT_FALLBACK = ["low", "medium", "high", "xhigh", "max"];
 const WORKSPACES = [["worktree", "New worktree"], ["root", "Folder root"]];
+const CATCHUP = [["", "Use the default from Settings"], ["-1", "Only on time: skip it if missed"], ["30", "Run it if back within 30 min"], ["120", "Run it if back within 2 hours"], ["360", "Run it if back within 6 hours"], ["720", "Run it if back within 12 hours"], ["1440", "Run it if back within 24 hours"]];
+const PAGE = 6; // rows per page in the Inbox / Next feed
 const FINISHED = new Set(["done", "failed", "cancelled"]);
-const KINDS = [["command", "Command"], ["prompt", "Prompt"]];
-const CHIPS = [["all", "All"], ["script", "Scripts"], ["command", "Commands"], ["prompt", "Prompts"], ["scheduled", "Scheduled"]];
-const KIND_GLYPH = { script: "▸", command: "$", prompt: "✦" };
+const KINDS = [["command", "Command"], ["prompt", "Prompt"], ["set", "Set"]];
+const WHEN = [["always", "Always run this step"], ["prev_ok", "Only if the previous step succeeded"], ["prev_output", "Only if the previous step succeeded and printed something"]];
+const ON_FAIL = [["stop", "Stop the set (the remaining steps are skipped)"], ["continue", "Keep going (the set still ends as failed)"]];
+const CHIPS = [["all", "All"], ["script", "Scripts"], ["command", "Commands"], ["prompt", "Prompts"], ["set", "Sets"], ["scheduled", "Scheduled"]];
+const KIND_GLYPH = { script: "▸", command: "$", prompt: "✦", set: "⛓" };
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 const human = (cron) => PRESETS.find(([, c]) => c === cron)?.[0] ?? cron;
@@ -46,7 +84,7 @@ function until(iso) {
   if (s < 86400 && d.getDate() === new Date().getDate()) return `today ${hm}`;
   return `${DAYS[d.getDay()]} ${hm}`;
 }
-const duration = (sec) => (sec < 60 ? `${sec}s` : sec < 3600 ? `${Math.round(sec / 60)}m` : `${Math.floor(sec / 3600)}h${String(Math.round((sec % 3600) / 60)).padStart(2, "0")}`);
+const duration = (sec) => (!Number.isFinite(sec) ? "—" : sec < 60 ? `${sec}s` : sec < 3600 ? `${Math.round(sec / 60)}m` : `${Math.floor(sec / 3600)}h${String(Math.round((sec % 3600) / 60)).padStart(2, "0")}`);
 
 function location() {
   const space = spaces().find((s) => s.active), f = focused();
@@ -59,17 +97,42 @@ function location() {
   return { cwd: pane?.cwd || f?.cwd || fallback || space?.folder, space: space?.id };
 }
 
+// Same behaviour as the Files tab: reuse a tab already showing the file, else the preview slot, else a new tab.
+function openFileTab({ spaceId, path, root, name }) {
+  if (!spaceId || !root || !path) return;
+  const slots = { ...(shared("file-view.slots") ?? {}) };
+  const spaceTabIds = new Set((spaces().find((s) => s.id === spaceId)?.tabs ?? []).map((t) => t.id));
+  const liveFileTabs = new Set(panes().filter((p) => p.mod === "file-view").map((p) => p.tab));
+  const now = Date.now();
+  const live = (s) => s.spaceId === spaceId && s.tabId && spaceTabIds.has(s.tabId) && liveFileTabs.has(s.tabId);
+  const existing = Object.values(slots).find((s) => live(s) && s.root === root && s.path === path && s.kind === "file" && !s.on);
+  if (existing) return void run("tab.select", { id: existing.tabId });
+  const previewSlot = Object.values(slots).find((s) => live(s) && s.preview);
+  if (previewSlot) {
+    Object.assign(previewSlot, { kind: "file", path, root, on: null, name, preview: true, updatedAt: now });
+    setShared("file-view.slots", slots);
+    run("tab.rename", { id: previewSlot.tabId, name });
+    return void run("tab.select", { id: previewSlot.tabId });
+  }
+  const slotId = `fv-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  const entry = { spaceId, tabId: null, kind: "file", path, root, on: null, name, preview: true, updatedAt: now };
+  slots[slotId] = entry;
+  setShared("file-view.slots", slots);
+  run("tab.new", { name, space: spaceId, mod: "file-view", props: { slotId, ...entry, beforeTabs: [...spaceTabIds] } });
+}
+
 export default class Tasks extends View {
   init(_props, cx) {
-    this.list = null; // `herdr-automations ls --json`
-    this.runs = []; // prompt runs: `history --json`
-    this.cmdRuns = []; // command runs: history.jsonl
+    this.list = null; // `herdr-tasks ls`: { scheduler, paused_all, tasks: [{id, next, last, ...}] }
+    this.runs = []; // `herdr-tasks history`: newest first
     this.store = parseStore("");
     this.scripts = [];
     this.view = { kind: "list" }; // list | detail {task:{kind,id|name}} | form
     this.chip = "all";
+    this.showRead = false;
+    this.feed = "inbox";
+    this.page = 0;
     this.scope = "folder";
-    this.recent = [];
     this.error = null;
     this.note = null;
     this.known = null;
@@ -82,7 +145,7 @@ export default class Tasks extends View {
     this.again = false;
     this.cache = new Map(); // folder -> { gitRoot, scripts }
     this.handle = cx.focus_handle();
-    this.p = paths(home());
+    this.stateDir = `${home()}/.local/state/herdr/tasks`;
     this.cmdFile = `${appHome()}/data/tasks/tasks.json`;
     cx.spawn(async (cx) => {
       this.bin = await this.locate();
@@ -95,8 +158,8 @@ export default class Tasks extends View {
   }
 
   async locate() {
-    try { if ((await exec("herdr-automations", ["version"])).code === 0) return "herdr-automations"; } catch {}
-    return `${home()}/.local/bin/herdr-automations`;
+    try { if ((await exec("herdr-tasks", ["version"])).code === 0) return "herdr-tasks"; } catch {}
+    return `${home()}/.local/bin/herdr-tasks`;
   }
 
   async cli(args) {
@@ -145,25 +208,23 @@ export default class Tasks extends View {
     const folder = this.folder, space = this.spaceId;
     const current = () => this.folder === folder && this.spaceId === space;
     try {
-      const [storeText, gitRoot, scripts, cmdRuns] = await Promise.all([
+      const [storeText, gitRoot, scripts, settingsText] = await Promise.all([
         readTextFile(this.cmdFile).catch(() => ""),
         folder ? exec("git", ["rev-parse", "--show-toplevel"], { cwd: folder }).then((r) => (r.code === 0 ? r.stdout.trim() || null : null)).catch(() => null) : null,
         folder ? exec("sh", ["-c", DETECT_SCRIPT, "detect", folder]).then((r) => detect(parseRecords(r.stdout))).catch(() => []) : [],
-        exec("sh", ["-c", 'tail -n 400 "$1" 2>/dev/null; true', "h", this.p.history]).then((r) => parseHistory(r.stdout)).catch(() => []),
+        readTextFile(`${appHome()}/data/tasks/settings.json`).catch(() => ""),
       ]);
+      try { this.settings = JSON.parse(settingsText || "{}"); } catch { this.settings = {}; }
       const store = parseStore(storeText ?? "");
       if (!current()) { this.again = true; return; }
       this.store = store;
       this.gitRoot = gitRoot;
       this.scripts = scripts;
-      this.cmdRuns = cmdRuns;
       if (folder) this.cache.set(folder, { gitRoot, scripts });
-      this.announceCommands();
       cx.notify(); // scripts and local tasks are ready; the scheduler below can take longer
-      if (!this.templates) { try { this.templates = JSON.parse((await hc(["templates", "--json"])).stdout).templates ?? []; } catch { this.templates = []; } }
       if (this.bin) {
         try {
-          const [ls, hist] = await Promise.all([this.cli(["ls", "--json"]), this.cli(["history", "--json"])]);
+          const [ls, hist] = await Promise.all([this.cli(["ls"]), this.cli(["history", "--limit", "300"])]);
           this.list = JSON.parse(ls);
           this.runs = JSON.parse(hist);
           this.error = null;
@@ -171,7 +232,7 @@ export default class Tasks extends View {
         } catch (e) {
           this.list = null;
           this.error = /ENOENT|not found|No such file/i.test(String(e?.message ?? e))
-            ? "herdr-automations is not installed: prompt schedules are off. Scripts and commands still work."
+            ? "herdr-tasks is not installed: scheduling and background runs are off. Run now in a tab still works."
             : String(e?.message ?? e);
         }
       }
@@ -179,38 +240,35 @@ export default class Tasks extends View {
   }
 
   watch(cx) {
-    const dirs = [this.list?.config?.replace(/\/[^/]+$/, ""), this.list?.state].filter(Boolean);
+    const dirs = [this.stateDir];
     for (const dir of dirs) cx.spawn(async (cx) => {
       for (;;) { try { await watchFolder(dir); } catch { return; } await this.refresh(cx); }
     });
   }
 
-  // A failure finds you: toast prompt runs that failed or were missed, and command runs that exited non-zero, since the panel started.
+  // Toasts for runs that finished since the panel started, as far as Settings → Tasks → Notifications allows:
+  // failures (failed or missed), failures and late catch-up runs, every run, or none.
   announce() {
-    const ids = new Set(this.runs.map((r) => r.run_id));
-    if (this.known) for (const r of this.runs) {
-      if (this.known.has(r.run_id) || !(r.status === "failed" || r.status === "missed")) continue;
+    const mode = this.settings?.notify ?? "failures";
+    const ids = new Set(this.runs.map((r) => r.run_id + r.status));
+    if (this.known && mode !== "off") for (const r of this.runs) {
+      if (this.known.has(r.run_id + r.status)) continue;
+      // Toasts follow the selected space profile (the Inbox rule); a task whose folder no space uses is never hidden.
+      if (!taskVisible(this.info(r.task)?.folder, spaces(), shared("space-folders"), shared("space-folders.profile") ?? null)) continue;
+      const bad = r.status === "failed" || r.status === "missed";
+      const late = r.status === "done" && (r.trigger === "catchup" || r.late_seconds > 0);
+      const finished = bad || r.status === "done";
+      if (!(bad || (mode === "late" && late) || (mode === "all" && finished))) continue;
       notify({
-        title: `${r.automation} ${r.status === "failed" ? "failed" : "missed a run"}`,
-        body: r.error ?? "", level: r.status === "failed" ? "error" : "warning",
-        ...(r.terminal && this.live(r.terminal) ? { action: { name: "pane.focus", args: { terminal: r.terminal } } } : {}),
+        title: `${r.name ?? r.task} ${r.status === "failed" ? "failed" : r.status === "missed" ? "missed a run" : late ? "ran late" : "done"}`,
+        body: r.error ?? r.reason ?? (late ? "it ran after the computer came back" : ""), level: bad ? (r.status === "failed" ? "error" : "warning") : "info",
       });
     }
     this.known = ids;
   }
 
-  announceCommands() {
-    const keys = new Set(this.cmdRuns.map((r) => `${r.id}@${r.at}`));
-    if (this.knownCmd) for (const r of this.cmdRuns) {
-      if (this.knownCmd.has(`${r.id}@${r.at}`) || r.code === 0) continue;
-      const t = this.findCommand(r.id);
-      notify({ title: `${t?.name ?? r.id} failed`, body: `exit code ${r.code}`, level: "error" });
-    }
-    this.knownCmd = keys;
-  }
-
-  live(address) { return terminals().find((t) => t.address === address && t.state === "live"); }
-  liveFor(name) { return terminals().find((t) => t.labels?.automation === name && t.state === "live"); }
+  isRunning(id) { return this.runs.some((r) => r.task === id && r.status === "running"); }
+  info(id) { return this.list?.tasks?.find((x) => x.id === id) ?? null; }
 
   findCommand(id) {
     for (const list of Object.values(this.store.folders)) { const t = list.find((x) => x.id === id); if (t) return t; }
@@ -219,17 +277,10 @@ export default class Tasks extends View {
 
   // ---- model ----
 
-  // Everything shown for the active folder, as one list: saved tasks (commands, prompts) + scheduler entries
-  // not created from a saved task + detected scripts.
+  // Everything shown for the active folder: saved tasks (with the daemon's next/last run) + detected scripts.
   model() {
     const own = this.scope === "all" ? Object.entries(this.store.folders).flatMap(([f, l]) => l.map((t) => ({ ...t, folder: f }))) : tasksFor(this.store, this.folder).map((t) => ({ ...t, folder: this.folder }));
-    const linked = new Set(own.filter((t) => t.automation).map((t) => t.automation));
-    const all = this.list?.automations ?? [];
-    const autos = (this.scope === "all" ? all : filterByFolder(all, this.folder, this.gitRoot, home())).filter((a) => !linked.has(a.name));
-    const rows = [
-      ...own.map((t) => ({ ...t, source: "task", auto: t.automation ? all.find((a) => a.name === t.automation) : null })),
-      ...autos.map((a) => ({ id: `auto:${a.name}`, name: a.name, kind: "prompt", source: "auto", auto: a, folder: a.repo, prompt: a.prompt, schedule: { cron: a.cron }, paused: a.disabled })),
-    ];
+    const rows = own.map((t) => ({ ...t, source: "task", info: this.info(t.id) }));
     const scripts = this.scope === "all" ? [] : this.scripts.map((s) => ({ ...s, id: `script:${s.source}:${s.name}`, kind: "script" }));
     return { rows, scripts, names: new Set(rows.map((r) => r.name)) };
   }
@@ -251,30 +302,12 @@ export default class Tasks extends View {
     await writeTextFile(this.cmdFile, serializeStore(this.store), await readTextFile(this.cmdFile));
   }
 
-  // The crontab holds one managed block for every scheduled command task, across folders.
-  async syncCrontab() {
-    const entries = scheduled(this.store).filter((e) => e.task.kind === "command" || e.task.kind === "script");
-    await exec("mkdir", ["-p", this.p.jobs, this.p.state]);
-    for (const { folder, task } of entries) {
-      const job = this.p.job(task.id);
-      await writeTextFile(job, jobScript(task, folder, this.p), await readTextFile(job));
-    }
-    const cur = await exec("crontab", ["-l"]);
-    const existing = cur.code === 0 ? cur.stdout : "";
-    const next = mergeBlock(existing, renderBlock(entries, this.p));
-    if (next === existing) return;
-    const tmp = `${this.p.data}/crontab.tmp`;
-    await writeTextFile(tmp, next, await readTextFile(tmp));
-    const r = await exec("crontab", [tmp]);
-    if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim() || "crontab refused the new table");
-  }
-
+  // The daemon re-reads the store on every tick (30 s), so saving it is all scheduling needs.
   persist(cx, mutate) {
     cx.spawn(async (cx) => {
       try {
         this.store = mutate(this.store);
         await this.saveStore();
-        await this.syncCrontab();
         this.note = null;
       } catch (e) { this.note = String(e?.message ?? e); }
       await this.refresh(cx);
@@ -284,7 +317,6 @@ export default class Tasks extends View {
   // Run a command/script in a new tab named after it, opened in its folder and placed after the current tab.
   runInTab(name, command, folder, cx, split = false) {
     const argv = ["sh", "-c", command];
-    this.pushRecent({ name, command, folder });
     if (split) { run("pane.split", { direction: "right", argv }); return; }
     const space = spaces().find((s) => s.active);
     if (!space) return;
@@ -297,96 +329,181 @@ export default class Tasks extends View {
     });
   }
 
-  // The project a run belongs to: the git root of the folder, else the folder. (The space id is not used:
-  // `active` can be true for one space per group, so it does not tell spaces apart.)
+  // The project a run belongs to: the git root of the folder, else the folder.
   project() { return this.gitRoot || this.folder; }
 
-  // Last 3 runs per project; the list only shows the active project's (or all, in "All folders").
-  pushRecent(raw) {
-    const item = { ...raw, project: this.project(), cwd: this.folder };
-    const same = (r) => r.project === item.project;
-    const others = this.recent.filter((r) => !(same(r) && r.name === item.name && r.command === item.command));
-    const mine = [item, ...others.filter(same)].slice(0, 3);
-    this.recent = [...mine, ...others.filter((r) => !same(r))];
-  }
-
-  recentHere() {
-    if (this.scope === "all") return this.recent;
-    const project = this.project();
-    return this.recent.filter((r) => r.project === project || r.cwd === this.folder);
-  }
-
-  // Prompt tasks run through hc: the `<agent>-chat` template when it exists, else the agent itself.
-  runPrompt(task, folder, cx) {
-    const agent = task.agent || "claude";
-    const template = (this.templates ?? []).some((x) => x.name === `${agent}-chat`) ? `${agent}-chat` : agent;
-    const name = `${slug(task.name)}-${Date.now().toString(36)}`.slice(0, 32);
+  // Prompt runs go to the daemon (`herdr-tasks run`): headless, with the task's permission level and workspace.
+  // The answer is saved as a Markdown file per run, which History and the Inbox open in the file viewer.
+  runNow(task, cx) {
+    if (this.isRunning(task.id)) return;
     this.note = null;
-    cx.spawn(async (cx) => {
-      try {
-        const r = await exec("hc", ["run", "--bg", "--name", name, template, task.prompt], { cwd: folder });
-        if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim());
-        notify({ title: "Started", body: `${task.name} in ${tilde(folder)}`, level: "info" });
-      } catch (e) { this.note = String(e.message ?? e); }
-      cx.notify();
-    });
+    this.act(cx, ["run", task.id], () => notify({ title: "Started", body: task.name, level: "info" }));
+  }
+
+  // Resume a failed set at the step that failed, keeping the earlier steps' results (and the same worktree).
+  retryFrom(r, run, stepId, cx) {
+    if (this.isRunning(r.id)) return;
+    this.note = null;
+    this.act(cx, ["run", r.id, "--from", stepId, "--retry-of", run.run_id], () => notify({ title: "Retrying", body: `${r.name} from ${stepId}`, level: "info" }));
+  }
+
+  openRunFile(run, cx) {
+    if (!run?.output_file) { this.note = "This run saved no output."; return void cx.notify(); }
+    const i = run.output_file.lastIndexOf("/");
+    openFileTab({ spaceId: spaces().find((s) => s.active)?.id, root: run.output_file.slice(0, i), path: run.output_file.slice(i + 1), name: run.output_file.slice(i + 1) });
   }
 
   runRow(r, cx, split = false) {
-    if (r.source === "auto") return this.act(cx, ["run", r.name, "--bg"]);
-    if (r.kind === "prompt") {
-      if (r.automation && r.auto) return this.act(cx, ["run", r.automation, "--bg"]);
-      return this.runPrompt(r, r.folder, cx);
-    }
+    if (r.kind === "prompt" || r.kind === "set") return this.runNow(r, cx);
     this.runInTab(r.name, r.command, r.cwd ? `${r.folder}/${r.cwd}` : r.folder, cx, split);
   }
 
   open(r, cx) {
     if (!r.seen && FINISHED.has(r.status)) this.act(cx, ["seen", r.run_id]);
-    if (r.terminal && this.live(r.terminal)) run("pane.focus", { terminal: r.terminal });
-    else { this.view = { kind: "detail", ref: { id: `auto:${r.automation}` } }; cx.notify(); }
+    if (r.output_file) this.openRunFile(r, cx);
+    else { this.view = { kind: "detail", ref: { id: r.task } }; cx.notify(); }
   }
 
   // ---- form ----
 
   edit(task, cx, preset = null) {
-    const t = task ?? { kind: "command", name: "", command: "", prompt: "", agent: "claude", model: "", workspace: "worktree", cwd: "", schedule: null, ...(preset ?? {}) };
+    const t = task ?? { kind: "command", name: "", command: "", prompt: "", agent: "claude", model: "", workspace: "worktree", permission: "read-only", cwd: "", schedule: null, ...(preset ?? {}) };
     const field = (value, placeholder) => {
       const s = InputState.new({ placeholder, value: value ?? "" });
       s.on("change", (_e, cx) => { this.preview(cx); cx.notify(); });
       return s;
     };
     this.form = {
-      id: task?.id ?? null, automation: task?.automation ?? null, step: preset?.step ?? 1,
-      kind: t.kind === "prompt" ? "prompt" : "command", agent: t.agent || "claude", workspace: t.workspace === "root" ? "root" : "worktree",
+      id: task?.id ?? null, step: preset?.step ?? 1, permission: t.permission ?? "read-only",
+      kind: ["prompt", "set"].includes(t.kind) ? t.kind : "command",
+      steps: (t.steps ?? []).reduce((acc, st) => (acc.push(this.stepEditor(st, acc.map((x) => x.id))), acc), []), agent: t.agent || "claude", workspace: t.workspace === "root" ? "root" : "worktree",
       schedule: Boolean(t.schedule?.cron), original: task ? { ...task } : null,
+      effort: t.effort ?? "",
       name: field(t.name, "backup, nightly-tests, issue-triage"), cwd: field(t.cwd, "optional subfolder"),
       cron: field(t.schedule?.cron ?? "0 9 * * 1-5", "0 9 * * 1-5"), model: field(t.model, "agent default"),
       command: TextareaState.new({ placeholder: "A shell command, e.g. ./scripts/backup.sh --full", value: t.command ?? "" }),
       prompt: TextareaState.new({ placeholder: "What should the agent do each time?", value: t.prompt ?? "" }),
       result: null, seq: 0, error: null,
+      openId: null, catchUp: t.catchUpMinutes ? String(t.catchUpMinutes) : "",
     };
     this.form.command.set_auto_grow(3, 8);
     this.form.prompt.set_auto_grow(4, 12);
     this.view = { kind: "form" };
     cx.spawn(async (cx) => {
-      try { this.templates = JSON.parse((await hc(["templates", "--json"])).stdout).templates ?? []; } catch { this.templates = []; }
-      try { this.installed = (await knownAgents()).filter((x) => x.installed).map((x) => x.key); } catch { this.installed = null; }
+      await this.loadAgents();
       cx.notify();
     });
     this.preview(cx);
   }
 
-  automationEntry() {
-    const f = this.form;
+  // A set is a list of references to saved tasks, prompts and sets (live: editing the task changes the set; deleting it
+  // makes the set fail before it runs). Ids are fixed once given (`s1`, `s2`, ...) so references stay valid when steps move.
+  stepEditor(st, used = []) {
+    let n = 1;
+    while (used.includes(`s${n}`)) n++;
+    const typed = st.kind === "command" || st.kind === "prompt"; // older sets with text typed into the step: kept, read-only
     return {
-      name: slug(f.name.value()), cron: f.cron.value().trim(), repo: this.folder ?? "",
-      workspace: f.workspace, workspace_id: "", close_workspace: "never", agent: f.agent, template: "", model: f.model.value().trim(),
-      prompt: f.prompt.value(), mcp_config: "", timeout_minutes: 60,
+      id: st.id ?? `s${n}`, ref: st.ref ?? null, legacy: typed ? st : null,
+      when: st.when ?? "always", onFailure: st.onFailure ?? "stop",
+      input: TextareaState.new({ placeholder: "Optional extra context for this prompt. Use the chips to pass an earlier result.", value: st.input ?? "" }),
     };
   }
 
-  // Cron validity and the next runs come from the scheduler's own dry run.
+  stepsOut(f) {
+    return f.steps.map((e) => e.legacy
+      ? { ...e.legacy, id: e.id, when: e.when, onFailure: e.onFailure }
+      : { id: e.id, kind: "task", ref: e.ref, when: e.when, onFailure: e.onFailure, ...(e.input.value().trim() ? { input: e.input.value() } : {}) });
+  }
+
+  taskById(id) {
+    for (const [folder, list] of Object.entries(this.store.folders)) { const t = list.find((x) => x.id === id); if (t) return { ...t, folder }; }
+    return null;
+  }
+
+  // What a step produces, for the variable chips: a referenced command/script is "command", a prompt "prompt", a set "set".
+  stepKind(e) {
+    if (e.legacy) return e.legacy.kind;
+    const t = e.ref ? this.taskById(e.ref) : null;
+    return !t ? null : t.kind === "prompt" ? "prompt" : t.kind === "set" ? "set" : "command";
+  }
+
+  // True when `setId` is reachable from task `id` through set references (adding it would loop).
+  reaches(id, setId, seen = new Set()) {
+    if (id === setId) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    const t = this.taskById(id);
+    return t?.kind === "set" && (t.steps ?? []).some((st) => st.ref && this.reaches(st.ref, setId, seen));
+  }
+
+  // A detected script is not a saved task and is not saved as one: the step carries the command itself (read-only in the set).
+  pickScript(f, sc, cx) {
+    const dir = sc.dir && this.folder && sc.dir.startsWith(this.folder + "/") ? sc.dir.slice(this.folder.length + 1) : "";
+    f.steps.push(this.stepEditor({ kind: "command", command: sc.command, cwd: dir }, f.steps.map((x) => x.id)));
+    cx.notify();
+  }
+
+  pickable(f) {
+    return tasksFor(this.store, this.folder).filter((t) => t.id !== f.id && !(t.kind === "set" && f.id && this.reaches(t.id, f.id)));
+  }
+
+  // Auto-discovery. Herdr's table of runnable agents (`knownAgents`, including ones added in programs.json) is the
+  // candidate list, but it counts shell functions as installed (the herdr-chat `claude`/`agy`/`codex` wrappers), so each
+  // candidate is kept only if its real executable is on the PATH. Models are discovered per agent, see probe.
+  async loadAgents() {
+    if (this.agentList && Date.now() - (this.agentsAt ?? 0) < 60000) return;
+    let candidates;
+    try {
+      candidates = (await knownAgents()).filter((x) => x.agent !== false && Array.isArray(x.run) && x.run.length).map((x) => ({ name: x.name, bin: String(x.run[0]).split("/").pop() }));
+    } catch { candidates = FALLBACK_AGENTS.map(([bin, name]) => ({ name, bin })); }
+    const seen = new Set();
+    const unique = candidates.filter((c) => /^[\w.-]+$/.test(c.bin) && !seen.has(c.bin) && seen.add(c.bin));
+    const found = await Promise.all(unique.map(async (c) => {
+      try { return (await exec("sh", ["-c", 'command -v "$1" >/dev/null 2>&1', "chk", c.bin])).code === 0 ? { id: c.bin, name: c.name, bin: c.bin } : null; } catch { return null; }
+    }));
+    this.agentList = found.filter((a) => a && HEADLESS_AGENTS.includes(a.id));
+    this.agentsAt = Date.now();
+    this.models ??= {};
+    this.efforts ??= {};
+    this.variants ??= {};
+    await Promise.all(this.agentList.map(async (a) => {
+      if (this.models[a.id] && a.id in this.efforts) return;
+      const probe = await this.probe(a.bin);
+      this.models[a.id] = probe.models;
+      this.efforts[a.id] = probe.efforts;
+      this.variants[a.id] = probe.variants;
+    }));
+  }
+
+  // One `--help` per agent tells what it can do: a `models` subcommand lists its models, and a `--effort` flag
+  // (reasoning effort) lists its levels in parentheses. Claude's model aliases are documented, so they are fixed.
+  async probe(bin) {
+    let help = "";
+    try { const r = await exec(bin, ["--help"], { timeout: 10000 }); help = `${r.stdout}\n${r.stderr}`; } catch {}
+    let efforts = null;
+    const line = /--effort\b[^\n]*(?:\n[^\n-][^\n]*)?/.exec(help)?.[0];
+    if (line) {
+      const group = /\(([^)]*)\)/.exec(line)?.[1];
+      const levels = group ? group.split(/[,|/]/).map((x) => x.trim()).filter((x) => /^[a-z]+$/.test(x)) : [];
+      efforts = levels.length > 1 ? levels : EFFORT_FALLBACK;
+    }
+    let models = STATIC_MODELS[bin] ?? [];
+    if (!models.length && /^\s+models\b/m.test(help)) {
+      try {
+        const r = await exec(bin, ["models"], { timeout: 20000 });
+        models = [];
+        for (const l of r.stdout.split("\n")) {
+          const c = l.split("\t");
+          if (c.length >= 2 && /^[\w./:-]+$/.test(c[0])) models.push([c[0], c.slice(1).join(" ").trim() || c[0]]);
+          else if (c.length === 1 && /^[\w./:-]+$/.test(c[0].trim())) models.push([c[0].trim(), c[0].trim()]);
+        }
+      } catch {}
+    }
+    const grouped = models.length ? groupVariants(models) : null;
+    return { models: grouped ? grouped.bases : models, variants: grouped?.variants ?? null, efforts: grouped ? null : efforts };
+  }
+
+  // Cron validity and the next runs come from the scheduler's own parser.
   preview(cx) {
     const f = this.form;
     if (!f) return;
@@ -395,9 +512,9 @@ export default class Tasks extends View {
     cx.spawn(async (cx) => {
       let result;
       try {
-        const r = await exec(this.bin, ["put", "--dry-run", "--entry", JSON.stringify(dryRunEntry(f.cron.value().trim(), this.folder ?? ""))]);
-        if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim());
-        result = JSON.parse(r.stdout);
+        const r = await exec(this.bin, ["next", f.cron.value().trim(), "--count", "3"]);
+        result = JSON.parse(r.stdout || "{}");
+        if (r.code !== 0 && !result.problem) throw new Error((r.stderr || r.stdout).trim());
       } catch (e) { result = { problem: String(e.message ?? e) }; }
       if (this.form === f && seq === f.seq) { f.result = result; cx.notify(); }
     });
@@ -406,39 +523,35 @@ export default class Tasks extends View {
   save(cx) {
     const f = this.form;
     const name = f.name.value().trim();
-    const text = (f.kind === "prompt" ? f.prompt : f.command).value().trim();
+    const text = f.kind === "set" ? "set" : (f.kind === "prompt" ? f.prompt : f.command).value().trim();
     if (!name) { f.error = "Give the task a name."; cx.notify(); return; }
     if (!text) { f.error = f.kind === "prompt" ? "Write the prompt." : "Write the command."; cx.notify(); return; }
     if (f.schedule && f.result?.problem) { f.error = f.result.problem; cx.notify(); return; }
     const folder = this.folder;
     if (!folder) { f.error = "No folder in the active space."; cx.notify(); return; }
+    const steps = f.kind === "set" ? this.stepsOut(f) : null;
+    if (steps) {
+      const problems = validateSet(steps);
+      const gone = f.steps.findIndex((e) => !e.legacy && !this.taskById(e.ref));
+      if (gone >= 0 && !problems.length) problems.push(`Step ${gone + 1}: the chosen task no longer exists. Remove or replace it.`);
+      if (problems.length) { f.error = problems[0]; cx.notify(); return; }
+    }
     const task = {
       id: f.id ?? newId(), name, kind: f.kind, folder: undefined,
-      ...(f.kind === "prompt"
-        ? { prompt: f.prompt.value(), agent: f.agent, model: f.model.value().trim(), workspace: f.workspace }
+      ...(f.kind === "set" ? { steps } : f.kind === "prompt"
+        ? { prompt: f.prompt.value(), agent: f.agent, model: f.model.value().trim(), effort: f.effort, workspace: f.workspace, permission: f.permission }
         : { command: f.command.value(), cwd: f.cwd.value().trim().replace(/^\/+|\/+$/g, "") }),
       schedule: f.schedule ? { cron: f.cron.value().trim() } : null,
+      ...(f.schedule && f.catchUp ? { catchUpMinutes: Number(f.catchUp) } : {}),
       paused: false,
+      ...(Object.values(this.store.folders).flat().find((x) => x.id === f.id)?.pinned ? { pinned: true } : {}),
     };
     delete task.folder;
     cx.spawn(async (cx) => {
       try {
-        if (!validTask({ ...task, command: task.command ?? task.prompt })) throw new Error("Incomplete task");
-        if (f.kind === "prompt") {
-          const autoName = f.automation ?? slug(name);
-          if (f.schedule) {
-            const r = await exec(this.bin, ["put", ...(f.automation ? ["--original", f.automation] : []), "--entry", JSON.stringify({ ...this.automationEntry(), name: autoName })]);
-            if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim());
-            const res = JSON.parse(r.stdout);
-            if (res.problem) throw new Error(res.problem);
-            task.automation = autoName;
-          } else if (f.automation) {
-            await this.cli(["rm", f.automation]);
-          }
-        }
+        if (!validTask({ ...task, command: task.command ?? task.prompt ?? "set" })) throw new Error("Incomplete task");
         this.store = upsert(this.store, folder, task);
         await this.saveStore();
-        await this.syncCrontab();
         this.view = { kind: "detail", ref: { id: task.id } };
         this.form = null;
       } catch (e) { f.error = String(e?.message ?? e); }
@@ -476,6 +589,63 @@ export default class Tasks extends View {
         .on_click((_e, cx) => pick(v, cx)).child(label)));
   }
 
+  pickModel(f, base, cx) {
+    const v = this.variants?.[f.agent];
+    if (v && base) {
+      const level = v[base]?.[f.effort] ? f.effort : "";
+      if (!level) f.effort = "";
+      f.model.set_value(level ? v[base][level] : Object.keys(v[base]).length ? defaultVariant(v[base]) : base);
+    } else f.model.set_value(base);
+    cx.notify();
+  }
+
+  pickEffort(f, level, cx) {
+    f.effort = level;
+    const v = this.variants?.[f.agent];
+    if (v) {
+      const base = Object.keys(v).find((b) => b === f.model.value().trim() || Object.values(v[b]).includes(f.model.value().trim()));
+      if (base && Object.keys(v[base]).length) f.model.set_value(level && v[base][level] ? v[base][level] : defaultVariant(v[base]));
+    }
+    cx.notify();
+  }
+
+  // A stepped range: "Default" then each level as a segment; every segment up to the chosen one is filled, so it reads
+  // as a slider from least to most. Clicking a segment picks it; clicking the chosen one again goes back to Default.
+  range(id, levels, value, t, pick) {
+    const at = levels.indexOf(value);
+    return v_flex().gap(4)
+      .child(h_flex().gap(3).children(levels.map((lv, i) =>
+        div().id(`${id}-${lv}`).flex_1().h(8).rounded(4).cursor_pointer()
+          .bg(i <= at ? t.accent : t.raised).hover((s) => s.opacity(0.8))
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .on_click((_e, cx) => pick(i === at ? "" : lv, cx)))))
+      .child(h_flex().children([...levels.map((lv, i) =>
+        div().flex_1().text_size(10.5).text_color(i === at ? t.foreground : t.dim).child(lv))]))
+      .child(div().text_size(11).text_color(t.dim).child(at < 0 ? "Default: the agent decides" : `Effort: ${value}`));
+  }
+
+  // A dropdown we control ourselves: the trigger toggles `f.modelOpen`, the list opens right below it (in the form's
+  // flow, so nothing can be clipped or lost behind a popup layer) and choosing an option closes it. The toolkit's
+  // Select/Popup does not open from a plain click on a trigger we draw, so it is not used.
+  dropdown(id, options, value, f, t, pick) {
+    const current = options.find(([v]) => v === value);
+    const trigger = h_flex().id(`${id}-trigger`).h(28).px(8).gap(6).items_center().rounded(6).bg(t.chrome).border(1)
+      .border_color(f.openId === id ? t.accent : t.border).cursor_pointer().hover((s) => s.bg(t.hover)).w_full()
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => { f.openId = f.openId === id ? null : id; cx.notify(); })
+      .child(div().flex_1().min_w(0).truncate().text_size(12).child(current ? current[1] : value || "Agent default"))
+      .child(div().text_size(10).text_color(t.dim).child(f.openId === id ? "▴" : "▾"));
+    const list = v_flex().id(`${id}-list`).w_full().max_h(240).overflow_y_scrollbar().p(4).gap(1).rounded(8).bg(t.popover).border(1).border_color(t.border)
+      .children(options.map(([v, label]) =>
+        h_flex().id(`${id}-opt-${v}`).h(26).px(8).items_center().rounded(5).text_size(12).cursor_pointer().gap(8)
+          .bg(v === value ? t.selected : t.popover).text_color(v === value ? t.foreground : t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .on_click((_e, cx) => { f.openId = null; pick(v, cx); })
+          .child(div().flex_1().min_w(0).truncate().child(label))
+          .child(div().flex_none().text_size(10).text_color(t.dim).child(v))));
+    return v_flex().gap(4).child(trigger).when(f.openId === id, (el) => el.child(list));
+  }
+
   switch_(id, on, t, toggle) {
     return h_flex().id(id).w(30).h(17).flex_none().rounded(9).p(2).cursor_pointer().bg(on ? t.accent : t.input)
       .when(on, (el) => el.justify_end()).on_click((_e, cx) => toggle(cx))
@@ -484,34 +654,40 @@ export default class Tasks extends View {
 
   header(t, cx) {
     const back = this.view.kind !== "list";
-    const paused = Boolean(this.list?.paused);
+    const paused = Boolean(this.list?.paused_all);
     return h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border)
       .when(back, (el) => el.child(this.button("back", "‹", t, (cx) => { this.view = { kind: "list" }; this.form = null; cx.notify(); }, { px: 7 })))
       .child(div().font_semibold().child("Tasks"))
       .child(div().flex_1().min_w(0).truncate().text_right().text_size(12).text_color(t.dim).child(this.scope === "folder" ? (this.folder?.split("/").pop() ?? "") : "all folders"))
       .when(Boolean(this.list) && !back, (el) => el
-        .child(div().text_size(11).text_color(paused ? t.blocked : t.dim).child(paused ? "Prompts paused" : "Active"))
+        .child(div().text_size(11).text_color(paused ? t.blocked : t.dim).child(paused ? "All paused" : "Active"))
         .child(this.switch_("pause-all", !paused, t, (cx) => this.act(cx, [paused ? "resume" : "pause", "--all"]))))
       .when(!back, (el) => el.child(this.button("new", "+", t, (cx) => this.edit(null, cx), { px: 8 })));
   }
 
   banner(t, cx) {
     return h_flex().px(14).py(8).gap(8).items_center().bg(t.blocked + "22").border_b(1).border_color(t.border)
-      .child(div().flex_1().text_size(12).child("Prompt scheduler stopped: scheduled prompts will not run on time."))
+      .child(div().flex_1().text_size(12).child("Scheduler stopped: scheduled tasks will not run on time."))
       .child(this.button("start", "Start", t, (cx) => this.act(cx, ["service", "install"]), { solid: true }));
   }
 
-  dot(r, t) {
-    const live = r.auto ? this.liveFor(r.auto.name) : null;
-    const last = r.kind === "command" ? this.lastCmdRun(r.id) : r.auto?.last;
-    const failed = r.kind === "command" ? last && last.code !== 0 : last?.status === "failed" || last?.status === "missed";
-    const color = live ? (live.status === "blocked" ? t.blocked : t.working) : r.paused ? t.dim : failed ? t.ansi1 : this.isScheduled(r) ? t.ansi2 : t.muted;
-    return div().size(8).rounded(4).flex_none().bg(color);
+  // Status is the colour of the row's icon: yellow while running, red after a failure, green when scheduled.
+  statusColor(r, t) {
+    const last = r.info?.last;
+    const failed = last?.status === "failed" || last?.status === "missed";
+    return this.isRunning(r.id) ? t.working : r.paused ? t.dim : failed ? t.ansi1 : this.isScheduled(r) ? t.ansi2 : t.muted;
   }
 
-  lastCmdRun(id) {
-    for (let i = this.cmdRuns.length - 1; i >= 0; i--) if (this.cmdRuns[i].id === id) return this.cmdRuns[i];
-    return null;
+  // Schedule button icon: a thin clock, green when the task is scheduled.
+  clock(t, on) {
+    return svg("mods/tasks/clock.svg").size(13).flex_none().text_color(on ? t.ansi2 : t.foreground);
+  }
+
+  // The icon in front of a task: the agent's logo for a prompt, a glyph for a command.
+  kindIcon(r, t, colorOverride, size = 14) {
+    const color = colorOverride ?? this.statusColor(r, t);
+    if (r.kind === "prompt") return svg(`mods/tasks/${r.agent === "agy" ? "agy" : "claude"}.svg`).size(size).flex_none().text_color(color);
+    return div().w(size).flex_none().text_color(color).child(KIND_GLYPH[r.kind] ?? "$");
   }
 
   renderList(t, cx) {
@@ -523,43 +699,58 @@ export default class Tasks extends View {
     const showRow = (r) => this.chip === "all" || (this.chip === "scheduled" ? this.isScheduled(r) : r.kind === this.chip);
     const shown = rows.filter(showRow);
     const shownScripts = this.chip === "all" || this.chip === "script" ? scripts : [];
-    const inbox = (this.scope === "all" ? this.runs : this.runs.filter((r) => rows.some((x) => x.auto?.name === r.automation))).filter((r) => FINISHED.has(r.status) && !r.seen).slice(0, 20);
+    const finished = (this.scope === "all" ? this.runs : this.runs.filter((r) => rows.some((x) => x.id === r.task))).filter((r) => FINISHED.has(r.status));
+    const unread = finished.filter((r) => !r.seen);
+    const upcoming = rows.filter((r) => this.isScheduled(r) && r.info?.next).sort((a, b) => Date.parse(a.info.next) - Date.parse(b.info.next));
+    const feed = this.feed === "next" ? "next" : "inbox";
+    const items = feed === "next" ? upcoming : this.showRead ? finished : unread;
+    const pages = Math.max(1, Math.ceil(items.length / PAGE));
+    this.page = Math.min(this.page ?? 0, pages - 1);
+    const pageItems = items.slice(this.page * PAGE, this.page * PAGE + PAGE);
     const col = v_flex().pb(10);
     col.child(h_flex().px(14).pt(10).gap(4).flex_wrap().items_center()
       .children(CHIPS.map(([id, label]) => chip(`chip-${id}`, label, this.chip === id, (cx) => { this.chip = id; cx.notify(); })))
       .child(div().flex_1())
       .child(chip("scope-toggle", this.scope === "folder" ? "This folder" : "All folders", false, (cx) => { this.scope = this.scope === "folder" ? "all" : "folder"; cx.notify(); })));
-    const recent = this.recentHere();
-    if (recent.length && (this.chip === "all" || this.chip === "script" || this.chip === "command")) {
-      col.child(section("RECENT", 0));
-      for (const r of recent) col.child(this.recentRow(r, t));
+    if (finished.length || upcoming.length) {
+      const link = (id, label, fn) => div().id(id).text_size(11).font_normal().cursor_pointer().text_color(t.dim).hover((s) => s.text_color(t.foreground)).on_click((_e, cx) => fn(cx)).child(label);
+      const tab = (id, label, n) => h_flex().id(`feed-${id}`).h(22).px(8).gap(5).items_center().rounded(5).text_size(11.5).cursor_pointer()
+        .bg(feed === id ? t.selected : t.chrome).text_color(feed === id ? t.foreground : t.muted).hover((s) => s.bg(t.hover))
+        .on_click((_e, cx) => { this.feed = id; this.page = 0; cx.notify(); })
+        .child(label).when(n > 0, (el) => el.child(div().px(4).rounded(3).bg(t.raised).text_size(10.5).child(String(n))));
+      col.child(h_flex().px(14).pt(12).pb(4).gap(6).items_center()
+        .child(tab("inbox", "Inbox", unread.length)).child(tab("next", "Next", upcoming.length))
+        .child(div().flex_1())
+        .when(feed === "inbox", (el) => el.child(link("show-read", this.showRead ? "Hide read" : "Show read", (cx) => { this.showRead = !this.showRead; this.page = 0; cx.notify(); })))
+        .when(feed === "inbox" && unread.length > 0, (el) => el.child(link("seen-all", "Mark all read", (cx) => this.act(cx, ["seen", "--all"])))));
+      if (!items.length) col.child(div().px(14).py(4).text_size(12).text_color(t.dim).child(feed === "next" ? "Nothing scheduled." : "Nothing new. Show read lists earlier runs."));
+      for (const r of pageItems) col.child(feed === "next" ? this.nextRow(r, t) : this.inboxRow(r, t));
+      if (pages > 1) col.child(h_flex().px(14).py(2).gap(10).items_center().justify_end().text_size(11).text_color(t.dim)
+        .child(link("pg-prev", "‹", (cx) => { this.page = Math.max(0, this.page - 1); cx.notify(); }))
+        .child(div().child(`${this.page + 1} / ${pages}`))
+        .child(link("pg-next", "›", (cx) => { this.page = Math.min(pages - 1, this.page + 1); cx.notify(); })));
     }
-    if (inbox.length) {
-      col.child(section("INBOX", inbox.length).child(div().flex_1())
-        .child(div().id("seen-all").font_normal().cursor_pointer().hover((s) => s.text_color(t.foreground))
-          .on_click((_e, cx) => this.act(cx, ["seen", "--all"])).child("Mark all read")));
-      for (const r of inbox) col.child(this.inboxRow(r, t));
+    const pinned = shown.filter((r) => r.pinned);
+    const pinnedScripts = this.folder ? shownScripts.filter((s) => isPinnedScript(this.store, this.folder, s)) : [];
+    if (pinned.length || pinnedScripts.length) {
+      col.child(section("PINNED", pinned.length + pinnedScripts.length));
+      for (const r of pinned) col.child(this.taskRow(r, t));
+      for (const s of pinnedScripts) col.child(this.scriptRow(s, t));
     }
-    col.child(section("TASKS", shown.length));
-    if (!shown.length) col.child(div().px(14).py(4).text_size(12).text_color(t.dim).child(this.scope === "folder" ? "No tasks for this folder yet. + defines one." : "No tasks yet. + defines one."));
-    for (const r of shown) col.child(this.taskRow(r, t));
+    const others = shown.filter((r) => !r.pinned);
+    col.child(section("TASKS", others.length));
+    if (!others.length) col.child(div().px(14).py(4).text_size(12).text_color(t.dim).child(this.scope === "folder" ? "No tasks for this folder yet. + defines one." : "No tasks yet. + defines one."));
+    for (const r of others) col.child(this.taskRow(r, t));
     if (this.scope === "folder" && this.chip !== "command" && this.chip !== "prompt" && this.chip !== "scheduled") {
-      col.child(section("SCRIPTS", shownScripts.length));
-      if (!shownScripts.length) col.child(div().px(14).py(4).text_size(12).text_color(t.dim).child("No package.json, Makefile, justfile or pyproject scripts found here."));
-      for (const s of shownScripts) col.child(this.scriptRow(s, t));
+      const restScripts = shownScripts.filter((s) => !pinnedScripts.includes(s));
+      col.child(section("SCRIPTS", restScripts.length));
+      if (!restScripts.length) col.child(div().px(14).py(4).text_size(12).text_color(t.dim).child("No package.json, Makefile, justfile or pyproject scripts found here."));
+      for (const s of restScripts) col.child(this.scriptRow(s, t));
     }
     for (const d of this.list?.invalid ?? []) col.child(v_flex().mx(8).my(2).px(8).py(6).rounded(7).bg(t.ansi1 + "18")
       .child(div().text_size(12).font_semibold().child(d.name || `line ${d.line}`))
       .child(div().text_size(11).text_color(t.muted).child(d.message)));
     return col;
-  }
-
-  recentRow(r, t) {
-    return h_flex().id(`recent-${r.name}-${r.command}`).mx(8).px(8).py(4).gap(7).items_center().rounded(7).cursor_pointer().hover((s) => s.bg(t.hover))
-      .on_click((_e, cx) => this.runInTab(r.name, r.command, r.folder, cx))
-      .child(div().w(12).flex_none().text_color(t.ansi2).child("▶"))
-      .child(div().flex_none().truncate().child(r.name))
-      .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(r.command));
   }
 
   scriptRow(s, t) {
@@ -569,40 +760,52 @@ export default class Tasks extends View {
         .child(div().w(12).flex_none().text_color(t.muted).child(KIND_GLYPH.script))
         .child(div().flex_1().min_w(0).truncate().font_semibold().child(s.name))
         .child(div().px(6).h(16).flex().items_center().rounded(4).bg(t.raised).text_size(10.5).text_color(t.muted).child(s.source))
+        .child(this.button(`spin-${s.source}-${s.name}`, isPinnedScript(this.store, this.folder, s) ? "★" : "☆", t, (cx) => this.persist(cx, (st) => togglePinScript(st, this.folder, s)), { px: 6, h: 22 }))
         .child(this.button(`srun-${s.source}-${s.name}`, "▶", t, (cx) => this.runInTab(s.name, s.command, s.dir, cx), { px: 6, h: 22 }))
-        .child(this.button(`ssplit-${s.source}-${s.name}`, "▥", t, (cx) => this.runInTab(s.name, s.command, s.dir, cx, true), { px: 6, h: 22 })))
+        .child(this.button(`ssched-${s.source}-${s.name}`, this.clock(t, false), t, (cx) => this.edit(null, cx, { kind: "command", name: s.name, command: s.command, step: 2 }), { px: 6, h: 22 })))
       .child(div().pl(19).text_size(11).text_color(t.dim).truncate().child(s.preview || s.command));
   }
 
   taskRow(r, t) {
-    const live = r.auto ? this.liveFor(r.auto.name) : null;
-    const nextIso = r.auto?.next;
-    const sub = live ? `running · ${live.status ?? "starting"}` : r.paused ? "paused"
+    const running = this.isRunning(r.id);
+    const nextIso = r.info?.next;
+    const sub = running ? "running" : r.paused ? "paused"
       : this.isScheduled(r) ? `${human(r.schedule.cron)}${nextIso ? ` · ${until(nextIso)}` : ""}` : "manual";
-    const detail = r.kind === "prompt" ? `${r.auto?.agent ?? r.agent ?? "claude"}${r.auto?.model || r.model ? " · " + (r.auto?.model || r.model) : ""} · ${(r.prompt ?? "").replace(/\s+/g, " ")}` : (r.command ?? "").replace(/\s+/g, " ");
+    const detail = r.kind === "set" ? (r.steps ?? []).map((x) => { const t0 = x.kind === "task" ? this.taskById(x.ref) : null; return x.kind === "task" ? (t0 ? t0.name : "⚠ deleted") : x.kind === "prompt" ? "✦" : "$"; }).join(" → ") + ` · ${(r.steps ?? []).length} steps` : r.kind === "prompt" ? `${r.agent ?? "claude"}${r.model ? " · " + r.model : ""} · ${(r.prompt ?? "").replace(/\s+/g, " ")}` : (r.command ?? "").replace(/\s+/g, " ");
     return v_flex().id(`task-${r.id}`).mx(8).px(8).py(7).gap(2).rounded(7).cursor_pointer().hover((s) => s.bg(t.hover))
       .on_click((_e, cx) => { this.view = { kind: "detail", ref: { id: r.id } }; cx.notify(); })
       .child(h_flex().gap(7).items_center()
-        .child(this.dot(r, t))
-        .child(div().w(10).flex_none().text_color(t.muted).child(KIND_GLYPH[r.kind]))
-        .child(div().flex_1().min_w(0).truncate().font_semibold().child(r.name))
-        .child(this.button(`run-${r.id}`, "▶", t, (cx) => this.runRow(r, cx), { px: 6, h: 22 }))
-        .when(r.source === "task", (el) => el.child(this.button(`sched-${r.id}`, "⏰", t, (cx) => this.edit(r, cx, { step: 2 }), { px: 6, h: 22 }))))
-      .child(div().pl(25).text_size(11).text_color(t.muted).truncate().child(sub))
-      .child(div().pl(25).text_size(11).text_color(t.dim).truncate().child(detail));
+        .child(this.kindIcon(r, t))
+        .child(div().flex_1().min_w(0).truncate().font_semibold().text_color(running ? t.working : t.foreground).child(r.name))
+        .when(r.source === "task", (el) => el.child(this.button(`pin-${r.id}`, r.pinned ? "★" : "☆", t, (cx) => this.togglePin(r, cx), { px: 6, h: 22 })))
+        .child(this.button(`run-${r.id}`, running ? "◌" : "▶", t, (cx) => this.runRow(r, cx), { px: 6, h: 22 }))
+        .when(r.source === "task", (el) => el.child(this.button(`sched-${r.id}`, this.clock(t, this.isScheduled(r) && !r.paused), t, (cx) => this.edit(r, cx, { step: 2 }), { px: 6, h: 22 }))))
+      .child(div().pl(21).text_size(11).text_color(t.muted).truncate().child(sub))
+      .child(div().pl(21).text_size(11).text_color(t.dim).truncate().child(detail));
   }
 
+  // One compact line per run: dot, name, what happened (error or duration), status, age.
   inboxRow(r, t) {
     const color = r.status === "done" ? t.ansi2 : r.status === "failed" ? t.ansi1 : t.dim;
-    return v_flex().id(`inbox-${r.run_id}`).mx(8).px(8).py(6).gap(2).rounded(7).cursor_pointer().hover((s) => s.bg(t.hover))
+    const info = r.error || r.reason || (Number.isFinite(r.seconds) ? duration(r.seconds) : "");
+    const task = this.taskById(r.task);
+    return h_flex().id(`inbox-${r.run_id}`).mx(8).px(8).h(24).gap(6).items_center().rounded(6).text_size(12).cursor_pointer().hover((s) => s.bg(t.hover)).when(Boolean(r.seen), (el) => el.opacity(0.6))
       .on_click((_e, cx) => this.open(r, cx))
-      .child(h_flex().gap(6).items_center()
-        .child(div().size(7).rounded(4).flex_none().bg(color))
-        .child(div().flex_1().min_w(0).truncate().child(r.automation))
-        .child(div().text_size(11).text_color(color).child(r.status))
-        .child(div().text_size(11).text_color(t.dim).child(ago(r.at))))
-      .child(div().pl(13).text_size(11).text_color(t.muted).truncate()
-        .child(r.error || `${duration(r.seconds)}${r.terminal && this.live(r.terminal) ? " · open" : ""}`));
+      .child(div().w(14).flex_none().flex().items_center().justify_center()
+        .child(task?.kind === "prompt" || task?.kind === "set" ? this.kindIcon(task, t, color, 13) : div().size(6).rounded(3).flex_none().bg(color)))
+      .child(div().w(96).flex_none().truncate().child(r.name ?? r.task))
+      .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.muted).child(info))
+      .child(div().flex_none().text_size(11).text_color(color).child(r.status))
+      .child(div().flex_none().text_size(11).text_color(t.dim).child(ago(r.at)));
+  }
+
+  nextRow(r, t) {
+    return h_flex().id(`next-${r.id}`).mx(8).px(8).h(24).gap(6).items_center().rounded(6).text_size(12).cursor_pointer().hover((s) => s.bg(t.hover))
+      .on_click((_e, cx) => { this.view = { kind: "detail", ref: { id: r.id } }; cx.notify(); })
+      .child(div().w(14).flex_none().flex().items_center().justify_center().child(this.kindIcon(r, t, t.muted, 13)))
+      .child(div().flex_1().min_w(0).truncate().child(r.name))
+      .child(div().flex_none().text_size(11).text_color(t.dim).child(human(r.schedule.cron)))
+      .child(div().flex_none().text_size(11).text_color(t.foreground).child(until(r.info.next)));
   }
 
   renderDetail(t, cx) {
@@ -611,55 +814,99 @@ export default class Tasks extends View {
     const r = rows.find((x) => x.id === ref.id) ?? (() => { const f = Object.entries(this.store.folders).flatMap(([fo, l]) => l.map((x) => ({ ...x, folder: fo, source: "task" }))).find((x) => x.id === ref.id); return f ?? null; })();
     if (!r) return div().p(14).text_color(t.dim).child("This task is gone.");
     const kv = (k, v) => h_flex().gap(8).text_size(12).child(div().w(78).flex_none().text_color(t.dim).child(k)).child(div().flex_1().min_w(0).truncate().child(v || "—"));
-    const history = r.kind === "command"
-      ? this.cmdRuns.filter((x) => x.id === r.id).slice(-30).reverse().map((x) => ({ key: `${x.id}@${x.at}`, status: x.code === 0 ? "done" : "failed", info: x.code === 0 ? duration(x.seconds) : `exit ${x.code} · ${duration(x.seconds)}`, at: x.at }))
-      : this.runs.filter((x) => r.auto && x.automation === r.auto.name && x.status !== "scheduled").slice(0, 30).map((x) => ({ key: x.run_id, status: x.status, info: x.error || (x.seconds != null ? duration(x.seconds) : ""), at: x.at, run: x }));
+    const history = this.runs.filter((x) => x.task === r.id && x.status !== "running").slice(0, 30).map((x) => ({
+      key: x.run_id, status: x.status, run: x, at: x.at,
+      info: x.error || x.reason || [x.seconds != null ? duration(x.seconds) : "", x.late_seconds ? "late" : "", x.branch ?? ""].filter(Boolean).join(" · "),
+    }));
     const deleting = this.deleting === r.id;
     const scheduledNow = this.isScheduled(r);
     const manage = r.source === "task";
     return v_flex().p(14).gap(10)
-      .child(h_flex().gap(8).items_center().child(this.dot(r, t)).child(div().text_color(t.muted).child(KIND_GLYPH[r.kind])).child(div().flex_1().min_w(0).truncate().text_size(15).font_semibold().child(r.name)))
+      .child(h_flex().gap(8).items_center().child(this.kindIcon(r, t)).child(div().flex_1().min_w(0).truncate().text_size(15).font_semibold().child(r.name)))
       .child(h_flex().gap(6).flex_wrap()
-        .child(this.button("d-run", "Run now", t, (cx) => this.runRow(r, cx), { solid: true }))
+        .child(this.button("d-run", this.isRunning(r.id) ? "Running…" : "Run now", t, (cx) => this.runRow(r, cx), { solid: !this.isRunning(r.id) }))
         .when(r.kind === "command", (el) => el.child(this.button("d-split", "Run beside", t, (cx) => this.runRow(r, cx, true))))
         .when(manage, (el) => el.child(this.button("d-sched", r.schedule ? "Reschedule" : "Schedule", t, (cx) => this.edit(r, cx, { step: 2 }))))
         .when(Boolean(r.schedule), (el) => el.child(this.button("d-pause", r.paused ? "Resume" : "Pause", t, (cx) => this.togglePause(r, cx))))
+        .when(manage, (el) => el.child(this.button("d-pin", r.pinned ? "Unpin" : "Pin", t, (cx) => this.togglePin(r, cx))))
         .when(manage, (el) => el.child(this.button("d-edit", "Edit", t, (cx) => this.edit(r, cx))))
         .child(this.button("d-del", deleting ? "Confirm delete" : "Delete", t, (cx) => this.remove(r, deleting, cx), { danger: true })))
       .child(v_flex().gap(4)
-        .child(kv("Kind", r.kind === "prompt" ? "Agent prompt" : "Shell command"))
+        .child(kv("Kind", r.kind === "prompt" ? "Agent prompt" : r.kind === "set" ? "Set of steps" : "Shell command"))
         .child(kv("Folder", tilde(r.folder)))
         .when(r.kind === "command" && r.cwd, (el) => el.child(kv("Subfolder", r.cwd)))
         .child(kv("Schedule", r.schedule ? `${human(r.schedule.cron)}${r.paused ? " (paused)" : ""}` : "manual only"))
-        .when(r.auto?.next && scheduledNow, (el) => el.child(kv("Next", until(r.auto.next))))
-        .when(r.kind === "prompt", (el) => el.child(kv("Agent", `${r.auto?.agent ?? r.agent ?? "claude"}${r.auto?.model || r.model ? " · " + (r.auto?.model || r.model) : ""}`))))
-      .child(div().p(8).rounded(7).bg(t.raised).text_size(12).text_color(t.muted).child(r.kind === "prompt" ? (r.prompt || "(no prompt)") : (r.command || "(no command)")))
+        .when(r.info?.next && scheduledNow, (el) => el.child(kv("Next", until(r.info.next))))
+        .when(r.kind === "prompt", (el) => el.child(kv("Agent", `${r.agent ?? "claude"}${r.model ? " · " + r.model : ""}`)))
+        .when(r.kind === "prompt", (el) => el.child(kv("Permission", r.permission ?? "read-only")))
+        .when(r.kind === "prompt", (el) => el.child(kv("Runs in", r.workspace === "root" ? "folder root" : "new worktree")))
+        .when(r.kind === "prompt" && Boolean(r.effort), (el) => el.child(kv("Effort", r.effort))))
+      .child(r.kind === "set"
+        ? v_flex().gap(4).children((r.steps ?? []).map((x, i) => {
+            const ref = x.kind === "task" ? this.taskById(x.ref) : null;
+            const missing = x.kind === "task" && !ref;
+            const label = x.kind === "task" ? (ref ? `${KIND_GLYPH[ref.kind] ?? "$"} ${ref.name}` : "task deleted") : `${x.kind === "prompt" ? "✦ prompt" : "$ command"} typed in the set`;
+            return div().p(8).rounded(7).bg(t.raised).text_size(12).text_color(missing ? t.ansi1 : t.muted)
+              .child(`${i + 1}. [${x.id}] ${label}${i && x.when && x.when !== "always" ? ` · ${x.when === "prev_ok" ? "if previous ok" : "if previous printed"}` : ""}${x.onFailure === "continue" ? " · continues on failure" : ""}${x.input ? "\n+ " + x.input : ""}`);
+          }))
+        : div().p(8).rounded(7).bg(t.raised).text_size(12).text_color(t.muted).child(r.kind === "prompt" ? (r.prompt || "(no prompt)") : (r.command || "(no command)")))
       .child(div().pt(4).text_size(11).font_semibold().text_color(t.dim).child("HISTORY"))
       .when(!history.length, (el) => el.child(div().text_size(12).text_color(t.dim).child("No runs yet.")))
+      .when(this.isRunning(r.id), (el) => el.child(div().text_size(12).text_color(t.dim).child("Running…")))
       .children(history.map((h) => {
         const c = h.status === "done" ? t.ansi2 : h.status === "failed" ? t.ansi1 : t.dim;
-        return h_flex().id(`h-${h.key}`).gap(8).text_size(11.5).cursor_pointer().on_click((_e, cx) => (h.run ? this.open(h.run, cx) : null))
+        const failedStep = r.kind === "set" && h.status === "failed" ? (h.run.steps ?? []).find((x) => x.status === "failed")?.id : null;
+        return h_flex().id(`h-${h.key}`).gap(8).items_center().text_size(11.5).cursor_pointer().on_click((_e, cx) => this.open(h.run, cx))
           .child(div().w(66).flex_none().text_color(c).child(h.status))
           .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(h.info))
-          .child(div().text_color(t.dim).child(ago(h.at)));
+          .child(div().text_color(t.dim).child(ago(h.at)))
+          .when(Boolean(failedStep), (el) => el.child(this.button(`retry-${h.key}`, `Retry from ${failedStep}`, t, (cx) => this.retryFrom(r, h.run, failedStep, cx), { px: 6, h: 20 })));
       }));
   }
 
+  togglePin(r, cx) {
+    this.persist(cx, (s) => upsert(s, r.folder, { ...stripRow(r), pinned: !r.pinned }));
+  }
+
   togglePause(r, cx) {
-    if (r.source === "auto") return this.act(cx, [r.paused ? "resume" : "pause", r.name]);
-    if (r.kind === "prompt" && r.automation) this.act(cx, [r.paused ? "resume" : "pause", r.automation]);
-    this.persist(cx, (s) => upsert(s, r.folder, { ...stripRow(r), paused: !r.paused }));
+    this.persist(cx, (st) => upsert(st, r.folder, { ...stripRow(r), paused: !r.paused }));
   }
 
   remove(r, confirmed, cx) {
     if (!confirmed) { this.deleting = r.id; cx.notify(); return; }
     this.deleting = null;
     this.view = { kind: "list" };
-    if (r.source === "auto") return this.act(cx, ["rm", r.name]);
-    cx.spawn(async (cx) => {
-      try { if (r.automation) await this.cli(["rm", r.automation]); } catch (e) { this.note = String(e?.message ?? e); }
-      this.persist(cx, (s) => remove(s, r.folder, r.id));
-    });
+    this.persist(cx, (st) => remove(st, r.folder, r.id));
+  }
+
+  renderStep(f, e, i, t, cx, label, input, area) {
+    const ref = e.legacy ? null : this.taskById(e.ref);
+    const kind = this.stepKind(e);
+    const vars = availableVars(this.stepsOut(f).map((x, j) => ({ ...x, kind: this.stepKind(f.steps[j]) ?? "command" })), i);
+    const move = (d) => (cx) => { const j = i + d; if (j < 0 || j >= f.steps.length) return; [f.steps[i], f.steps[j]] = [f.steps[j], f.steps[i]]; cx.notify(); };
+    const title = e.legacy ? `${e.legacy.kind === "prompt" ? "Prompt" : "Command"} typed in the set (read-only)` : ref ? ref.name : "Task deleted";
+    const card = v_flex().id(`step-${e.id}`).p(8).gap(6).rounded(8).border_1().border_color(ref || e.legacy ? t.border : t.ansi1).bg(t.raised)
+      .child(h_flex().gap(6).items_center()
+        .child(ref ? this.kindIcon(ref, t, t.muted, 13) : div().flex_none().text_color(t.muted).child(KIND_GLYPH[e.legacy?.kind] ?? "?"))
+        .child(div().flex_1().min_w(0).truncate().text_size(12).font_semibold().text_color(ref || e.legacy ? t.foreground : t.ansi1).child(`${i + 1}. ${title}  [${e.id}]`))
+        .child(this.button(`up-${e.id}`, "↑", t, move(-1), { px: 6, h: 22 }))
+        .child(this.button(`down-${e.id}`, "↓", t, move(1), { px: 6, h: 22 }))
+        .child(this.button(`rm-${e.id}`, "✕", t, (cx) => { f.steps.splice(i, 1); cx.notify(); }, { px: 6, h: 22, danger: true })));
+    if (!ref && !e.legacy) card.child(div().text_size(11).text_color(t.ansi1).child("This task no longer exists: the set fails until you remove this step or pick another."));
+    if (e.legacy) card.child(div().text_size(11).text_color(t.muted).child((e.legacy.kind === "prompt" ? e.legacy.prompt : e.legacy.command) ?? ""));
+    else if (ref) card.child(div().text_size(11).text_color(t.dim).truncate().child(ref.kind === "set" ? `${(ref.steps ?? []).length} steps` : (ref.kind === "prompt" ? ref.prompt : ref.command) ?? ""));
+    if (kind === "prompt" && !e.legacy) {
+      card.child(area(e.input));
+      const chips = vars.flatMap((v) => v.fields.filter((fl) => fl === "response" || (fl === "stdout" && v.kind === "command")).map((fl) => [v.id, fl]));
+      if (chips.length) card.child(h_flex().flex_wrap().gap(4).items_center().child(div().text_size(11).text_color(t.dim).child("Pass:"))
+        .children(chips.map(([vid, fl]) => h_flex().id(`chip-${e.id}-${vid}-${fl}`).h(22).px(7).items_center().rounded(5).text_size(11).cursor_pointer().bg(t.chrome).border_1().border_color(t.border)
+          .hover((st) => st.bg(t.hover)).on_click((_e, cx) => { const cur = e.input.value(); e.input.set_value(cur + (cur && !/\s$/.test(cur) ? " " : "") + insertionFor("prompt", vid, fl)); cx.notify(); })
+          .child(`${vid}.${fl}`))));
+    } else if (kind && i > 0) {
+      card.child(div().text_size(11).text_color(t.dim).child("Earlier results reach this step as environment variables, e.g. $HERDR_" + (vars.at(-1)?.id ?? "S1").toUpperCase() + "_" + (vars.at(-1)?.kind === "command" ? "STDOUT" : "RESPONSE") + "."));
+    }
+    if (i > 0) card.child(label("RUN THIS STEP")).child(this.dropdown(`sw-${e.id}`, WHEN, e.when, f, t, (v, cx) => { e.when = v; cx.notify(); }));
+    return card.child(label("IF THIS STEP FAILS")).child(this.dropdown(`sf-${e.id}`, ON_FAIL, e.onFailure, f, t, (v, cx) => { e.onFailure = v; cx.notify(); }));
   }
 
   renderForm(t, cx) {
@@ -675,13 +922,44 @@ export default class Tasks extends View {
     if (f.step === 1) {
       col.child(label("KIND")).child(this.pills("kind", KINDS, f.kind, t, (v, cx) => { f.kind = v; cx.notify(); }))
         .child(label("NAME")).child(input(f.name));
-      if (f.kind === "command") {
+      if (f.kind === "set") {
+        col.child(label("STEPS: SAVED TASKS, PROMPTS AND SETS, RUN IN ORDER"));
+        f.steps.forEach((e, i) => col.child(this.renderStep(f, e, i, t, cx, label, input, area)));
+        // A dropdown of what already exists here: saved tasks, prompts and sets, then detected scripts (picking one saves it
+        // as a command step, nothing is saved as a task). Choosing an entry adds it as the next step.
+        const have = new Set(tasksFor(this.store, this.folder).map((x) => x.command));
+        const scripts = this.scripts.filter((sc) => !have.has(sc.command));
+        const opts = [["", "+ Add a step…"],
+          ...this.pickable(f).map((o) => [`task:${o.id}`, `${KIND_GLYPH[o.kind] ?? "$"} ${o.name}`]),
+          ...scripts.map((sc) => [`script:${sc.source}:${sc.name}`, `${KIND_GLYPH.script} ${sc.name} (${sc.source})`])];
+        col.child(this.dropdown("pick", opts, "", f, t, (v, cx) => {
+          if (v.startsWith("task:")) f.steps.push(this.stepEditor({ kind: "task", ref: v.slice(5) }, f.steps.map((x) => x.id)));
+          else if (v.startsWith("script:")) { const sc = scripts.find((x) => `script:${x.source}:${x.name}` === v); if (sc) return this.pickScript(f, sc, cx); }
+          cx.notify();
+        }));
+        if (opts.length === 1) col.child(div().text_size(11).text_color(t.dim).child("Nothing to add yet: no saved tasks and no scripts found in this folder."));
+      } else if (f.kind === "command") {
         col.child(label("COMMAND")).child(area(f.command)).child(label("SUBFOLDER (OPTIONAL)")).child(input(f.cwd));
       } else {
-        const agents = AGENTS.filter((x) => !this.installed || this.installed.includes(x) || x === f.agent).map((x) => [x, x]);
-        col.child(label("AGENT")).child(this.pills("agent", agents, f.agent, t, (v, cx) => { f.agent = v; cx.notify(); }))
-          .child(label("MODEL")).child(input(f.model))
+        const agents = (this.agentList ?? []).map((x) => [x.id, x.name]);
+        if (!agents.length) col.child(div().text_size(12).text_color(t.ansi1).child("No agent executable found on the PATH."));
+        if (f.agent && !agents.some(([k]) => k === f.agent) && agents.length) f.agent = agents[0][0];
+        const models = this.models?.[f.agent] ?? [];
+        const modelNow = f.model.value().trim();
+        const variants = this.variants?.[f.agent];
+        // With per-level variants the dropdown holds the base model; the id it maps to also carries the level.
+        const baseNow = variants ? Object.keys(variants).find((b) => b === modelNow || Object.values(variants[b]).includes(modelNow)) ?? "" : modelNow;
+        const effortNow = variants ? EFFORT_ORDER.find((l) => variants[baseNow]?.[l] === modelNow) ?? "" : f.effort;
+        const levels = variants ? EFFORT_ORDER.filter((l) => baseNow && variants[baseNow]?.[l]) : this.efforts?.[f.agent] ?? [];
+        col.child(label("AGENT")).child(this.pills("agent", agents, f.agent, t, (v, cx) => { f.agent = v; f.model.set_value(""); f.effort = ""; cx.notify(); }))
+          .child(label("MODEL"))
+          .child(models.length
+            ? this.dropdown("model", [["", "Agent default"], ...models], baseNow, f, t, (v, cx) => this.pickModel(f, v, cx))
+            : input(f.model))
+          .when(levels.length > 1, (el) => el.child(label("THINKING (EFFORT)")).child(this.range("effort", levels, effortNow, t, (v, cx) => this.pickEffort(f, v, cx))))
           .child(label("RUNS IN")).child(this.pills("ws", WORKSPACES, f.workspace, t, (v, cx) => { f.workspace = v; cx.notify(); }))
+          .child(label("PERMISSION")).child(this.pills("perm", PERMISSIONS, f.permission, t, (v, cx) => { f.permission = v; cx.notify(); }))
+          .child(div().text_size(11).text_color(f.permission === "full" ? t.ansi1 : t.dim).child(PERMISSION_NOTE[f.permission]))
           .child(label("PROMPT")).child(area(f.prompt));
       }
     } else {
@@ -692,7 +970,9 @@ export default class Tasks extends View {
         col.child(this.pills("sched", PRESETS.map(([n, c]) => [c, n]), f.cron.value().trim(), t, (c, cx) => { f.cron.set_value(c); this.preview(cx); cx.notify(); }))
           .child(input(f.cron))
           .child(div().text_size(12).text_color(res?.problem ? t.ansi1 : t.muted).child(res?.problem ? res.problem : res?.next?.length ? `Next: ${res.next.slice(0, 3).map(until).join(", ")}` : "Checking…"));
-        if (f.kind === "command") col.child(div().text_size(11).text_color(t.dim).child("Runs from your crontab, in the folder, without a terminal: output goes to a log and the exit code to this panel."));
+        col.child(label("IF THE COMPUTER WAS OFF OR ASLEEP"))
+          .child(this.dropdown("catchup", CATCHUP, f.catchUp, f, t, (v, cx) => { f.catchUp = v; cx.notify(); }));
+        col.child(div().text_size(11).text_color(t.dim).child("Run by the herdr-tasks service, without a terminal: output and exit code show in this panel. Runs missed while the machine slept are caught up."));
       } else col.child(div().text_size(12).text_color(t.dim).child("Saved as a task you can run from the list whenever you like."));
     }
     col.when(Boolean(f.error), (el) => el.child(div().text_size(12).text_color(t.ansi1).child(f.error)));
@@ -706,6 +986,6 @@ export default class Tasks extends View {
 
 // The row the panel builds adds display fields; the store keeps only the task.
 function stripRow(r) {
-  const { source, auto, folder, ...task } = r;
+  const { source, info, folder, ...task } = r;
   return task;
 }

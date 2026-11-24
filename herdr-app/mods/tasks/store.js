@@ -2,12 +2,12 @@
 // Prompt tasks live in herdr-automations' automations.yaml and are merged in by the panel.
 // Pure helpers; the panel reads and writes the JSON file with readTextFile / writeTextFile.
 
-export const emptyStore = () => ({ version: 1, folders: {} });
+export const emptyStore = () => ({ version: 1, folders: {}, pins: {} });
 
 export function parseStore(text) {
   try {
     const j = JSON.parse(text);
-    if (j && typeof j === "object" && j.folders && typeof j.folders === "object") return { version: 1, folders: j.folders };
+    if (j && typeof j === "object" && j.folders && typeof j.folders === "object") return { version: 1, folders: j.folders, pins: j.pins && typeof j.pins === "object" ? j.pins : {} };
   } catch {}
   return emptyStore();
 }
@@ -46,3 +46,15 @@ export function scheduled(store) {
 
 export const validTask = (t) =>
   Boolean(t && typeof t.id === "string" && typeof t.name === "string" && t.name.trim() && typeof t.command === "string" && t.command.trim());
+
+// Favourite scripts: detected scripts are not stored, so the store keeps their keys per folder.
+export const scriptKey = (s) => `${s.source}:${s.name}`;
+export const isPinnedScript = (store, folder, s) => (store.pins?.[folder] ?? []).includes(scriptKey(s));
+export function togglePinScript(store, folder, s) {
+  const key = scriptKey(s);
+  const cur = store.pins?.[folder] ?? [];
+  const next = cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key];
+  const pins = { ...(store.pins ?? {}) };
+  if (next.length) pins[folder] = next; else delete pins[folder];
+  return { ...store, pins };
+}

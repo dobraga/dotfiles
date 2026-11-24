@@ -12,8 +12,14 @@
         "effort": "high",
         "workspace": "worktree",
         "schedule": null,
-        "paused": false
+        "paused": false,
+        "pinned": true
       }
+    ]
+  },
+  "pins": {
+    "/home/dobraga/src/health-cockpit": [
+      "make:up"
     ]
   }
 }
