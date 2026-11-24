@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { parseDialog, lastMessage, parseStopped, parseClassifier, answerPlan, composeAnswers, decisionLine, hash, classifyPrompt } from "../asks.js";
-import { profilesOfFolder, inProfile, hiddenElsewhere, profileOf, classifierFor, buildItems, rank, normalizeSettings, pruneState, emptyState, parseState, needsYouCount, DEFAULT_SETTINGS } from "../items.js";
+import { autoSeenItems, profilesOfFolder, inProfile, hiddenElsewhere, profileOf, classifierFor, buildItems, rank, normalizeSettings, pruneState, emptyState, parseState, needsYouCount, DEFAULT_SETTINGS } from "../items.js";
 
 const PERMISSION = `
 ● Bash(rm -rf build)
@@ -242,4 +242,24 @@ test("Antigravity's dialog (> cursor, Navigate footer, Write-in row) is a card a
   const moved = { ...card, options: d.options.map((o) => ({ ...o, current: o.n === 3 })) };
   assert.deepEqual(answerPlan(moved, { option: 1 }), { keys: ["up", "up", "enter"] });
   assert.deepEqual(answerPlan({ mode: "dialog", nav: "number", options: d.options }, { option: 2 }), { keys: ["2"] });
+});
+
+test("auto-seen takes only informational rows of the active profile", () => {
+  const items = buildItems({
+    agents, runs, asks: [ask], settings: S, state: emptyState(),
+    notifs: [{ id: "i", prKey: "k", level: "info", title: "Merged", body: "", at: 1, profile: "work" }, { id: "w", prKey: "k", level: "warning", title: "Review", body: "", at: 2, profile: "work" }, { id: "o", prKey: "k", level: "info", title: "Other", body: "", at: 3, profile: "personal" }, ...notifs],
+  });
+  const keys = autoSeenItems(items, "work").map((i) => i.key);
+  assert.deepEqual(keys.sort(), ["pr-i"]); // r2 is already seen, n2 read; failures, reviews, asks and agents stay
+  assert.ok(autoSeenItems(items, null).some((i) => i.key === "pr-o"));
+  assert.equal(normalizeSettings({ autoSeen: false }).autoSeen, false);
+  assert.equal(normalizeSettings({}).autoSeen, true);
+});
+
+test("with the Agents tab open, finished agents are auto-seen too; blocked ones never", () => {
+  const items = buildItems({ agents, settings: S, state: emptyState() });
+  assert.deepEqual(autoSeenItems(items).map((i) => i.key), []);
+  assert.deepEqual(autoSeenItems(items, null, { agentsTab: true }).map((i) => i.key), ["ag-t2-6"]);
+  assert.equal(normalizeSettings({ autoSeenSeconds: 7 }).autoSeenSeconds, 5);
+  assert.equal(normalizeSettings({ autoSeenSeconds: 10 }).autoSeenSeconds, 10);
 });

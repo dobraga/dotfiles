@@ -330,6 +330,8 @@ export default class SettingsCustom extends View {
       .child(this.heading(t, "What the Inbox shows"))
       .children(SOURCES.map(([k, l]) => this.row(t, l, null, toggle(`st-inbox-src-${k}`, `sources.${k}`, true))))
       .child(this.row(t, "Toasts", "Which new items show a toast while Herdr is open: only for the selected space profile.", pills([["asks", "Asks"], ["all", "Everything"], ["off", "Off"]].map(([v, l]) => pill(`st-inbox-notify-${v}`, get("notify", "asks") === v, l, (cx) => this.updateInbox((o) => set(o, "notify", v), cx))))))
+      .child(this.row(t, "Mark info as seen", "Notices that do not need you (info alerts, successful runs) are marked seen a few seconds after you open the Inbox (finished agents too while the Agents tab is open). Asks, failures and reviews stay until you handle them.", toggle("st-inbox-autoseen", "autoSeen", true)))
+      .child(this.row(t, "Seen after", "How long the Inbox stays open before those notices are marked seen.", pills([3, 5, 10, 20].map((n) => pill(`st-inbox-autoseen-s-${n}`, get("autoSeenSeconds", 5) === n, `${n} s`, (cx) => this.updateInbox((o) => set(o, "autoSeenSeconds", n), cx))))))
       .child(this.row(t, "Decisions log", "Append every answer to data/inbox/decisions/<space>.md.", toggle("st-inbox-log", "asks.decisionsLog", true)))
       .child(this.row(t, "Keep seen and dismissed", "How long the Inbox remembers what you handled.", pills([7, 14, 30, 90].map((d) => pill(`st-inbox-ret-${d}`, get("retentionDays", 14) === d, `${d} days`, (cx) => this.updateInbox((o) => set(o, "retentionDays", d), cx))))))
       .when(Boolean(this.inboxError), (el) => el.child(div().pt(12).text_size(12.5).text_color(t.ansi1).child(this.inboxError)))

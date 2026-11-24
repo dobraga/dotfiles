@@ -7,12 +7,18 @@
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar } from "gpui-base";
-import { agents, spaces, appHome, checking, exec, hc, home, notify, readTextFile, run, setShared, shared, theme, writeTextFile } from "herdr";
-import { buildItems, rank, profilesOfFolder, hiddenElsewhere, inProfile, normalizeSettings, parseState, serializeState, pruneState, profileOf, classifierFor, needsYouCount, SECTIONS } from "./items.js";
+import { agents, layout, spaces, appHome, checking, exec, hc, home, notify, readTextFile, run, setShared, shared, theme, writeTextFile } from "herdr";
+import { buildItems, rank, autoSeenItems, profilesOfFolder, hiddenElsewhere, inProfile, normalizeSettings, parseState, serializeState, pruneState, profileOf, classifierFor, needsYouCount, SECTIONS } from "./items.js";
 import { parseDialog, lastMessage, parseStopped, classifyPrompt, parseClassifier, answerPlan, composeAnswers, decisionLine, hash, SUPPORTED_APPS } from "./asks.js";
 
 const FILTERS = [["all", "All"], ["asks", "Asks"], ["agents", "Agents"], ["prs", "PRs"], ["tasks", "Tasks"]];
 const MAX_CLASSIFY_PER_MIN = 6;
+
+function findNode(node, id) {
+  if (node?.id === id) return node;
+  for (const child of node?.children ?? []) { const f = findNode(child, id); if (f) return f; }
+  return null;
+}
 
 function since(ms) {
   if (!ms) return "";
@@ -44,10 +50,11 @@ export default class Inbox extends View {
       await Promise.all([this.loadRuns(), this.scan(cx)]);
       cx.notify();
     });
-    cx.timer.every(3000, (cx) => this.scan(cx));
+    cx.timer.every(1000, (cx) => this.scan(cx)); // cheap: a terminal is only read when its status or seq changed
     cx.timer.every(15000, async (cx) => { await this.loadFiles(); cx.notify(); });
     cx.timer.every(30000, async (cx) => { await this.loadRuns(); cx.notify(); });
     cx.timer.every(60000, (cx) => cx.notify());
+    cx.timer.every(1000, (cx) => this.autoSeen(cx));
   }
 
   // The runtime has no setTimeout: waits go through the view's timer.
@@ -282,6 +289,22 @@ export default class Inbox extends View {
     return reacted(6000);
   }
 
+  // The Inbox is on screen when the right panel is shown with this child selected.
+  visible() {
+    const root = layout();
+    const panel = findNode(root, "panel"), body = findNode(root, "panel-body");
+    return Boolean(panel && !panel.hidden && body?.active === "inbox");
+  }
+
+  // Informational rows (see autoSeenItems) are marked seen after the Inbox has been open for `autoSeenSeconds`.
+  autoSeen(cx) {
+    if (!this.settings?.autoSeen || !this.visible()) { this.openSince = null; return; }
+    this.openSince ??= Date.now();
+    if (Date.now() - this.openSince < (this.settings.autoSeenSeconds ?? 5) * 1000) return;
+    const todo = autoSeenItems(this.items(), this.activeProfile(), { agentsTab: this.filter === "agents" });
+    if (todo.length) this.markAllSeen(todo, cx);
+  }
+
   // ---- row actions ----
 
   markSeen(item, cx) {
@@ -310,7 +333,9 @@ export default class Inbox extends View {
     const prIds = new Set(todo.filter((i) => i.group === "prs").map((i) => i.data.id));
     const list = shared("forge.notifs");
     if (prIds.size && Array.isArray(list)) setShared("forge.notifs", list.map((n) => (prIds.has(n.id) ? { ...n, read: true } : n)));
-    if (todo.some((i) => i.group === "tasks")) exec(this.bin, ["seen", "--all"]).then(() => this.loadRuns()).then(() => cx.notify()).catch(() => {});
+    // One call per run, never `--all`: it would also mark failures that were not in this batch as read in the Tasks panel.
+    const runIds = todo.filter((i) => i.group === "tasks").map((i) => i.data.runId);
+    if (runIds.length) Promise.all(runIds.map((id) => exec(this.bin, ["seen", id]))).then(() => this.loadRuns()).then(() => cx.notify()).catch(() => {});
     cx.notify();
   }
 
@@ -336,7 +361,7 @@ export default class Inbox extends View {
     return buildItems({
       profileOfSpace: (id) => profileOf({ id }, sf),
       folderProfiles: (task) => profilesOfFolder(this.taskFolder?.get(task), spaces(), sf),
-      agents: this.agentList ?? [], notifs: Array.isArray(shared("forge.notifs")) ? shared("forge.notifs") : [], runs: this.runs,
+      agents: agents(), notifs: Array.isArray(shared("forge.notifs")) ? shared("forge.notifs") : [], runs: this.runs,
       asks: [...this.cards.values()], settings: this.settings, state: this.state,
     });
   }
@@ -423,7 +448,7 @@ export default class Inbox extends View {
         ["Dismiss", (x) => this.dismiss(i, x)],
       ];
       return h_flex().id(i.key).w_full().px(14).py(8).gap(10).items_start().border_b(1).border_color(t.border).cursor_pointer()
-        .hover((s) => s.bg(t.hover)).on_click(() => this.open(i)).opacity(i.seen ? 0.6 : 1)
+        .hover((s) => s.bg(t.hover)).on_click((_e, c) => { this.open(i); if (!i.seen) this.markSeen(i, c); }).opacity(i.seen ? 0.6 : 1)
         .child(badge(i.kind, i.tone))
         .child(v_flex().flex_1().min_w(0).gap(3)
           .child(h_flex().gap(8).items_center()
@@ -451,11 +476,12 @@ export default class Inbox extends View {
       .when(Boolean(this.classifierNote), (el) => el.child(div().px(14).py(4).text_size(11.5).text_color(t.dim).child(this.classifierNote)))
       .child(div().flex_1().min_h(0).relative()
         .child(v_flex().id("inbox-scroll").size_full().overflow_y_scroll()
-          .child(shown.length ? v_flex().children(body) : div().px(14).py(18).text_color(t.dim).child("Nothing needs you."))
-          .child(this.state.answered.length ? v_flex().pb(10)
-            .child(h_flex().px(14).pt(12).pb(4).gap(8).items_center().text_size(11).font_medium().text_color(t.dim).child(`ANSWERED · ${this.state.answered.length}`)
-              .child(div().flex_1()).child(link("clear-answered", "Clear", (c) => { this.state.answered = []; this.saveState(); c.notify(); })))
-            .children(this.state.answered.slice(-8).reverse().map((a, n) => div().id(`ans-${n}-${a.at}`).px(14).py(2).text_size(11.5).text_color(t.muted).truncate().child(`${a.space} · ${a.answer}`))) : div()))
-        .child(Scrollbar.vertical("inbox-sb").absolute().inset_0()));
+          .child(shown.length ? v_flex().children(body) : div().px(14).py(18).text_color(t.dim).child("Nothing needs you.")))
+        .child(Scrollbar.vertical("inbox-sb").absolute().inset_0()))
+      // Answered stays pinned at the bottom, outside the scroll, so it does not move as cards come and go.
+      .when(this.state.answered.length > 0, (el) => el.child(v_flex().flex_none().pb(8).border_t(1).border_color(t.border).bg(t.background)
+        .child(h_flex().px(14).pt(8).pb(3).gap(8).items_center().text_size(11).font_medium().text_color(t.dim).child(`ANSWERED · ${this.state.answered.length}`)
+          .child(div().flex_1()).child(link("clear-answered", "Clear", (c) => { this.state.answered = []; this.saveState(); c.notify(); })))
+        .children(this.state.answered.slice(-4).reverse().map((a, n) => div().id(`ans-${n}-${a.at}`).px(14).py(2).text_size(11.5).text_color(t.muted).truncate().child(`${a.space} · ${a.answer}`)))));
   }
 }

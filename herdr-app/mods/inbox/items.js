@@ -8,6 +8,8 @@ export const DEFAULT_SETTINGS = {
   asks: { enabled: true, plainText: false, decisionsLog: true },
   sources: { agents: true, asks: true, prs: true, tasks: true },
   notify: "asks",
+  autoSeen: true,
+  autoSeenSeconds: 5,
   retentionDays: 14,
 };
 
@@ -26,6 +28,8 @@ export function normalizeSettings(raw) {
     asks: { enabled: bool(asObj(j.asks).enabled, d.asks.enabled), plainText: bool(asObj(j.asks).plainText, d.asks.plainText), decisionsLog: bool(asObj(j.asks).decisionsLog, d.asks.decisionsLog) },
     sources: Object.fromEntries(Object.keys(d.sources).map((k) => [k, bool(asObj(j.sources)[k], d.sources[k])])),
     notify: ["asks", "all", "off"].includes(j.notify) ? j.notify : d.notify,
+    autoSeen: bool(j.autoSeen, d.autoSeen),
+    autoSeenSeconds: [3, 5, 10, 20].includes(Number(j.autoSeenSeconds)) ? Number(j.autoSeenSeconds) : d.autoSeenSeconds,
     retentionDays: Number.isFinite(days) && days >= 1 && days <= 365 ? Math.round(days) : d.retentionDays,
   };
 }
@@ -127,3 +131,11 @@ export const unseenCount = (items, profile = null) => items.filter((i) => inProf
 export const needsYouCount = (items, profile = null) => items.filter((i) => inProfile(i, profile) && !i.dismissed && i.section === 0 && (i.group === "asks" || !i.seen)).length;
 /** Unseen rows that belong to another profile: shown as a hint, as the PR panel does. */
 export const hiddenElsewhere = (items, profile) => (profile ? items.filter((i) => !inProfile(i, profile) && !i.dismissed && !i.seen).length : 0);
+
+/**
+ * Rows that do not depend on you (section 2: info notices, successful runs): marked seen on their own once the Inbox has been
+ * on screen for a moment; with the Agents tab open, finished agents too (you are looking at them). Asks, failures, review requests and agents waiting on you are never touched.
+ */
+export const autoSeenItems = (items, profile = null, { agentsTab = false } = {}) =>
+  items.filter((i) => inProfile(i, profile) && !i.dismissed && !i.seen && i.group !== "asks"
+    && ((i.section === 2 && i.group !== "agents") || (agentsTab && i.group === "agents" && i.kind === "DONE")));
