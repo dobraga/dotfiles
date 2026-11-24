@@ -1,0 +1,34 @@
+{
+  "agents-custom": {
+    "upstream": "agents",
+    "upstream_main_js": "1cf79c0c5f578fcd"
+  },
+  "changes-tabs": {
+    "upstream": "changes",
+    "upstream_main_js": "c5787c31283d4146"
+  },
+  "files-tabs": {
+    "upstream": "files",
+    "upstream_main_js": "8e4488e3fac5776c"
+  },
+  "space-folders": {
+    "upstream": "spaces",
+    "upstream_main_js": "8067902d05d475e4"
+  },
+  "tabs-folders": {
+    "upstream": "tabs",
+    "upstream_main_js": "ff113941edac1a02"
+  },
+  "workspace-status-usage": {
+    "upstream": "workspace-status",
+    "upstream_main_js": "a1db108171cdb9d7"
+  },
+  "workspace-chrome-custom": {
+    "upstream": "workspace-chrome",
+    "upstream_main_js": "7449619c284351c5"
+  },
+  "new-menu-custom": {
+    "upstream": "new-menu",
+    "upstream_main_js": "2f13095cb116c3cf"
+  }
+}
