@@ -26,6 +26,7 @@ import {
   exec,
 } from "herdr";
 import { ProfilesDialogController } from "./profiles-dialog.js";
+import { STATIC_MODELS, listsModels, shape, baseOf, pickModel as pickModelFor, pickEffort as pickEffortFor, effortOf, levelsOf } from "./agent-models.js";
 
 const I = (name) => `frame/settings/${name}.svg`;
 
@@ -38,6 +39,7 @@ const SECTIONS = [
   { id: "chat", title: "Herdr Chat", icon: "frame/welcome/messages.svg" },
   { id: "files", title: "Files", icon: "mods/files/file.svg" },
   { id: "tasks", title: "Tasks", icon: "mods/tasks/tasks.svg" },
+  { id: "inbox", title: "Inbox", icon: "mods/inbox/inbox.svg" },
   { id: "updates", title: "Updates", icon: "frame/settings/refresh.svg" },
   { id: "privacy", title: "Privacy", icon: "frame/settings/shield.svg" },
 ];
@@ -184,6 +186,154 @@ export default class SettingsCustom extends View {
         cx.notify();
       }
     });
+  }
+
+  // Inbox ----------------------------------------------------------------
+  // data/inbox/settings.json: read by the Inbox panel every 15 s. The raw object is kept so keys we do not show survive a save.
+
+  inboxSettingsFile() {
+    return `${appHome()}/data/inbox/settings.json`;
+  }
+
+  async loadInboxSettings() {
+    try { this.inboxRaw = JSON.parse((await readTextFile(this.inboxSettingsFile())) || "{}") ?? {}; } catch { this.inboxRaw = {}; }
+    // Only agents with a headless mode (herdr-tasks ask) that are really installed.
+    if (!this.inboxAgents) {
+      const found = await Promise.all(["claude", "agy"].map(async (a) => {
+        try { return (await exec("sh", ["-c", 'command -v "$1" >/dev/null 2>&1', "chk", a])).code === 0 ? a : null; } catch { return null; }
+      }));
+      this.inboxAgents = found.filter(Boolean);
+    }
+    // Models and effort levels per agent, discovered like the Tasks form does (one --help, plus `models` where it exists).
+    this.inboxProbe ??= {};
+    await Promise.all((this.inboxAgents ?? []).filter((a) => !this.inboxProbe[a]).map(async (a) => {
+      let help = "", list = null;
+      try { const r = await exec(a, ["--help"], { timeout: 10000 }); help = `${r.stdout}\n${r.stderr}`; } catch {}
+      if (!STATIC_MODELS[a] && listsModels(help)) { try { list = (await exec(a, ["models"], { timeout: 20000 })).stdout; } catch {} }
+      this.inboxProbe[a] = shape(a, help, list);
+    }));
+    for (const [id, input] of Object.entries(this.inboxInputs ?? {})) {
+      const c = id === "" ? this.inboxRaw.classifier : this.inboxRaw.profiles?.[id];
+      input.set_value(c?.model ?? "");
+    }
+  }
+
+  // InputState.new cannot run in render: made here, from the click that opens the tab (one per target, kept on the view).
+  ensureInboxInputs() {
+    this.inboxInputs ??= {};
+    const profiles = shared("space-folders")?.[""]?.profiles;
+    for (const id of ["", ...(Array.isArray(profiles) ? profiles.map((p) => p.id) : [])]) {
+      if (this.inboxInputs[id]) continue;
+      const input = InputState.new({ placeholder: "or a model id" });
+      input.on("change", (_e, cx) => {
+        const path = id === "" ? "classifier" : `profiles.${id}`;
+        const cur = (id === "" ? this.inboxRaw?.classifier : this.inboxRaw?.profiles?.[id]) ?? {};
+        const v = input.value().trim();
+        if (v !== (cur.model ?? "")) this.updateInbox((o) => { const c = id === "" ? (o.classifier ??= {}) : ((o.profiles ??= {})[id] ??= {}); c.model = v; }, cx);
+      });
+      this.inboxInputs[id] = input;
+    }
+  }
+
+  updateInbox(mutate, cx) {
+    const next = JSON.parse(JSON.stringify(this.inboxRaw ?? {}));
+    mutate(next);
+    this.inboxRaw = next;
+    this.inboxError = null;
+    cx.notify();
+    this.inboxTask?.cancel();
+    this.inboxTask = cx.timer.after(400, async (cx) => {
+      try {
+        await exec("mkdir", ["-p", `${appHome()}/data/inbox`]);
+        const file = this.inboxSettingsFile();
+        await writeTextFile(file, JSON.stringify(this.inboxRaw, null, 2) + "\n", await readTextFile(file));
+      } catch (e) {
+        this.inboxError = String(e?.message ?? e);
+        notify({ title: "Failed to save Inbox settings", body: this.inboxError, level: "error" });
+      } finally { cx.notify(); }
+    });
+  }
+
+  // The Tasks form's dropdown and stepped range, drawn the same way (the toolkit's Select does not open from a plain click).
+  inboxDropdown(id, options, value, t, pick) {
+    const open = this.inboxOpen === id;
+    const current = options.find(([v]) => v === value);
+    const trigger = h_flex().id(`${id}-trigger`).w(300).h(30).px(9).gap(6).items_center().rounded(6).bg(t.raised).border_1()
+      .border_color(open ? t.accent : t.border).cursor_pointer().hover((x) => x.bg(t.hover))
+      .on_click((_e, cx) => { this.inboxOpen = open ? null : id; cx.notify(); })
+      .child(div().flex_1().min_w(0).truncate().text_size(12.5).child(current ? current[1] : value || "Agent default"))
+      .child(div().text_size(10).text_color(t.dim).child(open ? "▴" : "▾"));
+    const list = v_flex().id(`${id}-list`).w(300).max_h(240).overflow_y_scrollbar().p(4).gap(1).rounded(8).bg(t.popover).border_1().border_color(t.border)
+      .children(options.map(([v, label]) => h_flex().id(`${id}-opt-${v || "d"}`).h(26).px(8).items_center().rounded(5).text_size(12).cursor_pointer().gap(8)
+        .bg(v === value ? t.selected : t.popover).text_color(v === value ? t.foreground : t.muted).hover((x) => x.bg(t.hover).text_color(t.foreground))
+        .on_click((_e, cx) => { this.inboxOpen = null; pick(v, cx); })
+        .child(div().flex_1().min_w(0).truncate().child(label))
+        .child(div().flex_none().text_size(10).text_color(t.dim).child(v))));
+    return v_flex().gap(4).child(trigger).when(open, (el) => el.child(list));
+  }
+
+  // "Default" then each level as a segment, filled up to the chosen one; clicking the chosen one again goes back to Default.
+  inboxRange(id, levels, value, t, pick) {
+    const at = levels.indexOf(value);
+    return v_flex().gap(4).w(300)
+      .child(h_flex().gap(3).children(levels.map((lv, i) => div().id(`${id}-${lv}`).flex_1().h(8).rounded(4).cursor_pointer()
+        .bg(i <= at ? t.accent : t.raised).hover((x) => x.opacity(0.8)).on_click((_e, cx) => pick(i === at ? "" : lv, cx)))))
+      .child(h_flex().children(levels.map((lv, i) => div().flex_1().text_size(10.5).text_color(i === at ? t.foreground : t.dim).child(lv))))
+      .child(div().text_size(11).text_color(t.dim).child(at < 0 ? "Effort: the agent decides" : `Effort: ${value}`));
+  }
+
+  inboxTab(t) {
+    const raw = this.inboxRaw ?? {};
+    const get = (path, d) => path.split(".").reduce((o, k) => o?.[k], raw) ?? d;
+    const set = (o, path, v) => { const ks = path.split("."); let c = o; for (const k of ks.slice(0, -1)) c = c[k] = c[k] && typeof c[k] === "object" ? c[k] : {}; c[ks.at(-1)] = v; };
+    const pill = (id, on, label, onClick) => div()
+      .id(id).px(10).py(5).rounded(7).cursor_pointer().text_size(12.5).border_1()
+      .border_color(on ? t.accent : t.border).bg(on ? t.selected : t.raised).text_color(on ? t.foreground : t.muted)
+      .hover((x) => x.bg(t.hover)).on_click((_e, cx) => onClick(cx)).child(label);
+    const pills = (list) => h_flex().gap(6).flex_wrap().children(list);
+    const toggle = (id, path, d) => pills([[true, "On"], [false, "Off"]].map(([v, l]) => pill(`${id}-${l}`, get(path, d) === v, l, (cx) => this.updateInbox((o) => set(o, path, v), cx))));
+    const agents = this.inboxAgents ?? [];
+    // One chooser per target: the default, and each space profile (personal, work...) that may override it.
+    const profiles = shared("space-folders")?.[""]?.profiles;
+    const targets = [{ id: "", name: "Default", path: "classifier" }, ...(Array.isArray(profiles) ? profiles.map((p) => ({ id: p.id, name: p.name ?? p.id, path: `profiles.${p.id}` })) : [])];
+    const chooser = (tg) => {
+      const cur = get(tg.path, null);
+      const isDefault = tg.id === "";
+      const agent = cur?.agent || (isDefault ? "claude" : "");
+      const col = v_flex().gap(6);
+      col.child(pills([
+        ...(isDefault ? [] : [pill(`st-inbox-${tg.id}-inherit`, !agent, "Use default", (cx) => this.updateInbox((o) => { if (o.profiles) delete o.profiles[tg.id]; }, cx))]),
+        ...agents.map((a) => pill(`st-inbox-${tg.id}-ag-${a}`, agent === a, a === "agy" ? "Antigravity" : "Claude Code", (cx) => { this.updateInbox((o) => { set(o, `${tg.path}.agent`, a); set(o, `${tg.path}.model`, ""); set(o, `${tg.path}.effort`, ""); }, cx); this.inboxInputs?.[tg.id]?.set_value(""); })),
+      ]));
+      if (agent) {
+        const pr = this.inboxProbe?.[agent];
+        const models = pr?.models ?? [];
+        const modelNow = cur?.model ?? "";
+        const baseNow = baseOf(pr?.variants, modelNow);
+        const apply = (r, cx) => { this.updateInbox((o) => { set(o, `${tg.path}.model`, r.model); set(o, `${tg.path}.effort`, r.effort ?? ""); }, cx); this.inboxInputs?.[tg.id]?.set_value(r.model); };
+        const levels = levelsOf(pr?.variants, modelNow, pr?.efforts);
+        col.child(models.length
+          ? this.inboxDropdown(`st-inbox-${tg.id}-model`, [["", "Agent default"], ...models], baseNow, t, (v, cx) => apply(pickModelFor(pr.variants, v, cur?.effort ?? ""), cx))
+          : (this.inboxInputs?.[tg.id] ? div().w(260).h(28).px(8).rounded(6).border_1().border_color(t.border).bg(t.background).child(Input.new(this.inboxInputs[tg.id]).w_full().h_full().text_size(12.5).text_color(t.foreground)) : div()));
+        if (levels.length > 1) col.child(this.inboxRange(`st-inbox-${tg.id}-effort`, levels, effortOf(pr?.variants, modelNow, cur?.effort ?? ""), t, (lv, cx) => apply(pickEffortFor(pr?.variants, modelNow, lv), cx)));
+      }
+      return this.row(t, tg.name, isDefault ? "Used for every space without its own choice." : `Used for the spaces of the ${tg.name} profile.`, col);
+    };
+    const SOURCES = [["agents", "Agents"], ["asks", "Asks"], ["prs", "PR alerts"], ["tasks", "Task runs"]];
+    return v_flex()
+      .w_full()
+      .child(this.heading(t, "Inbox"))
+      .child(this.row(t, "Ask cards", "Show what blocked agents are asking, and answer from the card.", toggle("st-inbox-asks", "asks.enabled", true)))
+      .child(this.row(t, "Detect plain-text questions", "When an agent ends a turn asking you something in prose, a model reads that message to decide. It spends a small call per finished turn (at most 6 a minute) and is off by default. Dialogs and errors never need it.", toggle("st-inbox-plain", "asks.plainText", false)))
+      .child(this.heading(t, "Agent and model for detection"))
+      .children(agents.length ? targets.map(chooser) : [div().py(8).text_size(12.5).text_color(t.dim).child("No supported agent (claude, agy) found on the PATH.")])
+      .child(this.heading(t, "What the Inbox shows"))
+      .children(SOURCES.map(([k, l]) => this.row(t, l, null, toggle(`st-inbox-src-${k}`, `sources.${k}`, true))))
+      .child(this.row(t, "Toasts", "Which new items show a toast while Herdr is open: only for the selected space profile.", pills([["asks", "Asks"], ["all", "Everything"], ["off", "Off"]].map(([v, l]) => pill(`st-inbox-notify-${v}`, get("notify", "asks") === v, l, (cx) => this.updateInbox((o) => set(o, "notify", v), cx))))))
+      .child(this.row(t, "Decisions log", "Append every answer to data/inbox/decisions/<space>.md.", toggle("st-inbox-log", "asks.decisionsLog", true)))
+      .child(this.row(t, "Keep seen and dismissed", "How long the Inbox remembers what you handled.", pills([7, 14, 30, 90].map((d) => pill(`st-inbox-ret-${d}`, get("retentionDays", 14) === d, `${d} days`, (cx) => this.updateInbox((o) => set(o, "retentionDays", d), cx))))))
+      .when(Boolean(this.inboxError), (el) => el.child(div().pt(12).text_size(12.5).text_color(t.ansi1).child(this.inboxError)))
+      .child(div().pt(12).text_size(12).text_color(t.dim).child(`Settings file: ${this.inboxSettingsFile()}`));
   }
 
   async loadFilesSettings() {
@@ -1437,6 +1587,7 @@ export default class SettingsCustom extends View {
               this.handle.focus();
               if (s.id === "machines") cx.spawn(async (cx) => { await this.loadMachines(); cx.notify(); });
               if (s.id === "git") this.profilesCtrl.ensureLoaded(cx);
+              if (s.id === "inbox") { this.ensureInboxInputs(); cx.spawn(async (cx) => { await this.loadInboxSettings(); cx.notify(); }); }
               if (s.id === "tasks") cx.spawn(async (cx) => { await this.loadTasksSettings(); cx.notify(); });
               if (s.id === "files") cx.spawn(async (cx) => { await this.loadFilesSettings(); cx.notify(); });
               if (s.id === "chat") cx.spawn(async (cx) => { await this.loadChatState(); cx.notify(); });
@@ -1536,6 +1687,8 @@ export default class SettingsCustom extends View {
                                 ? this.filesTab(t)
                                 : this.section === "tasks"
                                 ? this.tasksTab(t)
+                                : this.section === "inbox"
+                                ? this.inboxTab(t)
                                 : this.section === "privacy"
                                   ? this.privacy(t)
                                   : this.updates(t),

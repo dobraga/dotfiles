@@ -317,7 +317,7 @@ export default class TabsFolders extends View {
     // The welcome flow saves [] before any panel is picked; treat that as the default.
     const picked = shared("workspace.panels");
     const basePanels = Array.isArray(picked) && picked.length ? picked : ["files", "changes"];
-    const enabled = ["prs", "loadout", "tasks"].reduce((acc, id) => (acc.includes(id) ? acc : [...acc, id]), basePanels);
+    const enabled = ["prs", "loadout", "tasks", "inbox"].reduce((acc, id) => (acc.includes(id) ? acc : [...acc, id]), basePanels);
     this.syncPanel(space, panel, body, enabled);
     const forgeState = shared("forge.state");
     const activeProf = shared("space-folders.profile") || null;
@@ -346,6 +346,10 @@ export default class TabsFolders extends View {
           else { run("layout.select", { stack: "panel-body", child: id }); run("layout.show", { id: "panel" }); }
         }).child(svg(icon).size(14)).child(label).when(Boolean(extra), (el) => el.child(extra));
     };
+    const inboxCount = shared("inbox.count") ?? { needsYou: 0 };
+    const inboxBadge = inboxCount.needsYou > 0
+      ? div().px(4).rounded(4).bg(t.ansi1).text_size(10).text_color(t.background).child(String(inboxCount.needsYou))
+      : null;
     const prBadge = prSummary.total > 0 || prSummary.alert
       ? h_flex()
           .gap(4)
@@ -369,6 +373,7 @@ export default class TabsFolders extends View {
       .when(enabled.includes("prs"), el => el.child(panelButton("prs", "PRs", "mods/prs-panel/pull-request.svg", prBadge)))
       .when(enabled.includes("loadout"), el => el.child(panelButton("loadout", "Loadout", "mods/loadout/loadout.svg")))
       .when(enabled.includes("tasks"), el => el.child(panelButton("tasks", "Tasks", "mods/tasks/tasks.svg")))
+      .when(enabled.includes("inbox"), el => el.child(panelButton("inbox", "Inbox", "mods/inbox/inbox.svg", inboxBadge)))
       .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/tabs-folders/win-min.svg").size(16) : "−", () => run("window.minimize")))
         .child(button("maximize", w.platform === "windows" ? svg(`mods/tabs-folders/${w.maximized ? "win-restore" : "win-max"}.svg`).size(16) : "□", () => run("window.maximize")))
         .child(button("close-window", w.platform === "windows" ? svg("mods/tabs-folders/win-close.svg").size(16) : svg("mods/pane/close.svg").size(13), () => run("window.close"))));

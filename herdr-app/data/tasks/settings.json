@@ -1,0 +1,5 @@
+{
+  "timeoutMinutes": 30,
+  "catchUpMinutes": 720,
+  "notify": "failures"
+}

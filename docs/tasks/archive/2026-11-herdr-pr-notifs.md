@@ -32,3 +32,6 @@ Keep the native `agents` mod exactly as it is today and add a compact PR notific
 - [ ] Click to open in `prs-panel`; dismiss and mark read
 - [ ] Automated checks: `node --check`, `herdr-app check`, `herdr-app status`, `herdr-app shot`
 - [ ] Live manual verification in Herdr UI (NOT tested live until done)
+
+## Status (2026-11-23)
+Superseded and removed: the Inbox (`plan-inbox-tab.md`) covers PR alerts; `mods/pr-notifs` and its sidebar block were deleted. `forge.notifs` (produced by workspace-status-usage) is still read by the Inbox.

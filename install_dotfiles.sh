@@ -244,6 +244,13 @@ if [ -d "${HERDR_SRC}" ]; then
   if [ -f "${HERDR_SRC}/data/tasks/tasks.json" ]; then
     link_herdr "${HERDR_SRC}/data/tasks/tasks.json" "${HERDR_HOME}/data/tasks/tasks.json"
   fi
+  # Per-mod settings written by the settings screens (Tasks, Inbox, Files...): data/<mod>/settings.json. Runtime state
+  # (state.json, runs, decisions, jobs/) is not versioned.
+  for settings in "${HERDR_SRC}/data/"*/settings.json; do
+    [ -f "$settings" ] || continue
+    mod_name="$(basename "$(dirname "$settings")")"
+    link_herdr "$settings" "${HERDR_HOME}/data/${mod_name}/settings.json"
+  done
   echo "  - Linked Herdr config, layouts, and mods -> ${HERDR_SRC}"
 
   # herdr-chat fork (Antigravity ACP provider + unified Ctrl+T launcher)

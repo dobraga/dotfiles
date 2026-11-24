@@ -1,0 +1,22 @@
+{
+  "profiles": {
+    "personal": {
+      "agent": "agy",
+      "model": "gemini-3.8-flash-low",
+      "effort": ""
+    },
+    "work": {
+      "agent": "claude",
+      "model": "haiku",
+      "effort": "medium"
+    }
+  },
+  "classifier": {
+    "agent": "agy",
+    "model": "gemini-3.8-flash-low",
+    "effort": ""
+  },
+  "sources": {
+    "prs": false
+  }
+}
