@@ -3,7 +3,7 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, Input, InputState } from "gpui-base";
 import { spaces, panes, focused, exec, theme, run, shared, setShared } from "herdr";
-import { TOOLS, SCAN_SCRIPT, buildSpecs, flattenSpecs, parseRecords, pluginSpecs, buildInventory } from "./scan.js";
+import { TOOLS, SCAN_SCRIPT, buildSpecs, flattenSpecs, parseRecords, pluginSpecs, buildInventory, parseMcpList } from "./scan.js";
 
 function location() {
   const space = spaces().find((s) => s.active), f = focused();
@@ -60,6 +60,13 @@ function openFileTab({ spaceId, path, root, on, name }) {
   run("tab.new", { name, space: spaceId, mod: "file-view", props: { slotId, ...entry, beforeTabs: [...spaceTabIds] } });
 }
 
+const TABS = [
+  { id: "skills", title: "Skills" },
+  { id: "mcps", title: "MCPs" },
+  { id: "plugins", title: "Plugins" },
+];
+const CONN_TTL = 5 * 60 * 1000;
+
 const SCOPES = [
   { id: "all", title: "All" },
   { id: "project", title: "Project" },
@@ -69,14 +76,15 @@ const SCOPES = [
 
 export default class Loadout extends View {
   init(_props, cx) {
-    this.inv = { tools: [], skills: [], mcps: [] };
+    this.inv = { tools: [], skills: [], mcps: [], plugins: [] };
+    this.tab = "skills";
+    this.conn = { list: [], at: 0, loading: false, error: null, showUnused: false, key: null };
     this.context = null;
     this.loading = false;
     this.error = null;
     this.scope = "all";
     this.tool = "all";
     this.expanded = new Set();
-    this.collapsed = new Set(["skills:plugin", "mcps:plugin"]);
     this.copied = null;
     this.filter = "";
     this.input = InputState.new({ placeholder: "Filter skills and MCP servers…" });
@@ -84,26 +92,50 @@ export default class Loadout extends View {
       this.filter = this.input.value().trim().toLowerCase();
       cx.notify();
     });
-    this.refresh(cx, true);
+    this.refresh(cx, true, true);
     cx.timer.every(30000, (cx) => this.refresh(cx, true));
   }
 
-  refresh(cx, force = false) {
+  refresh(cx, force = false, manual = false) {
     const loc = location();
     const next = JSON.stringify(loc);
     if (!force && next === this.context?.key) return;
     if (this.loading) return;
     this.context = { key: next, ...loc };
-    if (!loc.cwd) { this.error = "No folder in active space"; this.inv = { tools: [], skills: [], mcps: [] }; cx.notify(); return; }
+    if (!loc.cwd) { this.error = "No folder in active space"; this.inv = { tools: [], skills: [], mcps: [], plugins: [] }; cx.notify(); return; }
     this.loading = true;
     cx.spawn(async (cx) => {
       try {
         const inv = await scan(loc.cwd, loc.on);
         if (this.context?.key === next) { this.inv = inv; this.error = null; }
+        this.fetchConnectors(cx, loc.on, manual);
       } catch (e) {
         this.error = String(e?.message ?? e);
       } finally {
         this.loading = false;
+        cx.notify();
+      }
+    });
+  }
+
+  // `claude mcp list` takes ~16 s: run it after the file scan, cached per machine, never blocking the tabs.
+  fetchConnectors(cx, on, force) {
+    const c = this.conn;
+    const k = on ?? "";
+    if (c.loading) return;
+    if (!force && c.key === k && Date.now() - c.at < CONN_TTL) return;
+    if (!this.inv.tools.some((t) => t.id === "claude")) { c.list = []; c.error = null; return; }
+    c.loading = true;
+    cx.spawn(async (cx) => {
+      try {
+        const r = await exec("sh", ["-c", "command -v claude >/dev/null 2>&1 && timeout 45 claude mcp list 2>&1"], { on });
+        const list = parseMcpList(r.stdout);
+        if (!list.length && r.code !== 0) throw new Error((r.stdout || r.stderr || "claude mcp list failed").trim().split("\n").pop());
+        c.list = list; c.error = null; c.at = Date.now(); c.key = k;
+      } catch (e) {
+        c.error = String(e?.message ?? e);
+      } finally {
+        c.loading = false;
         cx.notify();
       }
     });
@@ -197,32 +229,62 @@ export default class Loadout extends View {
   }
 
   section(t, id, title, rows) {
-    const groups = [
-      { key: "own", label: null, rows: rows.filter((r) => r.scope !== "plugin") },
-      { key: "plugin", label: "Plugins", rows: rows.filter((r) => r.scope === "plugin") },
-    ];
-    const groupOf = (name) => groups.find((g) => g.key === name);
+    const rank = (r) => (r.scope === "plugin" ? 2 : r.scope === "global" ? 1 : 0); // project/local, global, then plugin
+    const sorted = rows.map((r, i) => [r, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([r]) => r);
+    const el = v_flex().w_full().gap(2);
+    sorted.forEach((r, i) => el.child(this.row(t, r, i, id)));
+    if (!sorted.length) el.child(div().px(8).py(4).text_size(12).text_color(t.dim).child("None found"));
+    return el;
+  }
+
+  pluginRow(t, p, i) {
+    const id = `plugin-${p.name}-${i}`;
+    const open = this.expanded.has(id);
+    const loc = this.context ?? {};
+    const btn = (bid, label, onClick) =>
+      div().id(`${id}-${bid}`).h(22).px(8).flex().items_center().rounded(5).cursor_pointer().text_size(11.5).bg(t.raised).text_color(t.muted)
+        .hover((s) => s.bg(t.hover).text_color(t.foreground)).on_click(onClick).child(label);
+    const show = (tab, cx) => { cx.stop_propagation(); this.filter = p.name.toLowerCase(); this.input.set_value(p.name); this.scope = "plugin"; this.tab = tab; cx.notify(); };
+    return v_flex().id(id).w_full().px(8).py(6).rounded(6).gap(3).cursor_pointer().hover((s) => s.bg(t.hover))
+      .on_click((_e, cx) => { open ? this.expanded.delete(id) : this.expanded.add(id); cx.notify(); })
+      .child(h_flex().gap(6).items_center().min_w(0)
+        .child(div().truncate().font_medium().text_size(12.5).child(p.name))
+        .child(this.badge(t, "plugin", p.version || ""))
+        .child(div().flex_1())
+        .child(div().flex_none().text_size(10.5).text_color(t.dim).child(`${p.skills} skills · ${p.mcps} MCPs`)))
+      .child(div().text_size(11.5).text_color(t.dim).child(`${p.marketplace} · ${p.scope}`))
+      .when(open, (el) => el.child(v_flex().gap(4).pt(4)
+        .child(div().text_size(11).text_color(t.muted).child(p.path))
+        .child(h_flex().gap(6).pt(2)
+          .child(btn("skills", "Show skills", (_e, cx) => show("skills", cx)))
+          .child(btn("mcps", "Show MCPs", (_e, cx) => show("mcps", cx)))
+          .child(btn("copy", this.copied === id ? "Copied" : "Copy path", (_e, cx) => { cx.stop_propagation(); this.copy(p.path, id, cx); })))));
+  }
+
+  connectors(t) {
+    const c = this.conn;
+    const q = this.filter;
+    const all = c.list.filter((x) => !q || `${x.name} ${x.url}`.toLowerCase().includes(q));
+    const used = all.filter((x) => x.status !== "auth");
+    const unused = all.filter((x) => x.status === "auth");
+    const dot = (st) => div().flex_none().w(8).h(8).rounded(4).bg(st === "connected" ? t.ansi2 : st === "auth" ? (t.ansi3 ?? t.muted) : t.ansi1);
+    const row = (x) => h_flex().gap(8).px(8).py(4).items_center().min_w(0)
+      .child(dot(x.status))
+      .child(div().truncate().text_size(12.5).child(x.name))
+      .child(div().flex_1())
+      .child(div().flex_none().text_size(10.5).text_color(t.dim).child(x.status === "auth" ? "needs sign-in" : x.status === "failed" ? "failed" : "connected"));
     const el = v_flex().w_full().gap(2)
-      .child(div().px(8).pt(10).pb(4).text_size(11).font_semibold().text_color(t.dim).child(`${title.toUpperCase()} (${rows.filter((r) => r.scope !== "plugin").length})`));
-    const rank = (r) => (r.scope === "global" ? 1 : 0); // project/local first, then global
-    const own = groupOf("own").rows.map((r, i) => [r, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([r]) => r);
-    own.forEach((r, i) => el.child(this.row(t, r, i, id)));
-    const plug = groupOf("plugin").rows;
-    if (plug.length) {
-      const gk = `${id}:plugin`;
-      // Plugin rows start collapsed; choosing the Plugin scope chip or filtering expands them.
-      const forceOpen = this.scope === "plugin" || Boolean(this.filter);
-      const open = forceOpen || !this.collapsed.has(gk);
-      el.child(
-        h_flex().id(`${gk}-toggle`).h(24).px(8).gap(6).items_center().rounded(6).cursor_pointer().text_size(11.5).text_color(t.muted)
-          .hover((s) => s.bg(t.hover))
-          .on_click((_e, cx) => { this.collapsed.has(gk) ? this.collapsed.delete(gk) : this.collapsed.add(gk); cx.notify(); })
-          .child(div().w(10).child(open ? "▾" : "▸"))
-          .child(`Plugin ${title.toLowerCase()} (${plug.length})`),
-      );
-      if (open) plug.forEach((r, i) => el.child(this.row(t, r, i, `${id}-p`)));
+      .child(div().px(8).pt(14).pb(4).text_size(11).font_semibold().text_color(t.dim)
+        .child(`CLAUDE.AI CONNECTORS (${all.length})${c.loading ? " · checking…" : ""}`));
+    if (c.error) el.child(div().px(8).py(4).text_size(11.5).text_color(t.ansi1).child(`Connector status unavailable: ${c.error}`));
+    used.forEach((x) => el.child(row(x)));
+    if (unused.length) {
+      el.child(h_flex().id("lo-conn-unused").h(24).px(8).gap(6).items_center().rounded(6).cursor_pointer().text_size(11.5).text_color(t.muted)
+        .hover((s) => s.bg(t.hover)).on_click((_e, cx) => { c.showUnused = !c.showUnused; cx.notify(); })
+        .child(div().w(10).child(c.showUnused || q ? "▾" : "▸")).child(`Needs sign-in (${unused.length})`));
+      if (c.showUnused || q) unused.forEach((x) => el.child(row(x)));
     }
-    if (!own.length) el.child(div().px(8).py(4).text_size(12).text_color(t.dim).child(plug.length ? "None outside plugins" : "None found"));
+    if (!all.length && !c.loading && !c.error) el.child(div().px(8).py(4).text_size(12).text_color(t.dim).child("None found"));
     return el;
   }
 
@@ -231,6 +293,9 @@ export default class Loadout extends View {
     if (key() !== this.context?.key) this.refresh(cx);
     const skills = this.visible(this.inv.skills);
     const mcps = this.visible(this.inv.mcps);
+    const q = this.filter;
+    const plugins = (this.inv.plugins ?? []).filter((p) => !q || `${p.name} ${p.marketplace}`.toLowerCase().includes(q));
+    const counts = { skills: skills.length, mcps: mcps.length + this.conn.list.length, plugins: plugins.length };
     const folder = this.context?.cwd?.split(/[\\/]/).pop() ?? "";
     return v_flex().id("loadout").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background)
       .border_1().border_color(t.border).text_color(t.foreground).text_size(13)
@@ -238,7 +303,7 @@ export default class Loadout extends View {
         h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border)
           .child(div().font_semibold().child("Loadout"))
           .child(div().flex_1().min_w(0).truncate().text_right().text_size(12).text_color(t.dim).child(folder))
-          .child(this.chip(t, "lo-refresh", this.loading ? "…" : "↻", false, (_e, cx) => this.refresh(cx, true))),
+          .child(this.chip(t, "lo-refresh", this.loading || this.conn.loading ? "…" : "↻", false, (_e, cx) => this.refresh(cx, true, true))),
       )
       .child(
         v_flex().flex_none().px(10).py(8).gap(6).border_b(1).border_color(t.border)
@@ -251,11 +316,21 @@ export default class Loadout extends View {
           ),
       )
       .child(
+        h_flex().flex_none().px(10).pt(6).gap(4).border_b(1).border_color(t.border)
+          .children(TABS.map((x) => div().id(`lo-tab-${x.id}`).h(26).px(10).flex().items_center().cursor_pointer().text_size(12)
+            .border_b(2).border_color(this.tab === x.id ? t.accent : "transparent")
+            .text_color(this.tab === x.id ? t.foreground : t.muted)
+            .hover((s) => s.text_color(t.foreground)).on_click((_e, cx) => { this.tab = x.id; cx.notify(); })
+            .child(`${x.title} ${counts[x.id]}`))),
+      )
+      .child(
         v_flex().id("loadout-body").flex_1().min_h(0).overflow_y_scrollbar().p(6)
           .when(Boolean(this.error), (el) => el.child(div().p(8).text_size(12).text_color(t.ansi1).child(this.error)))
           .when(!this.error && this.loading && !this.inv.skills.length && !this.inv.mcps.length, (el) => el.child(div().p(8).text_size(12).text_color(t.dim).child("Scanning…")))
-          .child(this.section(t, "skills", "Skills", skills))
-          .child(this.section(t, "mcps", "MCP servers", mcps)),
+          .when(this.tab === "skills", (el) => el.child(this.section(t, "skills", "Skills", skills)))
+          .when(this.tab === "mcps", (el) => el.child(this.section(t, "mcps", "MCP servers", mcps)).child(this.connectors(t)))
+          .when(this.tab === "plugins", (el) => el.child(v_flex().w_full().gap(2).children(plugins.map((p, i) => this.pluginRow(t, p, i)))
+            .when(!plugins.length, (e) => e.child(div().px(8).py(4).text_size(12).text_color(t.dim).child("None found"))))),
       );
   }
 }

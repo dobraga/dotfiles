@@ -23,11 +23,11 @@
 5. **Failure handling:** timeout 45 s, on error show "Connector status unavailable" with the message; never breaks the file-based tabs.
 
 ## Todo
-- [ ] `scan.js`: `parseMcpList(stdout)` + plugin summary (`buildPlugins`) with skill/MCP/hook counts
-- [ ] `main.js`: tab state and tab bar, remove plugin group, per-tab render
-- [ ] `main.js`: Plugins tab rows and "show skills/MCPs" action
-- [ ] `main.js`: async connectors fetch with cache, status dots, "Show unused" toggle
-- [ ] Verify: `node` check of parsers against the real `claude mcp list` output and `installed_plugins.json`; build/lint. **UI not testable headless: validated by build/tests only, NOT tested live**; manual steps listed in the PR
+- [x] `scan.js`: `parseMcpList(stdout)` + plugin summary (`buildPlugins`) with skill/MCP/hook counts
+- [x] `main.js`: tab state and tab bar, remove plugin group, per-tab render
+- [x] `main.js`: Plugins tab rows and "show skills/MCPs" action
+- [x] `main.js`: async connectors fetch with cache, status dots, "Show unused" toggle
+- [x] Verify: `node` check of parsers against the real `claude mcp list` output and `installed_plugins.json`; build/lint. **UI not testable headless: validated by build/tests only, NOT tested live**; manual steps listed in the PR
 - [ ] Move this plan to `docs/tasks/archive/2026-11-loadout-tabs.md` when merged
 
 ## Open question

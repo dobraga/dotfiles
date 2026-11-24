@@ -196,11 +196,45 @@ export function buildInventory(records, cwd, pluginRecords = []) {
     } else addServers(serversFromObject(tryJson(r.content)), r.tool, r.scope, r.label, r.path);
   }
   const byName = (a, b) => a.name.localeCompare(b.name);
+  const skillList = [...skills.values()].sort(byName);
+  const mcpList = [...mcps.values()].sort(byName);
   return {
     tools: TOOLS.filter((t) => found.has(t.id)),
-    skills: [...skills.values()].sort(byName),
-    mcps: [...mcps.values()].sort(byName),
+    skills: skillList,
+    mcps: mcpList,
+    plugins: buildPlugins(records, cwd, skillList, mcpList),
   };
+}
+
+// installed_plugins.json => one row per plugin that applies to this folder, with skill / MCP counts.
+export function buildPlugins(records, cwd, skills, mcps) {
+  const rec = records.find((r) => r.t === "F" && r.kind === "plugins");
+  const j = rec ? tryJson(rec.content) : null;
+  const out = [];
+  for (const [id, installs] of Object.entries(j?.plugins ?? {})) {
+    const [name, marketplace = ""] = id.split("@");
+    const inst = (Array.isArray(installs) ? installs : []).find((i) => i.installPath && !(i.scope === "project" && i.projectPath && i.projectPath !== cwd));
+    if (!inst) continue;
+    out.push({
+      name, marketplace, version: inst.version ?? "", scope: inst.scope ?? "user", path: inst.installPath,
+      skills: skills.filter((r) => r.scope === "plugin" && r.label === name).length,
+      mcps: mcps.filter((r) => r.scope === "plugin" && r.label === name).length,
+    });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// `claude mcp list` => claude.ai connectors with status: connected | auth | failed.
+export function parseMcpList(stdout) {
+  const out = [];
+  for (const line of String(stdout).split("\n")) {
+    const m = /^(claude\.ai .+?): (\S+) - (.*)$/.exec(line.trim());
+    if (!m) continue;
+    const st = m[3];
+    const status = /connected/i.test(st) && !/disconnected/i.test(st) ? "connected" : /auth/i.test(st) ? "auth" : "failed";
+    out.push({ name: m[1].replace(/^claude\.ai /, ""), url: safeUrl(m[2]), status });
+  }
+  return out;
 }
 
 // installed_plugins.json => extra specs for the plugin skills / .mcp.json that apply to this folder.
