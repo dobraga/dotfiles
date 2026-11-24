@@ -4,6 +4,7 @@ import {
   spaces,
   agents,
   panes,
+  terminals,
   focused,
   theme,
   run,
@@ -25,6 +26,7 @@ import {
 import { usageCard } from "./usage-card.js";
 import { mediaCard } from "./media-card.js";
 import { readPlayers, pickActive, signature, sendCommand, pillLabel } from "./media.js";
+import { resolveFocusedAgent } from "./agent-focus.js";
 
 function findNode(node, id) {
   if (node?.id === id) return node;
@@ -310,16 +312,12 @@ export default class WorkspaceStatusUsage extends View {
   }
 
   focusedAgentInfo() {
-    const f = focused();
-    const term = f?.terminal;
-    if (!term) return null;
-    const a = agents().find((x) => x.address === term);
-    const p = f?.pane ? panes().find((x) => x.pane === f.pane) : null;
-    const key = a?.program?.key ?? p?.program?.key ?? "";
-    const app = a?.app ?? p?.app ?? "";
-    if (key === "claude" || app === "claude-code") return { kind: "claude", term };
-    if (key === "antigravity" || app === "antigravity" || app === "agy") return { kind: "agy", term };
-    return null;
+    return resolveFocusedAgent({
+      focused: focused(),
+      panes: panes(),
+      agents: agents(),
+      terminals: terminals(),
+    });
   }
 
   async refresh(cx) {
