@@ -2,13 +2,57 @@
 // Multirepo: when the space folder holds several Git repos, each one gets its own collapsible block.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar } from "gpui-base";
-import { spaces, panes, focused, exec, watchFolder, theme, run, shared, setShared, props, openOverlay, closeOverlay, notify } from "herdr";
+import { spaces, panes, focused, exec, watchFolder, theme, run, shared, setShared, props, openOverlay, closeOverlay, notify, window } from "herdr";
 import { normalizeRemoteSlug, discoverRepoRoots, repoName } from "./repos.js";
 
 function joinPath(root, rel) {
   if (!root) return rel;
   const sep = root.includes("\\") && !root.includes("/") ? "\\" : "/";
   return `${root.replace(/[\\/]+$/, "")}${sep}${rel}`;
+}
+
+// The panels share data in one VM, but their host tasks belong to separate copies.
+const scans = globalThis[Symbol.for("herdr.repoStatus.v2")] ??= new Map();
+
+async function repoStatus(root, on, { after, visiting, urgent, allowInactive }, cx, current) {
+  const repo = JSON.stringify([on, root]), now = Date.now();
+  for (const [key, scan] of scans) {
+    if (scan.pollAt <= now || (!scan.pollAt && scan.task.is_done())) scans.delete(key);
+  }
+  while (current()) {
+    let scan = scans.get(repo);
+    const pending = scan && !scan.pollAt && !scan.task.is_done();
+    const reusable = scan?.status?.code === 0 && Date.now() < scan.pollAt
+      && (scan.started >= after || (!urgent && Date.now() < scan.watchAt));
+    if (!reusable && (!pending || (visiting && scan.started !== undefined && scan.started < after))) {
+      if (!allowInactive && window()?.active === false) return null;
+      const next = {};
+      next.task = cx.spawn(async cx => {
+        await cx.sleep(25); // Let both listeners for a watch batch join before starting Git.
+        if (!allowInactive && window()?.active === false) return;
+        next.started = Date.now();
+        try {
+          next.status = await exec("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all"], { cwd: root, on });
+        } catch (error) {
+          next.error = error;
+        } finally {
+          const finished = Date.now(), duration = finished - next.started;
+          const delay = duration < 500 ? 0 : Math.min(60000, 5 * duration);
+          next.watchAt = finished + delay;
+          next.pollAt = finished + Math.max(10000, delay);
+          if (next.status?.code !== 0 && scans.get(repo) === next) scans.delete(repo);
+        }
+      });
+      scans.set(repo, next);
+      scan = next;
+    }
+    // Resume through our own host task, so another copy's close cannot cancel our follow-up work.
+    while (current() && !scan.pollAt && !scan.task.is_done()) await cx.sleep(50);
+    if (!current()) return null;
+    if (!scan.pollAt) continue; // The scanning copy closed or reloaded.
+    return scan;
+  }
+  return null;
 }
 
 function location() {
@@ -108,12 +152,10 @@ export default class ChangesTabs extends View {
     this.repos = [];
     this.inputs = new Map(); // root -> InputState (survives context changes, so a typed message is not lost)
     this.collapsed = {}; // root -> bool; unset = collapsed only when the repo has no changes
-    this.watchGen = 0;
-    this.watchedRoots = new Set();
     this.syncAction = null; // { root, action }
     this.handle = cx.focus_handle();
     this.refresh(cx);
-    cx.timer.every(10000, (cx) => this.refresh(cx));
+    cx.timer.every(500, (cx) => this.refreshIfDue(cx));
   }
 
   inputFor(root) {
@@ -136,26 +178,55 @@ export default class ChangesTabs extends View {
   // Read-only: render must never create state (InputState.new is forbidden during render). refresh() creates the inputs.
   message(r) { return this.inputs.get(r.root)?.value().trim() ?? ""; }
 
-  watch(root, cx) {
-    if (this.on || this.watchedRoots.has(root)) return;
-    this.watchedRoots.add(root);
-    const gen = this.watchGen;
+  refreshIfDue(cx) {
+    const active = window()?.active !== false, state = this.state;
+    const refocused = active && this.windowActive === false;
+    this.windowActive = active;
+    if (!state) return;
+    if (refocused && (state.dirty.size || !state.watches.size)) state.catchUp = true;
+    if (!active || this.loading || this.busy) return;
+    const now = Date.now();
+    if (state.catchUp || (state.dirty.size && now >= state.watchAt) || now >= state.pollAt) this.refresh(cx);
+  }
+
+  watch(root, state, cx) {
+    if (state.on || state.watches.has(root)) return;
+    const watch = { root };
+    state.watches.set(root, watch);
     cx.spawn(async (cx) => {
       try {
-        while (this.watchGen === gen) {
-          await watchFolder(root);
-          if (this.watchGen === gen) this.refresh(cx);
+        while (this.state === state && state.watches.get(root) === watch) {
+          watch.pending = watchFolder(root);
+          const paths = await watch.pending;
+          if (paths.length && state.watches.get(root) === watch && this.current(state)) {
+            state.dirty.set(root, Date.now() + 1);
+            this.refreshIfDue(cx);
+          }
         }
-      } catch { if (this.watchGen === gen) this.watchedRoots.delete(root); }
+      } catch {
+        if (state.watches.get(root) === watch) state.watches.delete(root);
+      }
     });
   }
 
+  current(state) {
+    return this.state === state && key() === state.key;
+  }
+
   // Reads one repo. Never throws: a broken repo shows its error in its own block and does not hide the others.
-  async loadRepo(root, on) {
+  async loadRepo(root, on, state, request, cx, scans) {
     const git = (args) => exec("git", [...READ, ...args], { cwd: root, on });
     const base = { root, name: repoName(root), files: [], branch: null, repoSlug: null, ahead: 0, behind: 0, hasUpstream: false, hasHead: false, limited: false, error: null };
     try {
-      const status = await git(["status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all"]);
+      const after = request.visiting || request.force ? Date.now() + 1 : state.dirty.get(root) || (state.last.get(root) ?? -1) + 1;
+      const scan = await repoStatus(root, on, { ...request, after }, cx, () => this.current(state));
+      if (!scan || !this.current(state)) return null;
+      scans.push(scan);
+      const { status, started } = scan;
+      state.last.set(root, started);
+      if ((state.dirty.get(root) ?? 0) <= started) state.dirty.delete(root);
+      if (request.urgent && after > started) state.catchUp = true;
+      if (scan.error) throw scan.error;
       if (status.code !== 0) throw new Error(status.stderr);
       const head = await git(["rev-parse", "--verify", "HEAD"]);
       const branchRes = await git(["rev-parse", "--abbrev-ref", "HEAD"]);
@@ -182,10 +253,12 @@ export default class ChangesTabs extends View {
         }
         return out;
       };
-      const stagedStats = await readStats(["--cached"]), workStats = await readStats([]);
+      const entries = status.stdout.split("\0").filter(Boolean);
+      // Numstat only matters for tracked entries; skip both diffs when everything is untracked.
+      const tracked = entries.slice(0, 1000).some((entry) => !entry.startsWith("??"));
+      const stagedStats = tracked ? await readStats(["--cached"]) : {}, workStats = tracked ? await readStats([]) : {};
       const letter = (c, fresh) => (c === "D" ? "D" : fresh || c === "A" ? "A" : "M");
       const files = [];
-      const entries = status.stdout.split("\0").filter(Boolean);
       for (const entry of entries.slice(0, 1000)) {
         const xy = entry.slice(0, 2), path = entry.slice(3), fresh = xy === "??";
         const conflict = xy.includes("U") || xy === "AA" || xy === "DD";
@@ -197,35 +270,51 @@ export default class ChangesTabs extends View {
     } catch (e) { return { ...base, error: String(e) }; }
   }
 
-  refresh(cx) {
-    if (this.loading || this.busy) return;
+  refresh(cx, force = false) {
     const { cwd, on, space, folder } = location(), context = key();
-    if (context !== this.context) {
+    const visiting = context !== this.context;
+    if (visiting) {
+      if (this.state) for (const w of this.state.watches.values()) w.pending?.cancel();
       this.context = context;
+      this.state = { key: context, on, dirty: new Map(), last: new Map(), watches: new Map(), catchUp: false, pollAt: 0, watchAt: 0 };
       this.spaceId = space;
       this.repos = [];
       this.error = null;
       this.note = null;
       this.pendingDiscard = null;
-      this.watchGen++;
-      this.watchedRoots = new Set();
+      this.loading = false;
     }
-    if (!cwd) return;
+    const state = this.state, now = Date.now();
+    if (!cwd) {
+      state.catchUp = false;
+      state.dirty.clear();
+      state.pollAt = now + 10000;
+      return;
+    }
+    if (this.loading || this.busy) return;
+    const request = { visiting, force, urgent: force || visiting || state.catchUp, allowInactive: force || visiting };
+    state.catchUp = false;
+    state.pollAt = state.watchAt = now + 10000;
     this.loading = true;
     cx.spawn(async (cx) => {
       try {
         const roots = await discoverRepoRoots(exec, { cwd, folder, on });
-        if (key() !== context) return;
+        if (!this.current(state)) return;
         if (!roots.length) { this.repos = []; this.error = "Not a git repository"; return; }
-        const repos = await Promise.all(roots.map((root) => this.loadRepo(root, on)));
-        if (key() !== context) return;
+        const scans = [];
+        const repos = await Promise.all(roots.map((root) => this.loadRepo(root, on, state, request, cx, scans)));
+        if (!this.current(state) || repos.some((r) => !r)) return;
+        if (scans.length) {
+          state.pollAt = Math.min(...scans.map((x) => x.pollAt));
+          state.watchAt = Math.min(...scans.map((x) => x.watchAt));
+        }
         for (const r of repos) this.inputFor(r.root);
         this.on = on;
         this.repos = repos;
         this.error = null;
-        for (const r of repos) if (!r.error) this.watch(r.root, cx);
-      } catch (e) { if (key() === context) this.error = String(e); }
-      finally { this.loading = false; cx.notify(); }
+        for (const r of repos) if (!r.error) this.watch(r.root, state, cx);
+      } catch (e) { if (this.current(state)) this.error = String(e); }
+      finally { if (this.state === state) this.loading = false; cx.notify(); }
     });
   }
 
@@ -307,7 +396,7 @@ export default class ChangesTabs extends View {
       } finally {
         this.busy = false;
         this.syncAction = null;
-        this.refresh(cx);
+        this.refresh(cx, true);
         cx.notify();
       }
     });
@@ -327,7 +416,7 @@ export default class ChangesTabs extends View {
           if (res.code !== 0) throw new Error((res.stderr || res.stdout).trim());
         }
       } catch (e) { if (key() === context) this.note = `${r.name}: ${failLabel} failed: ${e}`; }
-      finally { this.busy = false; this.refresh(cx); cx.notify(); }
+      finally { this.busy = false; this.refresh(cx, true); cx.notify(); }
     });
     cx.notify();
   }
@@ -364,7 +453,7 @@ export default class ChangesTabs extends View {
         if (res.code !== 0) throw new Error((res.stderr || res.stdout).trim());
         if (key() === context) this.inputFor(root).set_value("");
       } catch (e) { if (key() === context) this.note = `${r.name}: Commit failed: ${e}`; }
-      finally { this.busy = false; this.syncAction = null; this.refresh(cx); cx.notify(); }
+      finally { this.busy = false; this.syncAction = null; this.refresh(cx, true); cx.notify(); }
     });
     cx.notify();
   }
@@ -478,6 +567,7 @@ export default class ChangesTabs extends View {
         .child(item("changes-ctx-abs", "Copy full path", fullPath));
     }
     if (key() !== this.context) this.refresh(cx);
+    else this.refreshIfDue(cx);
     const repos = this.repos, multi = repos.length > 1;
     const allFiles = repos.flatMap((r) => r.files);
     const add = allFiles.reduce((n, f) => n + f.add, 0);
