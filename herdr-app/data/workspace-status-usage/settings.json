@@ -1,0 +1,6 @@
+{
+  "style": "ring",
+  "warn": 60,
+  "critical": 90,
+  "showReset": true
+}

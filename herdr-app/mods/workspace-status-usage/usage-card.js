@@ -1,7 +1,8 @@
 import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
+import { cfg } from "./usage-settings.js";
 
-function formatReset(iso) {
+export function formatReset(iso) {
   if (!iso) return "";
   const ms = Date.parse(iso) - Date.now();
   if (!Number.isFinite(ms) || ms <= 0) return "soon";
@@ -24,7 +25,7 @@ function formatAge(ts) {
 }
 
 function barColor(pct, t) {
-  return pct >= 90 ? t.ansi1 : pct >= 60 ? t.blocked : t.ansi2;
+  return pct >= cfg.critical ? t.ansi1 : pct >= cfg.warn ? t.blocked : t.ansi2;
 }
 
 function meterRow(id, label, pct, resetIso, t) {

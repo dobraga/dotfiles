@@ -23,7 +23,8 @@ import {
   checking,
 } from "herdr";
 
-import { usageCard } from "./usage-card.js";
+import { usageCard, formatReset } from "./usage-card.js";
+import { cfg, applySettings } from "./usage-settings.js";
 import { mediaCard } from "./media-card.js";
 import { readPlayers, pickActive, signature, sendCommand, pillLabel } from "./media.js";
 import { resolveFocusedAgent } from "./agent-focus.js";
@@ -71,8 +72,30 @@ function formatCurrency(minor, currency = "USD", exponent = 2) {
   return currency === "USD" ? `$${val.toFixed(2)}` : `${val.toFixed(2)} ${currency}`;
 }
 
-function pctColor(pct, t) {
-  return pct >= 90 ? t.ansi1 : pct >= 60 ? t.blocked : t.muted;
+function pctColor(pct, t, ctx = false) {
+  const crit = ctx ? cfg.ctxCritical : cfg.critical;
+  const warn = ctx ? cfg.ctxWarn : cfg.warn;
+  return pct >= crit ? t.ansi1 : pct >= warn ? t.blocked : t.muted;
+}
+
+function gauge(pct, color, t) {
+  if (cfg.style === "text") return null;
+  if (cfg.style === "bar") {
+    return div().w(26).h(4).flex_none().rounded(2).bg(t.raised).overflow_hidden()
+      .child(div().h_full().w(Math.round((26 * Math.max(0, Math.min(100, pct))) / 100)).bg(color).rounded(2));
+  }
+  const step = Math.max(0, Math.min(100, Math.round(pct / 5) * 5));
+  return div()
+    .size(12)
+    .flex_none()
+    .relative()
+    .child(svg("mods/workspace-status-usage/rings/track.svg").size(12).absolute().top(0).left(0).text_color(t.raised))
+    .when(step > 0, (el) => el.child(svg(`mods/workspace-status-usage/rings/arc-${step}.svg`).size(12).absolute().top(0).left(0).text_color(color)));
+}
+
+async function loadSettings() {
+  applySettings(await readTextFile(`${appHome()}/data/workspace-status-usage/settings.json`));
+  setShared("usage.settings", { ...cfg });
 }
 
 function bucketUsed(b) {
@@ -211,6 +234,7 @@ export default class WorkspaceStatusUsage extends View {
     this.repoByKey = {};
     this.repoLoading = new Set();
     if (checking()) return;
+    loadSettings();
 
     setShared("usage.pillHovered", false);
     setShared("usage.cardHovered", false);
@@ -325,6 +349,7 @@ export default class WorkspaceStatusUsage extends View {
     this.refreshing = true;
     setShared("usage.loading", true);
     try {
+      await loadSettings();
       const [claude, agy] = await Promise.all([fetchClaudeUsage(), fetchAgyUsage()]);
       const prev = shared("usage.data") ?? {};
       setShared("usage.data", {
@@ -472,21 +497,23 @@ export default class WorkspaceStatusUsage extends View {
   }
 
   pillItems(data, activeAgent, t) {
+    const live = shared("usage.settings");
+    if (live) Object.assign(cfg, live);
     if (activeAgent?.kind === "claude") {
       const items = [];
       const ctx = this.ctxByTerm[activeAgent.term];
       if (ctx?.agent === "claude" && typeof ctx.ctx_pct === "number") {
         const p = Math.round(ctx.ctx_pct);
-        items.push({ label: `Ctx ${p}%`, color: pctColor(p, t) });
+        items.push({ label: `Ctx ${p}%`, pct: p, color: pctColor(p, t, true) });
       }
       const cl = data?.claude;
       if (cl?.fiveHour) {
         const p = Math.round(cl.fiveHour.utilization ?? 0);
-        items.push({ label: `5h ${p}%`, color: pctColor(p, t) });
+        items.push({ label: `5h ${p}%`, pct: p, reset: cl.fiveHour.resets_at, color: pctColor(p, t) });
       }
       if (cl?.sevenDay) {
         const p = Math.round(cl.sevenDay.utilization ?? 0);
-        items.push({ label: `7d ${p}%`, color: pctColor(p, t) });
+        items.push({ label: `7d ${p}%`, pct: p, reset: cl.sevenDay.resets_at, color: pctColor(p, t) });
       }
       return { title: "Claude", items };
     }
@@ -496,7 +523,7 @@ export default class WorkspaceStatusUsage extends View {
       const ctx = this.ctxByTerm[activeAgent.term];
       if (ctx?.agent === "agy" && typeof ctx.ctx_pct === "number") {
         const p = Math.round(ctx.ctx_pct);
-        items.push({ label: `Ctx ${p}%`, color: pctColor(p, t) });
+        items.push({ label: `Ctx ${p}%`, pct: p, color: pctColor(p, t, true) });
       }
       const group = matchAgyGroup(data?.agy?.groups, ctx?.model);
       if (group) {
@@ -504,8 +531,8 @@ export default class WorkspaceStatusUsage extends View {
         const bw = group.buckets.find((b) => b.window === "weekly");
         const p5h = bucketUsed(b5h);
         const pw = bucketUsed(bw);
-        if (p5h !== null) items.push({ label: `5h ${p5h}%`, color: pctColor(p5h, t) });
-        if (pw !== null) items.push({ label: `W ${pw}%`, color: pctColor(pw, t) });
+        if (p5h !== null) items.push({ label: `5h ${p5h}%`, pct: p5h, reset: b5h.resetTime, color: pctColor(p5h, t) });
+        if (pw !== null) items.push({ label: `W ${pw}%`, pct: pw, reset: bw.resetTime, color: pctColor(pw, t) });
       }
       return { title: "AGY", items };
     }
@@ -514,12 +541,12 @@ export default class WorkspaceStatusUsage extends View {
     const cl = data?.claude;
     if (cl?.sevenDay || cl?.fiveHour) {
       const clPct = Math.round(Math.max(cl.fiveHour?.utilization ?? 0, cl.sevenDay?.utilization ?? 0));
-      items.push({ label: `Claude ${clPct}%`, color: pctColor(clPct, t) });
+      items.push({ label: `Claude ${clPct}%`, pct: clPct, color: pctColor(clPct, t) });
     }
     const agyGroups = data?.agy?.groups ?? [];
     if (agyGroups.length) {
       const maxUsed = Math.max(...agyGroups.flatMap((g) => g.buckets.map((b) => bucketUsed(b) ?? 0)));
-      items.push({ label: `AGY ${maxUsed}%`, color: pctColor(maxUsed, t) });
+      items.push({ label: `AGY ${maxUsed}%`, pct: maxUsed, color: pctColor(maxUsed, t) });
     }
     return { title: "Usage", items };
   }
@@ -806,7 +833,9 @@ export default class WorkspaceStatusUsage extends View {
                   .gap(4)
                   .items_center()
                   .child(div().text_color(t.dim).child("·"))
-                  .child(div().text_color(item.color).child(item.label)),
+                  .when(cfg.style !== "text", (el) => el.child(gauge(item.pct, item.color, t)))
+                  .child(div().text_color(item.color).child(cfg.showPercent || cfg.style === "text" ? item.label : item.label.replace(/ \d+%$/, "")))
+                  .when(cfg.showReset && Boolean(item.reset), (el) => el.child(div().text_size(10.5).text_color(t.dim).child(`↻${formatReset(item.reset)}`))),
               ),
             ),
           ))

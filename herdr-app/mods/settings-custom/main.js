@@ -38,6 +38,7 @@ const SECTIONS = [
   { id: "git", title: "GitHub & Bitbucket", icon: "mods/prs-panel/pull-request.svg" },
   { id: "chat", title: "Herdr Chat", icon: "frame/welcome/messages.svg" },
   { id: "files", title: "Files", icon: "mods/files/file.svg" },
+  { id: "usage", title: "Usage", icon: "mods/tasks/agy.svg" },
   { id: "tasks", title: "Tasks", icon: "mods/tasks/tasks.svg" },
   { id: "inbox", title: "Inbox", icon: "mods/inbox/inbox.svg" },
   { id: "updates", title: "Updates", icon: "frame/settings/refresh.svg" },
@@ -145,6 +146,78 @@ export default class SettingsCustom extends View {
 
   chatStateFile() {
     return `${appHome()}/data/herdr-chat/state.json`;
+  }
+
+  usageSettingsFile() {
+    return `${appHome()}/data/workspace-status-usage/settings.json`;
+  }
+
+  async loadUsageSettings() {
+    const next = { style: "ring", warn: 60, critical: 90, showReset: false, showPercent: true, ctxWarn: 60, ctxCritical: 90 };
+    try {
+      const p = JSON.parse((await readTextFile(this.usageSettingsFile())) || "{}");
+      if (["ring", "bar", "text"].includes(p?.style)) next.style = p.style;
+      if (Number.isFinite(Number(p?.warn))) next.warn = Number(p.warn);
+      if (Number.isFinite(Number(p?.critical))) next.critical = Number(p.critical);
+      if (p?.showReset === true) next.showReset = true;
+      if (p?.showPercent === false) next.showPercent = false;
+      if (Number.isFinite(Number(p?.ctxWarn))) next.ctxWarn = Number(p.ctxWarn);
+      if (Number.isFinite(Number(p?.ctxCritical))) next.ctxCritical = Number(p.ctxCritical);
+    } catch {}
+    this.usageSettings = next;
+  }
+
+  updateUsageSettings(patch, cx) {
+    const cur = this.usageSettings ?? { style: "ring", warn: 60, critical: 90, showReset: false, showPercent: true, ctxWarn: 60, ctxCritical: 90 };
+    const next = { ...cur, ...patch };
+    next.warn = Math.max(0, Math.min(next.warn, next.critical - 5));
+    next.ctxWarn = Math.max(0, Math.min(next.ctxWarn, next.ctxCritical - 5));
+    this.usageSettings = next;
+    setShared("usage.settings", next);
+    this.usageError = null;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      try {
+        await exec("mkdir", ["-p", `${appHome()}/data/workspace-status-usage`]);
+        const file = this.usageSettingsFile();
+        await writeTextFile(file, JSON.stringify(next, null, 2) + "\n", await readTextFile(file));
+      } catch (e) {
+        this.usageError = String(e?.message ?? e);
+        notify({ title: "Failed to save Usage settings", body: this.usageError, level: "error" });
+      } finally {
+        cx.notify();
+      }
+    });
+  }
+
+  usageTab(t) {
+    const st = this.usageSettings ?? { style: "ring", warn: 60, critical: 90, showReset: false, showPercent: true, ctxWarn: 60, ctxCritical: 90 };
+    const pill = (id, on, label, onClick) => div()
+      .id(id).px(10).py(5).rounded(7).cursor_pointer().text_size(12.5).border_1()
+      .border_color(on ? t.accent : t.border).bg(on ? t.selected : t.raised).text_color(on ? t.foreground : t.muted)
+      .hover((x) => x.bg(t.hover)).on_click((_e, cx) => onClick(cx)).child(label);
+    const styles = h_flex().gap(6).children([["ring", "Ring"], ["bar", "Bar"], ["text", "Text only"]].map(([v, l]) =>
+      pill(`st-usage-style-${v}`, st.style === v, l, (cx) => this.updateUsageSettings({ style: v }, cx))));
+    return v_flex()
+      .w_full()
+      .child(this.heading(t, "Usage"))
+      .child(this.row(t, "Gauge style", "How Ctx, 5h and 7d usage is drawn in the status bar pill, next to the percentage.", styles))
+      .child(this.row(t, "Show percentage", "Off keeps only the gauge and its label (Ctx, 5h, 7d). Ignored for Text only.", this.toggle(t, "st-usage-pct", st.showPercent, (_e, cx) => this.updateUsageSettings({ showPercent: !st.showPercent }, cx))))
+      .child(this.row(t, "Show reset time", "Append the time until the 5h and 7d limits reset, e.g. ↻2h 10m.", this.toggle(t, "st-usage-reset", st.showReset, (_e, cx) => this.updateUsageSettings({ showReset: !st.showReset }, cx))))
+      .child(this.row(t, "Warning color from", "Usage percentage where the gauge turns to the warning color.", this.stepper(t, "st-usage-warn", `${st.warn}%`,
+        (_e, cx) => this.updateUsageSettings({ warn: Math.max(0, st.warn - 5) }, cx),
+        (_e, cx) => this.updateUsageSettings({ warn: st.warn + 5 }, cx))))
+      .child(this.row(t, "Critical color from", "Usage percentage where the gauge turns red.", this.stepper(t, "st-usage-crit", `${st.critical}%`,
+        (_e, cx) => this.updateUsageSettings({ critical: Math.max(st.warn + 5, st.critical - 5) }, cx),
+        (_e, cx) => this.updateUsageSettings({ critical: Math.min(100, st.critical + 5) }, cx))))
+      .child(this.row(t, "Ctx warning color from", "Context usage percentage where the Ctx gauge turns to the warning color.", this.stepper(t, "st-usage-ctx-warn", `${st.ctxWarn}%`,
+        (_e, cx) => this.updateUsageSettings({ ctxWarn: Math.max(0, st.ctxWarn - 5) }, cx),
+        (_e, cx) => this.updateUsageSettings({ ctxWarn: st.ctxWarn + 5 }, cx))))
+      .child(this.row(t, "Ctx critical color from", "Context usage percentage where the Ctx gauge turns red.", this.stepper(t, "st-usage-ctx-crit", `${st.ctxCritical}%`,
+        (_e, cx) => this.updateUsageSettings({ ctxCritical: Math.max(st.ctxWarn + 5, st.ctxCritical - 5) }, cx),
+        (_e, cx) => this.updateUsageSettings({ ctxCritical: Math.min(100, st.ctxCritical + 5) }, cx))))
+      .when(Boolean(this.usageError), (el) => el.child(div().pt(12).text_size(12.5).text_color(t.ansi1).child(this.usageError)))
+      .child(div().pt(12).text_size(12).text_color(t.dim).child(`Settings file: ${this.usageSettingsFile()} · applied on the next usage refresh`));
   }
 
   filesSettingsFile() {
@@ -1608,6 +1681,7 @@ export default class SettingsCustom extends View {
               if (s.id === "git") this.profilesCtrl.ensureLoaded(cx);
               if (s.id === "inbox") { this.ensureInboxInputs(); cx.spawn(async (cx) => { await this.loadInboxSettings(); cx.notify(); }); }
               if (s.id === "tasks") cx.spawn(async (cx) => { await this.loadTasksSettings(); cx.notify(); });
+              if (s.id === "usage") cx.spawn(async (cx) => { await this.loadUsageSettings(); cx.notify(); });
               if (s.id === "files") cx.spawn(async (cx) => { await this.loadFilesSettings(); cx.notify(); });
               if (s.id === "chat") cx.spawn(async (cx) => { await this.loadChatState(); cx.notify(); });
               cx.notify();
@@ -1704,6 +1778,8 @@ export default class SettingsCustom extends View {
                                 ? this.herdrChat(t)
                                 : this.section === "files"
                                 ? this.filesTab(t)
+                                : this.section === "usage"
+                                ? this.usageTab(t)
                                 : this.section === "tasks"
                                 ? this.tasksTab(t)
                                 : this.section === "inbox"
