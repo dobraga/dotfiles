@@ -1,5 +1,5 @@
 import { View, div, svg } from "gpui-kit";
-import { h_flex } from "gpui-base";
+import { h_flex, Popup } from "gpui-base";
 import {
   spaces,
   agents,
@@ -17,13 +17,13 @@ import {
   notify,
   nextCommand,
   layout,
-  openOverlay,
-  closeOverlay,
   shared,
   setShared,
   checking,
 } from "herdr";
 
+import { usageCard } from "./usage-card.js";
+import { mediaCard } from "./media-card.js";
 import { readPlayers, pickActive, signature, sendCommand, pillLabel } from "./media.js";
 
 function findNode(node, id) {
@@ -61,21 +61,6 @@ function normalizeRemoteSlug(url) {
   if (parts.length < 2) return null;
   return `${provider}:${parts[0].toLowerCase()}/${parts[1].toLowerCase()}`;
 }
-
-// Window position that centres a card of size W x H right above the pointer (which is on the status-bar pill).
-function anchorAbove(cx, W, H) {
-  try {
-    const w = globalThis.window; // the herdr `window` import shadows the GPUI Window global
-    const vp = w.viewport_size(), m = w.mouse_position();
-    const x = Math.round(m.x - W / 2), y = Math.round(m.y - 16 - H);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error(`bad pointer ${m.x},${m.y}`);
-    return { x: Math.max(8, Math.min(vp.width - W - 8, x)), y: Math.max(8, y) };
-  } catch (e) {
-    anchorError = String(e);
-    return "pointer";
-  }
-}
-let anchorError = null;
 
 const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 
@@ -228,12 +213,12 @@ export default class WorkspaceStatusUsage extends View {
     setShared("usage.pillHovered", false);
     setShared("usage.cardHovered", false);
     setShared("usage.pinned", false);
-    setShared("usage.openOverlayId", null);
+    setShared("usage.open", false);
     setShared("media.state", null);
     setShared("media.hovered", false);
     setShared("media.cardHovered", false);
     setShared("media.pinned", false);
-    setShared("media.openOverlayId", null);
+    setShared("media.open", false);
     this.mediaSig = "";
     this.mediaBusy = false;
     this.lastMediaReq = shared("media.cmdReq")?.n ?? 0;
@@ -261,6 +246,32 @@ export default class WorkspaceStatusUsage extends View {
     cx.timer.after(1500, (cx) => this.syncForge(cx));
     cx.timer.every(15000, (cx) => this.maybeSyncForge(cx));
     cx.timer.every(2000, (cx) => this.pollMedia(cx));
+    // Safety net: hover-leave is unreliable for the popup layer, so close an unpinned card when the pointer is
+    // geometrically outside both its trigger and the card, or when no hover flag is left.
+    cx.timer.every(500, () => {
+      for (const [k, pillRect, cardRect, close] of [
+        ["usage", this.pillRect, this.cardRect, () => this.closeCard()],
+        ["media", this.mediaPillRect, this.mediaCardRect, () => this.closeMediaCard()],
+      ]) {
+        if (!shared(`${k}.open`) || shared(`${k}.pinned`)) continue;
+        const hoverKey = k === "usage" ? "usage.pillHovered" : "media.hovered";
+        if (pillRect && cardRect) {
+          try {
+            const p = globalThis.window.mouse_position();
+            const inside = (r) => p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height;
+            if (!inside(pillRect) && !inside(cardRect)) {
+              setShared(hoverKey, false);
+              setShared(`${k}.cardHovered`, false);
+            }
+          } catch {}
+        }
+        if (!shared(hoverKey) && !shared(`${k}.cardHovered`)) close();
+      }
+    });
+    // Keeps the media card's progress bar moving.
+    cx.timer.every(1000, (cx) => {
+      if (shared("media.open")) cx.notify();
+    });
     cx.timer.every(180000, (cx) => this.refresh(cx));
     cx.timer.every(3000, (cx) => {
       const info = this.focusedAgentInfo();
@@ -354,18 +365,15 @@ export default class WorkspaceStatusUsage extends View {
     }
   }
 
-  openMediaCard(cx) {
-    if (shared("media.openOverlayId")) return;
-    const W = 340, H = 175;
-    const id = openOverlay({ mod: "media-card", kind: "window", frame: "none", at: anchorAbove(cx, W, H), width: W });
-    setShared("media.openOverlayId", id);
+  openMediaCard() {
+    setShared("media.open", true);
   }
 
   closeMediaCard() {
-    const id = shared("media.openOverlayId");
-    if (id) closeOverlay(id);
-    setShared("media.openOverlayId", null);
+    this.mediaCardRect = null;
+    setShared("media.open", false);
     setShared("media.pinned", false);
+    setShared("media.cardHovered", false);
   }
 
   mediaPill(m, t) {
@@ -382,8 +390,8 @@ export default class WorkspaceStatusUsage extends View {
           on();
         })
         .child(svg(`mods/media-card/icons/${icon}.svg`).size(12).flex_none().text_color(t.foreground));
-    const isOpen = Boolean(shared("media.openOverlayId"));
-    return h_flex()
+    const isOpen = Boolean(shared("media.open"));
+    const trigger = h_flex()
       .id("status-media")
       .px(7)
       .py(2)
@@ -393,6 +401,9 @@ export default class WorkspaceStatusUsage extends View {
       .cursor_pointer()
       .when(isOpen, (el) => el.bg(t.selected))
       .hover((s) => s.bg(t.hover).text_color(t.foreground))
+      .on_mouse_move((e) => {
+        this.mediaPillRect = e.bounds;
+      })
       .on_hover((hovered, cx) => {
         setShared("media.hovered", hovered);
         if (hovered) {
@@ -404,7 +415,7 @@ export default class WorkspaceStatusUsage extends View {
         }
       })
       .on_click((_e, cx) => {
-        if (!shared("media.openOverlayId")) {
+        if (!shared("media.open")) {
           setShared("media.pinned", true);
           this.openMediaCard(cx);
         } else if (shared("media.pinned")) {
@@ -416,27 +427,41 @@ export default class WorkspaceStatusUsage extends View {
       .when(m.canPrev, (el) => el.child(btn("media-prev", "prev", () => this.mediaCmdRef("prev"))))
       .child(btn("media-toggle", m.status === "Playing" ? "pause" : "play", () => this.mediaCmdRef("toggle")))
       .when(m.canNext, (el) => el.child(btn("media-next", "next", () => this.mediaCmdRef("next"))))
-      .child(div().max_w(380).truncate().child(pillLabel(m, 30) + (anchorError ? " | anchor: " + anchorError : "")));
+      .child(div().max_w(380).truncate().child(pillLabel(m, 30)));
+    return Popup.new("media-popup", trigger)
+      .anchor("top_center")
+      .when(isOpen, (el) =>
+        el.content(
+          mediaCard({
+            t,
+            m,
+            onHover: (hovered, cx) => {
+              setShared("media.cardHovered", hovered);
+              if (!hovered && !shared("media.pinned")) {
+                cx.timer.after(260, () => {
+                  if (!shared("media.cardHovered") && !shared("media.hovered") && !shared("media.pinned")) this.closeMediaCard();
+                });
+              }
+            },
+            onMove: (e) => {
+              this.mediaCardRect = e.bounds;
+            },
+            cmd: (cmd, arg) => setShared("media.cmdReq", { cmd, arg, n: Date.now() }),
+            onDismiss: () => this.closeMediaCard(),
+          }),
+        ),
+      );
   }
 
-  openCard(cx) {
-    if (shared("usage.openOverlayId")) return;
-    const id = openOverlay({
-      mod: "usage-card",
-      kind: "window",
-      frame: "none",
-      key: "usage-card",
-      at: anchorAbove(cx, 356, 355),
-      width: 356,
-    });
-    setShared("usage.openOverlayId", id);
+  openCard() {
+    setShared("usage.open", true);
   }
 
   closeCard() {
-    const id = shared("usage.openOverlayId");
-    if (id) closeOverlay(id);
-    setShared("usage.openOverlayId", null);
+    this.cardRect = null;
+    setShared("usage.open", false);
     setShared("usage.pinned", false);
+    setShared("usage.cardHovered", false);
   }
 
   hint() {
@@ -681,7 +706,7 @@ export default class WorkspaceStatusUsage extends View {
     const needs = list.filter((a) => a.status === "blocked").length;
     const data = shared("usage.data");
     const pill = this.pillItems(data, activeAgent, t);
-    const isOpen = Boolean(shared("usage.openOverlayId"));
+    const isOpen = Boolean(shared("usage.open"));
     this.mediaCmdRef = (c) => ((this.dbg = "cmd " + c), setShared("media.cmdReq", { cmd: c, arg: null, n: Date.now() }));
     const media = shared("media.state");
     const label = (icon, text) => h_flex().gap(6).items_center().child(svg(`mods/workspace-chrome/${icon}.svg`).size(13)).child(text);
@@ -736,7 +761,7 @@ export default class WorkspaceStatusUsage extends View {
           .when(needs > 0, (el) => el.child(div().text_color(t.blocked).child(`· ${needs} needs you`))),
       )
       .child(
-        h_flex()
+        Popup.new("usage-popup", h_flex()
           .id("status-usage")
           .px(7)
           .py(2)
@@ -746,6 +771,9 @@ export default class WorkspaceStatusUsage extends View {
           .cursor_pointer()
           .when(isOpen, (el) => el.bg(t.selected))
           .hover((s) => s.bg(t.hover).text_color(t.foreground))
+          .on_mouse_move((e) => {
+            this.pillRect = e.bounds;
+          })
           .on_hover((hovered, cx) => {
             setShared("usage.pillHovered", hovered);
             if (hovered) {
@@ -762,7 +790,7 @@ export default class WorkspaceStatusUsage extends View {
             }
           })
           .on_click((_e, cx) => {
-            if (!shared("usage.openOverlayId")) {
+            if (!shared("usage.open")) {
               setShared("usage.pinned", true);
               this.openCard(cx);
             } else if (shared("usage.pinned")) {
@@ -782,6 +810,30 @@ export default class WorkspaceStatusUsage extends View {
                   .child(div().text_color(t.dim).child("·"))
                   .child(div().text_color(item.color).child(item.label)),
               ),
+            ),
+          ))
+          .anchor("top_center")
+          .when(isOpen, (el) =>
+            el.content(
+              usageCard({
+                t,
+                data: data ?? {},
+                pinned: Boolean(shared("usage.pinned")),
+                loading: Boolean(shared("usage.loading")),
+                onHover: (hovered, cx) => {
+                  setShared("usage.cardHovered", hovered);
+                  if (!hovered && !shared("usage.pinned")) {
+                    cx.timer.after(260, () => {
+                      if (!shared("usage.cardHovered") && !shared("usage.pillHovered") && !shared("usage.pinned")) this.closeCard();
+                    });
+                  }
+                },
+                onMove: (e) => {
+                  this.cardRect = e.bounds;
+                },
+                onRefresh: () => setShared("usage.refreshReq", Date.now()),
+                onDismiss: () => this.closeCard(),
+              }),
             ),
           ),
       )
