@@ -146,15 +146,27 @@ export default class Loadout extends View {
     const btn = (bid, label, onClick) =>
       div().id(`${id}-${bid}`).h(22).px(8).flex().items_center().rounded(5).cursor_pointer().text_size(11.5).bg(t.raised).text_color(t.muted)
         .hover((s) => s.bg(t.hover).text_color(t.foreground)).on_click(onClick).child(label);
+    const skill = r.kind === "skill";
+    const toggle = (cx) => { open ? this.expanded.delete(id) : this.expanded.add(id); cx.notify(); };
+    const openSkill = () => {
+      const p = `${paths[0]}/SKILL.md`;
+      const slash = p.lastIndexOf("/");
+      openFileTab({ spaceId: loc.space, root: p.slice(0, slash) || "/", path: p.slice(slash + 1), on: loc.on, name: p.slice(slash + 1) });
+    };
+    // A skill opens its SKILL.md in the file viewer (Markdown preview); the small ⓘ shows its paths and Copy path.
+    // An MCP server has no document to open, so a click expands its details.
     return v_flex().id(id).w_full().px(8).py(6).rounded(6).gap(3).cursor_pointer()
       .hover((s) => s.bg(t.hover))
-      .on_click((_e, cx) => { open ? this.expanded.delete(id) : this.expanded.add(id); cx.notify(); })
+      .on_click((_e, cx) => (skill ? openSkill() : toggle(cx)))
       .child(
         h_flex().gap(6).items_center().min_w(0)
           .child(div().truncate().font_medium().text_size(12.5).child(r.name))
           .child(this.badge(t, r.scope, r.label))
           .child(div().flex_1())
-          .child(div().flex_none().text_size(10.5).text_color(t.dim).child(toolNames.join(" · "))),
+          .child(div().flex_none().text_size(10.5).text_color(t.dim).child(toolNames.join(" · ")))
+          .when(skill, (el) => el.child(div().id(`${id}-info`).flex_none().w(18).h(18).flex().items_center().justify_center().rounded(4).text_size(11).text_color(open ? t.foreground : t.dim)
+            .hover((s) => s.bg(t.raised).text_color(t.foreground))
+            .on_click((_e, cx) => { cx.stop_propagation(); toggle(cx); }).child("ⓘ"))),
       )
       .child(
         div().when(!open, (e) => e.truncate()).text_size(11.5).text_color(t.dim)
