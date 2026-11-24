@@ -6,7 +6,7 @@
 // Definitions of commands/prompts are kept in ~/.config/herdr-app/data/tasks/tasks.json (store.js).
 // The panel runs only what you click or schedule; it runs nothing on open.
 
-import { View, div, svg } from "gpui-kit";
+import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, TextareaState, Textarea } from "gpui-base";
 import { exec, home, theme, spaces, panes, focused, run, notify, shared, setShared, watchFolder, knownAgents, appHome, readTextFile, writeTextFile } from "herdr";
 import { taskVisible } from "./scope.js";
@@ -694,7 +694,7 @@ export default class Tasks extends View {
   // The icon in front of a task: the agent's logo for a prompt, a glyph for a command.
   kindIcon(r, t, colorOverride, size = 14) {
     const color = colorOverride ?? this.statusColor(r, t);
-    if (r.kind === "prompt") return svg(`mods/tasks/${r.agent === "agy" ? "agy" : "claude"}.svg`).size(size).flex_none().text_color(color);
+    if (r.kind === "prompt") return image(`icons/${r.agent === "agy" ? "antigravity" : "claude"}.svg`).size(size).flex_none();
     return div().w(size).flex_none().text_color(color).child(KIND_GLYPH[r.kind] ?? "$");
   }
 

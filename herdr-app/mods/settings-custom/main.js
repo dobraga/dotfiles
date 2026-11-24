@@ -38,7 +38,7 @@ const SECTIONS = [
   { id: "git", title: "GitHub & Bitbucket", icon: "mods/prs-panel/pull-request.svg" },
   { id: "chat", title: "Herdr Chat", icon: "frame/welcome/messages.svg" },
   { id: "files", title: "Files", icon: "mods/files/file.svg" },
-  { id: "usage", title: "Usage", icon: "mods/tasks/agy.svg" },
+  { id: "usage", title: "Usage", icon: "frame/settings/refresh.svg" },
   { id: "tasks", title: "Tasks", icon: "mods/tasks/tasks.svg" },
   { id: "inbox", title: "Inbox", icon: "mods/inbox/inbox.svg" },
   { id: "updates", title: "Updates", icon: "frame/settings/refresh.svg" },

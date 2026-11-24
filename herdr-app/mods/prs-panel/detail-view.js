@@ -296,9 +296,9 @@ export function renderDetailView(panel, pr, detail, t, cx) {
                       .border_1()
                       .border_color(t.border)
                       .child(pillBtn("ag-claude-chat", "Claude Chat", false, (_e, cx) => launchAgent("claude", "chat", cx)))
-                      .child(pillBtn("ag-agy-chat", "AGY Chat", false, (_e, cx) => launchAgent("agy", "chat", cx)))
+                      .child(pillBtn("ag-agy-chat", "Antigravity Chat", false, (_e, cx) => launchAgent("agy", "chat", cx)))
                       .child(pillBtn("ag-claude-tui", "Claude TUI", false, (_e, cx) => launchAgent("claude", "tui", cx)))
-                      .child(pillBtn("ag-agy-tui", "AGY TUI", false, (_e, cx) => launchAgent("agy", "tui", cx))),
+                      .child(pillBtn("ag-agy-tui", "Antigravity TUI", false, (_e, cx) => launchAgent("agy", "tui", cx))),
                   ),
                 ),
             )

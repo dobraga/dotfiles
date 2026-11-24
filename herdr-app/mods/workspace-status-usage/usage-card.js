@@ -131,7 +131,7 @@ function card({ t, data, claude, agy, pinned, loading, onRefresh, onDismiss, sto
               h_flex()
                 .items_center()
                 .gap(7)
-                .child(image("mods/files-tabs/icons/claude.svg").size(14))
+                .child(image("icons/claude.svg").size(14))
                 .child(div().flex_1().font_semibold().text_size(12).child("Claude Code"))
                 .when(Boolean(claude?.tier), (el) =>
                   el.child(div().px(5).py(1).rounded(4).border_1().border_color(t.border).text_size(10).text_color(t.muted).child(claude.tier)),
@@ -172,8 +172,8 @@ function card({ t, data, claude, agy, pinned, loading, onRefresh, onDismiss, sto
               h_flex()
                 .items_center()
                 .gap(7)
-                .child(svg("mods/tasks/agy.svg").size(14).flex_none().text_color(t.foreground))
-                .child(div().flex_1().font_semibold().text_size(12).child("Antigravity (agy)")),
+                .child(image("icons/antigravity.svg").size(14).flex_none())
+                .child(div().flex_1().font_semibold().text_size(12).child("Antigravity")),
             )
             .when(Boolean(agy?.error) && !agy?.groups?.length, (el) =>
               el.child(div().text_size(11).text_color(t.dim).child(agy.error)),

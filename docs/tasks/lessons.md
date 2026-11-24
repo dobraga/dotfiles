@@ -15,3 +15,5 @@
 - Herdr mods: content inside a `Popup` has no focus handle of its own, so a card's `on_key_down` Escape handler never fires. If Escape-to-close matters, handle it on the host view or give the content a `track_focus` handle.
 
 - Herdr mods: on `kind: "popup"`, `openOverlay`'s `height` is a max cap (omitting it falls back to a small default cap), while wrapping short lists in `min_h(0).overflow_y_scroll()` clips the last row's bottom pixels; render short lists as plain `v_flex().w_full()` and attach `max_h(...).overflow_y_scrollbar()` only when the item count exceeds the viewport.
+
+- Herdr mods: a mod cannot `import` a file from another mod (`../other-mod/x.js` makes the importing mod fail with "did not load"). Keep each mod self-contained; share assets by path (`icons/<program>.svg`, `mods/<mod>/x.svg`) and runtime state via `shared`/`setShared`, never code.
