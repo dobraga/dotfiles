@@ -23,7 +23,15 @@ async function scan(cwd, on) {
   const records = parseRecords(base.stdout);
   const extra = pluginSpecs(records, cwd);
   const plugin = extra.length ? parseRecords((await exe(extra)).stdout) : [];
-  return buildInventory(records, cwd, plugin);
+  const inv = buildInventory(records, cwd, plugin);
+  // Offer a tool chip only when its executable is really there: a skills folder or a shell function wrapper
+  // (the herdr-chat `codex` function) does not mean the tool is installed. "Shared" is not a program.
+  try {
+    const r = await exec("sh", ["-c", 'for b in claude agy codex gemini; do command -v "$b" >/dev/null 2>&1 && echo "$b"; done; true'], { on });
+    const present = new Set(r.stdout.split("\n").map((x) => x.trim()).filter(Boolean));
+    inv.tools = inv.tools.filter((t) => t.id === "shared" || present.has(t.id));
+  } catch {}
+  return inv;
 }
 
 // Same behaviour as the Files tab: reuse a tab already showing the file, else the preview slot, else a new tab.
@@ -184,7 +192,8 @@ export default class Loadout extends View {
     const groupOf = (name) => groups.find((g) => g.key === name);
     const el = v_flex().w_full().gap(2)
       .child(div().px(8).pt(10).pb(4).text_size(11).font_semibold().text_color(t.dim).child(`${title.toUpperCase()} (${rows.filter((r) => r.scope !== "plugin").length})`));
-    const own = groupOf("own").rows;
+    const rank = (r) => (r.scope === "global" ? 1 : 0); // project/local first, then global
+    const own = groupOf("own").rows.map((r, i) => [r, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([r]) => r);
     own.forEach((r, i) => el.child(this.row(t, r, i, id)));
     const plug = groupOf("plugin").rows;
     if (plug.length) {
