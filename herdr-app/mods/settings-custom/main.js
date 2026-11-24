@@ -37,6 +37,7 @@ const SECTIONS = [
   { id: "git", title: "GitHub & Bitbucket", icon: "mods/prs-panel/pull-request.svg" },
   { id: "chat", title: "Herdr Chat", icon: "frame/welcome/messages.svg" },
   { id: "files", title: "Files", icon: "mods/files/file.svg" },
+  { id: "tasks", title: "Tasks", icon: "mods/tasks/tasks.svg" },
   { id: "updates", title: "Updates", icon: "frame/settings/refresh.svg" },
   { id: "privacy", title: "Privacy", icon: "frame/settings/shield.svg" },
 ];
@@ -148,21 +149,60 @@ export default class SettingsCustom extends View {
     return `${appHome()}/data/files-tabs/settings.json`;
   }
 
+  tasksSettingsFile() {
+    return `${appHome()}/data/tasks/settings.json`;
+  }
+
+  // The daemon (herdr-tasks) reads this file when a run starts; a task's own limit wins over it.
+  async loadTasksSettings() {
+    let minutes = 60, catchUp = 120, notify = "failures";
+    try {
+      const j = JSON.parse((await readTextFile(this.tasksSettingsFile())) || "{}");
+      const m = Number(j?.timeoutMinutes);
+      if (Number.isFinite(m) && m > 0) minutes = m;
+      const c = Number(j?.catchUpMinutes);
+      if (Number.isFinite(c) && c !== 0) catchUp = c;
+      if (["failures", "late", "all", "off"].includes(j?.notify)) notify = j.notify;
+    } catch {}
+    this.tasksSettings = { timeoutMinutes: minutes, catchUpMinutes: catchUp, notify };
+  }
+
+  updateTasksSettings(patch, cx) {
+    const next = { ...(this.tasksSettings ?? { timeoutMinutes: 60, catchUpMinutes: 120, notify: "failures" }), ...patch };
+    this.tasksSettings = next;
+    this.tasksError = null;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      try {
+        await exec("mkdir", ["-p", `${appHome()}/data/tasks`]);
+        const file = this.tasksSettingsFile();
+        await writeTextFile(file, JSON.stringify(next, null, 2) + "\n", await readTextFile(file));
+      } catch (e) {
+        this.tasksError = String(e?.message ?? e);
+        notify({ title: "Failed to save Tasks settings", body: this.tasksError, level: "error" });
+      } finally {
+        cx.notify();
+      }
+    });
+  }
+
   async loadFilesSettings() {
-    const next = { accordion: true, followActive: true, materialIcons: true, closePreview: true };
+    const next = { accordion: true, followActive: true, materialIcons: true, closePreview: true, diffTint: 10 };
     try {
       const parsed = JSON.parse((await readTextFile(this.filesSettingsFile())) || "{}");
       if (typeof parsed?.accordion === "boolean") next.accordion = parsed.accordion;
       if (typeof parsed?.followActive === "boolean") next.followActive = parsed.followActive;
       if (typeof parsed?.materialIcons === "boolean") next.materialIcons = parsed.materialIcons;
       if (typeof parsed?.closePreview === "boolean") next.closePreview = parsed.closePreview;
+      const tint = Number(parsed?.diffTint);
+      if (Number.isFinite(tint) && tint >= 0 && tint <= 30) next.diffTint = tint;
     } catch {}
     this.filesSettings = next;
     setShared("files-tabs.settings", next);
   }
 
   updateFilesSettings(patch, cx) {
-    const next = { ...(this.filesSettings ?? { accordion: true, followActive: true, materialIcons: true, closePreview: true }), ...patch };
+    const next = { ...(this.filesSettings ?? { accordion: true, followActive: true, materialIcons: true, closePreview: true, diffTint: 10 }), ...patch };
     this.filesSettings = next;
     this.filesError = null;
     setShared("files-tabs.settings", next);
@@ -488,7 +528,8 @@ export default class SettingsCustom extends View {
   // Files ----------------------------------------------------------------
 
   filesTab(t) {
-    const st = this.filesSettings ?? { accordion: true, followActive: true, materialIcons: true, closePreview: true };
+    const st = this.filesSettings ?? { accordion: true, followActive: true, materialIcons: true, closePreview: true, diffTint: 10 };
+    const tint = st.diffTint ?? 10;
     return v_flex()
       .w_full()
       .child(this.heading(t, "Files"))
@@ -532,10 +573,81 @@ export default class SettingsCustom extends View {
           ),
         ),
       )
+      .child(
+        this.row(
+          t,
+          "Diff highlight opacity",
+          "Background tint of added and removed lines in the Diff view. 0% turns it off; lower is more transparent.",
+          this.stepper(
+            t,
+            "st-files-diff-tint",
+            `${tint}%`,
+            (_e, cx) => this.updateFilesSettings({ diffTint: Math.max(0, tint - 1) }, cx),
+            (_e, cx) => this.updateFilesSettings({ diffTint: Math.min(30, tint + 1) }, cx),
+          ),
+        ),
+      )
       .when(Boolean(this.filesError), (el) =>
         el.child(div().pt(12).text_size(12.5).text_color(t.ansi1).child(this.filesError)),
       )
       .child(div().pt(12).text_size(12).text_color(t.dim).child(`Settings file: ${this.filesSettingsFile()}`));
+  }
+
+  // Tasks ----------------------------------------------------------------
+
+  tasksTab(t) {
+    const st = this.tasksSettings ?? { timeoutMinutes: 60, catchUpMinutes: 120, notify: "failures" };
+    const label = (m) => (m % 60 === 0 ? `${m / 60} h` : `${m} min`);
+    const options = [...new Set([15, 30, 60, 120, 240, st.timeoutMinutes])].sort((a, b) => a - b);
+    const pill = (id, on, label, onClick) => div()
+      .id(id).px(10).py(5).rounded(7).cursor_pointer().text_size(12.5).border_1()
+      .border_color(on ? t.accent : t.border).bg(on ? t.selected : t.raised).text_color(on ? t.foreground : t.muted)
+      .hover((x) => x.bg(t.hover)).on_click((_e, cx) => onClick(cx)).child(label);
+    const CATCH = [[-1, "Off"], [30, "30 min"], [120, "2 h"], [360, "6 h"], [720, "12 h"], [1440, "24 h"]];
+    const NOTIFY = [["failures", "Failures"], ["late", "Failures and late runs"], ["all", "Every run"], ["off", "Off"]];
+    const catchPills = h_flex().gap(6).flex_wrap().children(CATCH.map(([m, l]) => pill(`st-tasks-catch-${m}`, m === st.catchUpMinutes, l, (cx) => this.updateTasksSettings({ catchUpMinutes: m }, cx))));
+    const notifyPills = h_flex().gap(6).flex_wrap().children(NOTIFY.map(([v, l]) => pill(`st-tasks-notify-${v}`, v === st.notify, l, (cx) => this.updateTasksSettings({ notify: v }, cx))));
+    const pills = h_flex().gap(6).flex_wrap().children(
+      options.map((m) => {
+        const on = m === st.timeoutMinutes;
+        return div()
+          .id(`st-tasks-timeout-${m}`)
+          .px(10)
+          .py(5)
+          .rounded(7)
+          .cursor_pointer()
+          .text_size(12.5)
+          .border_1()
+          .border_color(on ? t.accent : t.border)
+          .bg(on ? t.selected : t.raised)
+          .text_color(on ? t.foreground : t.muted)
+          .hover((x) => x.bg(t.hover))
+          .on_click((_e, cx) => this.updateTasksSettings({ timeoutMinutes: m }, cx))
+          .child(label(m));
+      }),
+    );
+    return v_flex()
+      .w_full()
+      .child(this.heading(t, "Tasks"))
+      .child(
+        this.row(
+          t,
+          "Time limit per run",
+          "A run that is still going after this long is stopped and recorded as failed. Applies to prompt tasks, commands and sets, unless the task has its own limit.",
+          pills,
+        ),
+      )
+      .child(
+        this.row(
+          t,
+          "Catch-up window",
+          "If the computer was asleep or off at the scheduled time, a task still runs when it comes back, as long as it is back within this window; later than that it is recorded as missed. Off means only on time. A task can set its own window.",
+          catchPills,
+        ),
+      )
+      .child(this.row(t, "Notifications", "Which runs show a toast while Herdr is open. Every run is always kept in the Inbox.", notifyPills))
+      .when(Boolean(this.tasksError), (el) => el.child(div().pt(12).text_size(12.5).text_color(t.ansi1).child(this.tasksError)))
+      .child(div().pt(12).text_size(12).text_color(t.dim).child(`Settings file: ${this.tasksSettingsFile()}`));
   }
 
   // Look -----------------------------------------------------------------
@@ -1325,6 +1437,7 @@ export default class SettingsCustom extends View {
               this.handle.focus();
               if (s.id === "machines") cx.spawn(async (cx) => { await this.loadMachines(); cx.notify(); });
               if (s.id === "git") this.profilesCtrl.ensureLoaded(cx);
+              if (s.id === "tasks") cx.spawn(async (cx) => { await this.loadTasksSettings(); cx.notify(); });
               if (s.id === "files") cx.spawn(async (cx) => { await this.loadFilesSettings(); cx.notify(); });
               if (s.id === "chat") cx.spawn(async (cx) => { await this.loadChatState(); cx.notify(); });
               cx.notify();
@@ -1421,6 +1534,8 @@ export default class SettingsCustom extends View {
                                 ? this.herdrChat(t)
                                 : this.section === "files"
                                 ? this.filesTab(t)
+                                : this.section === "tasks"
+                                ? this.tasksTab(t)
                                 : this.section === "privacy"
                                   ? this.privacy(t)
                                   : this.updates(t),
