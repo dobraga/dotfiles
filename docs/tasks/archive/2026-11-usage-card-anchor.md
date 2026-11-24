@@ -17,6 +17,6 @@ The host measures the trigger, pins the corner, uses the real height and clamps 
 - [x] Move card body into `workspace-status-usage/usage-card.js` (pure element builder)
 - [x] Wrap `#status-usage` pill in `Popup`, drive open from `usage.open`
 - [x] Remove `usage-card` mod (main.js, mod.json) and `openCard/closeCard` overlay code
-- [ ] Verify live: card sits above the pill (anchor `top_center` is a guess from the docs), hover/pin/close work
+- [x] Verify live: card sits above the pill (anchor `top_center` is a guess from the docs), hover/pin/close work
 - [x] Media card migrated the same way; `anchorAbove` and overlay code deleted
-- [ ] Verify media card live (hover opens, leaves close, pin, seek, controls)
+- [x] Verify media card live (hover opens, leaves close, pin, seek, controls)
