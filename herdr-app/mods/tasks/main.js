@@ -152,6 +152,8 @@ export default class Tasks extends View {
       await this.refresh(cx);
       this.watch(cx);
     });
+    // Warm the agent probes in the background (async, never awaited by init) so the first "New task" opens ready.
+    cx.spawn(async (cx) => { try { await this.loadAgents(); } catch {} cx.notify(); });
     cx.timer.every(30000, (cx) => this.refresh(cx));
     // Do not wait for the next render to notice a space switch: look every second (cheap, local data only).
     cx.timer.every(1000, (cx) => { if (this.syncContext()) { cx.notify(); this.refresh(cx); } });
@@ -450,8 +452,14 @@ export default class Tasks extends View {
   // Auto-discovery. Herdr's table of runnable agents (`knownAgents`, including ones added in programs.json) is the
   // candidate list, but it counts shell functions as installed (the herdr-chat `claude`/`agy`/`codex` wrappers), so each
   // candidate is kept only if its real executable is on the PATH. Models are discovered per agent, see probe.
-  async loadAgents() {
-    if (this.agentList && Date.now() - (this.agentsAt ?? 0) < 60000) return;
+  // One run at a time: the background warm-up and the form share the same in-flight promise.
+  loadAgents() {
+    if (this.agentList && Date.now() - (this.agentsAt ?? 0) < 60000) return Promise.resolve();
+    this.agentsLoading ??= this.discoverAgents().finally(() => { this.agentsLoading = null; });
+    return this.agentsLoading;
+  }
+
+  async discoverAgents() {
     let candidates;
     try {
       candidates = (await knownAgents()).filter((x) => x.agent !== false && Array.isArray(x.run) && x.run.length).map((x) => ({ name: x.name, bin: String(x.run[0]).split("/").pop() }));
@@ -942,7 +950,7 @@ export default class Tasks extends View {
         col.child(label("COMMAND")).child(area(f.command)).child(label("SUBFOLDER (OPTIONAL)")).child(input(f.cwd));
       } else {
         const agents = (this.agentList ?? []).map((x) => [x.id, x.name]);
-        if (!agents.length) col.child(div().text_size(12).text_color(t.ansi1).child("No agent executable found on the PATH."));
+        if (!agents.length) col.child(div().text_size(12).text_color(this.agentsLoading ? t.dim : t.ansi1).child(this.agentsLoading ? "Loading agents…" : "No agent executable found on the PATH."));
         if (f.agent && !agents.some(([k]) => k === f.agent) && agents.length) f.agent = agents[0][0];
         const models = this.models?.[f.agent] ?? [];
         const modelNow = f.model.value().trim();
