@@ -2,6 +2,8 @@
 
 Supersedes `plan-automations-panel.md` (its panel code, `herdr-app/mods/automations/`, becomes the starting point and is renamed to `tasks`). References: https://github.com/cybertron288/herdr-mods/tree/main/run-scripts (run control, new tab per run) and https://github.com/DnzzL/herdr-automations (scheduler for agent prompts).
 
+> **Superseded in part (2026-11-23):** the crontab backend and `herdr-automations` are gone; see `plan-tasks-single-scheduler.md`. The panel design below still holds.
+
 ## Idea
 Two steps, in this order:
 1. **Define a task**: *what* runs. Three kinds:
