@@ -3,5 +3,6 @@
   "followActive": true,
   "materialIcons": true,
   "closePreview": true,
-  "diffTint": 10
+  "diffTint": 10,
+  "tabMaxWidth": 90
 }

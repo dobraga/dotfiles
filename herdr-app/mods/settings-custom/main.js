@@ -339,7 +339,7 @@ export default class SettingsCustom extends View {
   }
 
   async loadFilesSettings() {
-    const next = { accordion: true, followActive: true, materialIcons: true, closePreview: true, diffTint: 10 };
+    const next = { accordion: true, followActive: true, materialIcons: true, closePreview: true, diffTint: 10, tabMaxWidth: 170 };
     try {
       const parsed = JSON.parse((await readTextFile(this.filesSettingsFile())) || "{}");
       if (typeof parsed?.accordion === "boolean") next.accordion = parsed.accordion;
@@ -348,13 +348,15 @@ export default class SettingsCustom extends View {
       if (typeof parsed?.closePreview === "boolean") next.closePreview = parsed.closePreview;
       const tint = Number(parsed?.diffTint);
       if (Number.isFinite(tint) && tint >= 0 && tint <= 30) next.diffTint = tint;
+      const tw = Number(parsed?.tabMaxWidth);
+      if (Number.isFinite(tw) && tw >= 80 && tw <= 400) next.tabMaxWidth = tw;
     } catch {}
     this.filesSettings = next;
     setShared("files-tabs.settings", next);
   }
 
   updateFilesSettings(patch, cx) {
-    const next = { ...(this.filesSettings ?? { accordion: true, followActive: true, materialIcons: true, closePreview: true, diffTint: 10 }), ...patch };
+    const next = { ...(this.filesSettings ?? { accordion: true, followActive: true, materialIcons: true, closePreview: true, diffTint: 10, tabMaxWidth: 170 }), ...patch };
     this.filesSettings = next;
     this.filesError = null;
     setShared("files-tabs.settings", next);
@@ -680,8 +682,9 @@ export default class SettingsCustom extends View {
   // Files ----------------------------------------------------------------
 
   filesTab(t) {
-    const st = this.filesSettings ?? { accordion: true, followActive: true, materialIcons: true, closePreview: true, diffTint: 10 };
+    const st = this.filesSettings ?? { accordion: true, followActive: true, materialIcons: true, closePreview: true, diffTint: 10, tabMaxWidth: 170 };
     const tint = st.diffTint ?? 10;
+    const tabW = st.tabMaxWidth ?? 170;
     return v_flex()
       .w_full()
       .child(this.heading(t, "Files"))
@@ -722,6 +725,20 @@ export default class SettingsCustom extends View {
           "A file opened with a single click (preview) closes as soon as you switch to another tab. Turn off to keep previews open until you close them.",
           this.toggle(t, "st-files-close-preview", st.closePreview, (_e, cx) =>
             this.updateFilesSettings({ closePreview: !st.closePreview }, cx),
+          ),
+        ),
+      )
+      .child(
+        this.row(
+          t,
+          "Tab title max width",
+          "Longest a tab title can be in the top bar, in pixels. Longer titles are cut with an ellipsis.",
+          this.stepper(
+            t,
+            "st-files-tab-width",
+            `${tabW}px`,
+            (_e, cx) => this.updateFilesSettings({ tabMaxWidth: Math.max(80, tabW - 10) }, cx),
+            (_e, cx) => this.updateFilesSettings({ tabMaxWidth: Math.min(400, tabW + 10) }, cx),
           ),
         ),
       )

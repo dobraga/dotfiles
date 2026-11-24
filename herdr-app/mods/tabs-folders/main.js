@@ -251,10 +251,21 @@ export default class TabsFolders extends View {
       const borderColor = isActive
         ? t.border
         : blockedCount > 0
-          ? t.blocked + "73"
+          ? t.ansi1 + "B3"
           : doneCount > 0
             ? t.done + "73"
             : t.chrome;
+      const working = blockedCount === 0 && doneCount === 0 && c.status === "working";
+      const stColor = blockedCount > 0 ? t.ansi1 : doneCount > 0 ? t.done : c.status === "working" ? t.working : null;
+      const iconEl = isFileTab
+        ? (fileSlot?.kind === "file" && fileSlot?.path && shared("files-tabs.settings")?.materialIcons !== false
+            ? image(iconPath(iconFor(fileSlot.path.split("/").pop(), false, false))).size(14).flex_none().opacity(isPreview ? 0.65 : 1)
+            : svg(fileSlot?.kind === "diff" ? "mods/changes/changes.svg" : "mods/files/file.svg").size(13).flex_none().text_color(isPreview ? t.dim : t.muted))
+        : program?.icon ? (program.tint ? svg(program.icon).size(14).text_color(t.muted) : image(program.icon).size(14)) : null;
+      // Status is a dot on the icon corner (blocked, done or working) instead of a separate badge.
+      const iconBox = div().relative().flex_none().when(Boolean(iconEl), el => el.child(iconEl))
+        .when(Boolean(stColor) && !working, el => el.child(div().absolute().right(-2).bottom(-2).size(7).rounded(4).bg(stColor).border(1).border_color(isActive ? t.raised : t.chrome)))
+        .when(working, el => el.child(div().absolute().right(-4).bottom(-4).child(svg("mods/workspace-chrome/spinner.svg").size(10).flex_none().text_color(t.working).spin(900))));
       return h_flex().id(`tab-${c.id}`).h(29).px(10).gap(7).rounded(7).items_center().flex_none().text_size(12.8)
         // A rename or status dot on this or an earlier tab can push the active one out.
         .on_size_change((size, cx) => { this.w[i] = size.width; if (i <= active) { this.scroll.scroll_to_item(active); this.reveal(active); cx.notify(); } })
@@ -296,16 +307,9 @@ export default class TabsFolders extends View {
           }
           openOverlay({ mod: "menu", kind: "popup", width: 200, props: { tab: "tab", target } });
         })
-        .when(isFileTab, el => el.child(
-          fileSlot?.kind === "file" && fileSlot?.path && shared("files-tabs.settings")?.materialIcons !== false
-            ? image(iconPath(iconFor(fileSlot.path.split("/").pop(), false, false))).size(14).flex_none().opacity(isPreview ? 0.65 : 1)
-            : svg(fileSlot?.kind === "diff" ? "mods/changes/changes.svg" : "mods/files/file.svg").size(13).flex_none().text_color(isPreview ? t.dim : t.muted)))
-        .when(!isFileTab && Boolean(program?.icon), el => el.child(program.tint ? svg(program.icon).size(14).text_color(t.muted) : image(program.icon).size(14)))
-        .child(div().max_w(170).truncate().child(c.zoomed ? `${name} Z` : name))
+        .child(iconBox)
+        .child(div().max_w(Number(shared("files-tabs.settings")?.tabMaxWidth) || 170).truncate().child(c.zoomed ? `${name} Z` : name))
         .when(isPreview, el => el.child(div().px(4).rounded(3).bg(t.hover).text_size(9.5).text_color(t.dim).child("preview")))
-        .when(blockedCount > 0, el => el.child(tabStatusBadge(t, "blocked", blockedCount)))
-        .when(doneCount > 0, el => el.child(tabStatusBadge(t, "done", doneCount)))
-        .when(blockedCount === 0 && doneCount === 0 && c.status === "working", el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
         .when(isActive, el => el.child(div().id(`close-${c.id}`).text_color(t.dim).on_mouse_down("left", stop).on_click((_e, cx) => { cx.stop_propagation(); run("tab.close", { id: c.id }); }).child(svg("mods/pane/close.svg").size(12))));
     };
     const root = layout(), sidebar = find(root, "sidebar"), w = window();
