@@ -352,6 +352,8 @@ export default class Spaces extends View {
     } catch { this.folded = new Set(); }
     this.scroll = ScrollHandle.new(); // the list's position: the active space is brought into view through it
     this.activeAt = -1; // the active space's place among the list's children, -1 when not drawn
+    // Spaces whose terminal list was opened (true) or closed (false) by hand; otherwise only the active space's is open.
+    try { this.tabsOpen = JSON.parse(localStorage.getItem("spaces.tabs.open") ?? "{}"); } catch { this.tabsOpen = {}; }
     this.refreshMachines(cx);
     cx.timer.every(15000, cx => this.refreshMachines(cx));
     // Another screen may have changed them: read every machine's file again now and then.
@@ -774,9 +776,14 @@ export default class Spaces extends View {
     const draw = (r, away) => {
       seen.push({ id: r.w.id, shown: !away, folder: r.folder });
       if (away) return [];
-      const el = collapsed ? this.compact(r, t) : this.row(r, t);
+      if (collapsed) {
+        const el = this.compact(r, t);
+        if (r.w.active) this.activeEl = el;
+        return [el];
+      }
+      const el = this.row(r, t);
       if (r.w.active) this.activeEl = el;
-      return [el];
+      return [el, ...this.tabRows(r, t)];
     };
     const f = folders(machine), { list, spaceProfiles } = f, ps = panes(), prof = activeProfile();
     let parent = null, looseProf = null;
@@ -1104,57 +1111,60 @@ export default class Spaces extends View {
       .when(Boolean(showAheadBehind && g && g.behind > 0), (el) => el.child(div().flex_none().text_color(t.ansi1).child(`\u2193${g.behind}`)));
   }
 
-  openTabsStrip(w, t) {
+  tabsShown(w) {
+    return this.tabsOpen[w.id] ?? Boolean(w.active);
+  }
+
+  toggleTabs(w, cx) {
+    this.tabsOpen[w.id] = !this.tabsShown(w);
+    try { localStorage.setItem("spaces.tabs.open", JSON.stringify(this.tabsOpen)); } catch {}
+    cx.notify();
+  }
+
+  // One row per terminal/tab under its space's header, joined by tree lines.
+  tabRows({ w, folder, nested, tree }, t) {
     const tabs = w.tabs ?? [];
-    if (!tabs.length) return null;
+    if (!tabs.length || !this.tabsShown(w)) return [];
     const ps = this.panes ?? [];
-    const maxShown = 4;
-    const shown = tabs.slice(0, maxShown);
-    const extra = tabs.length - shown.length;
-    const items = shown.map((tab) => {
+    return tabs.map((tab, n) => {
       const lead = ps.find((p) => p.tab === tab.id && p.program?.agent) ?? ps.find((p) => p.tab === tab.id);
       const prog = lead?.program;
       const isFile = lead?.mod === "file-view";
+      const current = w.active && tab.active;
       const iconEl = isFile
-        ? svg("mods/files/file.svg").size(11).flex_none().text_color(t.muted)
+        ? svg("mods/files/file.svg").size(12).flex_none().text_color(t.muted)
         : prog?.icon
           ? (prog.tint
-              ? svg(prog.icon).size(11).flex_none().text_color(w.active && tab.active ? t.foreground : t.muted)
-              : image(prog.icon).size(11).flex_none())
+              ? svg(prog.icon).size(12).flex_none().text_color(current ? t.foreground : t.muted)
+              : image(prog.icon).size(12).flex_none())
           : div().size(6).rounded(3).bg(t.dim);
       const stColor = tab.status === "blocked" ? t.blocked : tab.status === "done" ? t.done : tab.status === "working" ? t.working : null;
-      const tip = prog?.name ? (tab.named ? `${tab.name} (${prog.name})` : prog.name) : tab.name;
       return h_flex()
         .id(`space-tab-${tab.id}`)
-        .relative()
-        .size(17)
+        .h(24)
         .flex_none()
-        .rounded(4)
+        .pl(indent(folder, nested) + (tree ? 22 : 0) + 8)
+        .pr(8)
+        .gap(7)
         .items_center()
-        .justify_center()
+        .rounded(6)
+        .text_size(11.5)
         .cursor_pointer()
-        .when(w.active && tab.active, (el) => el.bg(t.raised).border_1().border_color(t.border))
-        .when(!(w.active && tab.active), (el) => el.hover((s) => s.bg(t.hover)))
-        .tooltip(tip)
+        .text_color(current ? t.foreground : t.muted)
+        .when(current, (el) => el.bg(t.raised))
+        .when(!current, (el) => el.hover((s) => s.bg(t.hover)))
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click((_e, cx) => {
           cx.stop_propagation();
           if (!w.active) run("space.select", { id: w.id });
           if (!tab.active) run("tab.select", { id: tab.id });
         })
+        .child(div().flex_none().text_color(t.dim).child(n === tabs.length - 1 ? "\u2514\u2500" : "\u251c\u2500"))
         .child(iconEl)
-        .when(Boolean(stColor), (el) =>
-          el.child(div().absolute().right(0).bottom(0).size(5).rounded(3).bg(stColor)),
-        );
+        .child(div().flex_1().min_w(0).truncate().child(tab.name))
+        .when(Boolean(prog?.name) && tab.named, (el) => el.child(div().flex_none().text_color(t.dim).child(prog.name)))
+        .when(Boolean(stColor), (el) => el.child(div().size(6).rounded(3).flex_none().bg(stColor)));
     });
-    return h_flex()
-      .flex_none()
-      .gap(2)
-      .items_center()
-      .children(items)
-      .when(extra > 0, (el) =>
-        el.child(div().px(2).text_size(10).text_color(t.dim).child(`+${extra}`)),
-      );
   }
 
   row({ w, i, g, tree, folder, nested }, t) {
@@ -1163,7 +1173,7 @@ export default class Spaces extends View {
     const doneCount = this.done?.get(w.id) ?? (w.status === "done" ? 1 : 0);
     const tabs = w.tabs ?? [];
     const folderName = folder ? (folders(w.machine ?? null).list.find((x) => x.id === folder)?.name ?? "") : "";
-    const showLeftName = (!folder && !tree && !w.named) || tabs.length === 0;
+    const showLeftName = !tree && !w.named;
     return v_flex()
       .relative()
       .id(`space-${w.id}`)
@@ -1213,11 +1223,15 @@ export default class Spaces extends View {
           .items_center()
           .when(Boolean(tree), el => el.pl(22).child(svg("mods/workspace-chrome/branch.svg").size(13).text_color(t.dim)))
           .when(showLeftName, el => el.child(div().flex_initial().min_w(SIDE_MIN).truncate().text_color(t.foreground).child(w.name)))
-          .when(Boolean(tabs.length), (el) => el.child(this.openTabsStrip(w, t)))
           .child(g || tree || w.named ? this.gitTail(g, tree, w, t, folderName, !folder || Boolean(tree)) : div().flex_1())
           .when(blockedCount > 0, (el) => el.child(blockedBadge(t, blockedCount)))
           .when(doneCount > 0, (el) => el.child(doneBadge(t, doneCount)))
-          .when(blockedCount === 0 && doneCount === 0 && w.status === "working", (el) => el.child(svg("mods/workspace-chrome/spinner.svg").size(11).flex_none().text_color(t.working).spin(900))),
+          .when(blockedCount === 0 && doneCount === 0 && w.status === "working", (el) => el.child(svg("mods/workspace-chrome/spinner.svg").size(11).flex_none().text_color(t.working).spin(900)))
+          .when(tabs.length > 0, (el) => el.child(
+            div().id(`space-tabs-toggle-${w.id}`).flex_none().px(2).rounded(4).hover((s) => s.bg(t.hover))
+              .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+              .on_click((_e, cx) => { cx.stop_propagation(); this.toggleTabs(w, cx); })
+              .child(svg(`mods/workspace-chrome/chevron-${this.tabsShown(w) ? "down" : "right"}.svg`).size(11).flex_none()))),
       );
   }
 
