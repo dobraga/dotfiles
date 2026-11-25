@@ -29,6 +29,9 @@
       "Bash(python3 -c:*)",
       "mcp__plugin_claude-mem_mcp-search__search"
     ],
+    "ask": [
+      "Bash(uv run *bb.py* --yes*)"
+    ],
     "deny": [
       "Read(./**/.env)"
     ],
