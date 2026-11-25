@@ -23,7 +23,7 @@ import {
   checking,
 } from "herdr";
 
-import { usageCard, formatReset, paceOf, WINDOW_MS } from "./usage-card.js";
+import { usageCard, formatReset, formatResetShort, paceOf, WINDOW_MS } from "./usage-card.js";
 import { cfg, applySettings, usageColor } from "./usage-settings.js";
 import { mediaCard } from "./media-card.js";
 import { readPlayers, pickActive, signature, sendCommand, pillLabel } from "./media.js";
@@ -94,6 +94,10 @@ function gauge(pct, color, t, pace) {
     .relative()
     .child(svg("mods/workspace-status-usage/rings/track.svg").size(12).absolute().top(0).left(0).text_color(t.raised))
     .when(step > 0, (el) => el.child(svg(`mods/workspace-status-usage/rings/arc-${step}.svg`).size(12).absolute().top(0).left(0).text_color(color)));
+}
+
+function brandIcon(name, t, loading) {
+  return svg(`mods/workspace-status-usage/icons/${name}.svg`).size(name === "agy" ? 10 : 13).flex_none().text_color(loading ? t.working : t.muted);
 }
 
 async function loadSettings() {
@@ -606,7 +610,7 @@ export default class WorkspaceStatusUsage extends View {
         const p = Math.round(cl.sevenDay.utilization ?? 0);
         items.push({ label: `7d ${p}%`, pct: p, reset: cl.sevenDay.resets_at, pace: paceOf(cl.sevenDay.resets_at, WINDOW_MS["7d"]), color: usageColor(p, paceOf(cl.sevenDay.resets_at, WINDOW_MS["7d"]), t, t.muted) });
       }
-      return { title: "Claude", items };
+      return { icon: "claude", items };
     }
 
     if (activeAgent?.kind === "agy") {
@@ -625,21 +629,30 @@ export default class WorkspaceStatusUsage extends View {
         if (p5h !== null) items.push({ label: `5h ${p5h}%`, pct: p5h, reset: b5h.resetTime, pace: paceOf(b5h.resetTime, WINDOW_MS["5h"]), color: usageColor(p5h, paceOf(b5h.resetTime, WINDOW_MS["5h"]), t, t.muted) });
         if (pw !== null) items.push({ label: `W ${pw}%`, pct: pw, reset: bw.resetTime, pace: paceOf(bw.resetTime, WINDOW_MS.weekly), color: usageColor(pw, paceOf(bw.resetTime, WINDOW_MS.weekly), t, t.muted) });
       }
-      return { title: "AGY", items };
+      return { icon: "agy", items };
     }
 
     const items = [];
+    const add = (icon, wins) => {
+      wins.filter(Boolean).forEach((w, i) => {
+        const pace = paceOf(w.reset, w.ms);
+        items.push({ icon: i === 0 ? icon : null, noSep: i > 0, label: `${w.label} ${w.p}%`, pct: w.p, pace, color: usageColor(w.p, pace, t, t.muted) });
+      });
+    };
     const cl = data?.claude;
-    if (cl?.sevenDay || cl?.fiveHour) {
-      const clPct = Math.round(Math.max(cl.fiveHour?.utilization ?? 0, cl.sevenDay?.utilization ?? 0));
-      items.push({ label: `Claude ${clPct}%`, pct: clPct, color: pctColor(clPct, t) });
-    }
-    const agyGroups = data?.agy?.groups ?? [];
-    if (agyGroups.length) {
-      const maxUsed = Math.max(...agyGroups.flatMap((g) => g.buckets.map((b) => bucketUsed(b) ?? 0)));
-      items.push({ label: `AGY ${maxUsed}%`, pct: maxUsed, color: pctColor(maxUsed, t) });
-    }
-    return { title: "Usage", items };
+    add("claude", [
+      cl?.fiveHour && { label: "5h", p: Math.round(cl.fiveHour.utilization ?? 0), reset: cl.fiveHour.resets_at, ms: WINDOW_MS["5h"] },
+      cl?.sevenDay && { label: "7d", p: Math.round(cl.sevenDay.utilization ?? 0), reset: cl.sevenDay.resets_at, ms: WINDOW_MS["7d"] },
+    ]);
+    const buckets = (data?.agy?.groups ?? []).flatMap((g) => g.buckets);
+    const worst = (window, label, ms) => {
+      const bs = buckets.filter((b) => b.window === window && bucketUsed(b) !== null);
+      if (!bs.length) return null;
+      const b = bs.reduce((m, x) => (bucketUsed(x) > bucketUsed(m) ? x : m));
+      return { label, p: bucketUsed(b), reset: b.resetTime, ms };
+    };
+    add("agy", [worst("5h", "5h", WINDOW_MS["5h"]), worst("weekly", "W", WINDOW_MS.weekly)]);
+    return { items };
   }
 
   maybeSyncForge(cx) {
@@ -916,18 +929,18 @@ export default class WorkspaceStatusUsage extends View {
               setShared("usage.pinned", true);
             }
           })
-          .child(div().size(6).rounded(3).bg(shared("usage.loading") ? t.working : t.accent))
-          .child(pill.title)
+          .when(Boolean(pill.icon), (el) => el.child(brandIcon(pill.icon, t, shared("usage.loading"))))
           .when(pill.items.length > 0, (el) =>
             el.children(
-              pill.items.map((item) =>
+              pill.items.map((item, i) =>
                 h_flex()
                   .gap(4)
                   .items_center()
-                  .child(div().text_color(t.dim).child("·"))
+                  .when((i > 0 || Boolean(pill.icon)) && !item.noSep, (el) => el.child(div().text_color(t.dim).child("·")))
+                  .when(Boolean(item.icon), (el) => el.child(brandIcon(item.icon, t, shared("usage.loading"))))
+                  .child(div().text_color(item.color).child(cfg.showPercent || cfg.style === "text" ? item.label : item.label.replace(/ ?\d+%$/, "")))
                   .when(cfg.style !== "text", (el) => el.child(gauge(item.pct, item.color, t, item.pace)))
-                  .child(div().text_color(item.color).child(cfg.showPercent || cfg.style === "text" ? item.label : item.label.replace(/ \d+%$/, "")))
-                  .when(cfg.showReset && Boolean(item.reset), (el) => el.child(div().text_size(10.5).text_color(t.dim).child(`↻${formatReset(item.reset)}`))),
+                  .when(cfg.showReset && Boolean(item.reset), (el) => el.child(div().text_size(10.5).text_color(t.dim).child(`↻${formatResetShort(item.reset)}`))),
               ),
             ),
           ))

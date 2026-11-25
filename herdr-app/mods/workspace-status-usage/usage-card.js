@@ -14,6 +14,12 @@ export function formatReset(iso) {
   return `${Math.max(1, mins)}m`;
 }
 
+// Single-unit variant for the status pill: "6d", "2h", "45m".
+export function formatResetShort(iso) {
+  const full = formatReset(iso);
+  return full.split(" ")[0];
+}
+
 function formatAge(ts) {
   if (!ts) return "not fetched yet";
   const sec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
