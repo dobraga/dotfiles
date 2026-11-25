@@ -1,7 +1,7 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { cfg } from "./usage-settings.js";
-import { fmtRate, fmtBytes } from "./sysstats.js";
+import { fmtRate, fmtBytes, pad2, HIST_LEN } from "./sysstats.js";
 
 const icon = (name, t) => svg(`mods/workspace-status-usage/icons/${name}.svg`).size(14).flex_none().text_color(t.muted);
 const pctColor = (v, t) => (v >= cfg.critical ? t.ansi1 : v >= cfg.warn ? t.blocked : t.ansi2);
@@ -12,19 +12,26 @@ function bar(pct, t) {
     .child(div().h_full().w(Math.round((310 * v) / 100)).bg(pctColor(v, t)).rounded(3));
 }
 
-// Bars, newest on the right. `max` fixes the scale (100 for CPU); omit to autoscale (network).
+// Area graph, newest on the right. `max` fixes the scale (100 for CPU/GPU); omit to autoscale (network).
+// One flex column per sample: a solid 2px cap (the "line") over a faint fill down to the baseline.
 function spark(values, t, color, max) {
   const top = max ?? Math.max(1, ...values);
-  return h_flex().h(28).w(310).items_end().gap(1).overflow_hidden()
-    .children(values.map((v, i) => div().id(`sp-${i}`).w(4).flex_none().rounded(1).bg(color)
-      .h(Math.max(1, Math.round((28 * Math.min(v, top)) / top))).opacity(0.85)));
+  const H = 28;
+  const pad = Array(Math.max(0, HIST_LEN - values.length)).fill(null);
+  return h_flex().h(H).w(310).items_end().overflow_hidden()
+    .children([...pad, ...values].map((v, i) => {
+      const px = v == null ? 0 : Math.max(2, Math.round((H * Math.min(v, top)) / top));
+      return v_flex().id(`sp-${i}`).flex_1().h(px).min_w(0)
+        .when(px > 0, (el) => el.child(div().h(2).w_full().bg(color))
+          .when(px > 2, (e) => e.child(div().h(px - 2).w_full().bg(color).opacity(0.3))));
+    }));
 }
 
 function head(name, label, value, t, color) {
   return h_flex().items_center().gap(7).text_size(12)
     .child(icon(name, t))
     .child(div().flex_1().font_semibold().child(label))
-    .child(div().font_medium().text_color(color ?? t.foreground).child(value));
+    .child(div().w(150).flex_none().text_right().font_medium().text_color(color ?? t.foreground).child(value));
 }
 
 function procs(list, key, t) {
@@ -48,7 +55,7 @@ export function sysCard({ t, s, hist, detail, pinned, onHover, onMove, onDismiss
   const body = v_flex().p(12).gap(12);
   if (cfg.showCpu) {
     body.child(section(t)
-      .child(head("cpu", "CPU", s.cpu == null ? "–" : `${s.cpu}%`, t, s.cpu == null ? t.dim : pctColor(s.cpu, t)))
+      .child(head("cpu", "CPU", s.cpu == null ? "–" : `${pad2(s.cpu)}%`, t, s.cpu == null ? t.dim : pctColor(s.cpu, t)))
       .when(cfg.showSpark, (el) => el.child(spark(hist?.cpu ?? [], t, pctColor(s.cpu ?? 0, t), 100)))
       .when(Boolean(detail?.cores), (el) => el.child(div().text_size(10.5).text_color(t.dim)
         .child(`${detail.cores} cores${detail.load ? ` · load ${detail.load.map((n) => n.toFixed(2)).join(" ")}` : ""}`)))
@@ -57,7 +64,7 @@ export function sysCard({ t, s, hist, detail, pinned, onHover, onMove, onDismiss
   if (cfg.showMem) {
     body.child(section(t)
       .child(head("memory", "Memory", detail?.mem ? `${fmtBytes(detail.mem.used)} / ${fmtBytes(detail.mem.total)}` : `${memPct ?? "–"}%`, t, memPct == null ? t.dim : pctColor(memPct, t)))
-      .child(bar(memPct, t))
+      .child(cfg.showSpark ? spark(hist?.mem ?? [], t, memPct == null ? t.dim : pctColor(memPct, t), 100) : bar(memPct, t))
       .when(Boolean(detail?.swap?.total), (el) => el.child(div().text_size(10.5).text_color(t.dim).child(`Swap ${fmtBytes(detail.swap.used)} / ${fmtBytes(detail.swap.total)}`)))
       .when(cfg.showProcs && Boolean(detail?.procs), (el) => el.child(procs(detail.procs.mem, "mem", t))));
   }
@@ -66,6 +73,14 @@ export function sysCard({ t, s, hist, detail, pinned, onHover, onMove, onDismiss
       .child(head("disk", "Disk", detail?.disk ? `${fmtBytes(detail.disk.used)} / ${fmtBytes(detail.disk.total)}` : `${s.disk ?? "–"}%`, t, s.disk == null ? t.dim : pctColor(s.disk, t)))
       .child(bar(s.disk, t))
       .when(Boolean(detail?.disk), (el) => el.child(div().text_size(10.5).text_color(t.dim).child(`${fmtBytes(detail.disk.total - detail.disk.used)} free`))));
+  }
+  if (cfg.showGpu && s.gpu) {
+    const g = s.gpu;
+    body.child(section(t)
+      .child(head("gpu", "GPU", `${pad2(g.util)}%`, t, pctColor(g.util, t)))
+      .when(cfg.showSpark, (el) => el.child(spark(hist?.gpu ?? [], t, pctColor(g.util, t), 100)))
+      .child(div().text_size(10.5).text_color(t.dim)
+        .child(`VRAM ${fmtBytes(g.memUsed)} / ${fmtBytes(g.memTotal)}${g.temp != null ? ` · ${g.temp}°C` : ""}`)));
   }
   if (cfg.showNet) {
     body.child(section(t)

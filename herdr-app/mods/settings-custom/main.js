@@ -57,8 +57,8 @@ const APPEARANCES = [
 const DEFAULT_FONT = "JetBrains Mono";
 const DEFAULT_UI_FONT = "Geist";
 
-const USAGE_DEFAULTS = { style: "ring", warn: 60, critical: 90, showReset: false, showPace: true, colorMode: "threshold", showPercent: true, ctxWarn: 60, ctxCritical: 90, showComputer: true, showBranch: true, showAgents: true, showPrs: true, showSystem: true, showCpu: true, showMem: true, showDisk: true, showNet: true, showUsage: true, showMedia: true, showProcs: true, showSpark: true, sysInterval: 3 };
-const BAR_ITEMS = ["showComputer", "showBranch", "showAgents", "showPrs", "showSystem", "showCpu", "showMem", "showDisk", "showNet", "showUsage", "showMedia", "showProcs", "showSpark"];
+const USAGE_DEFAULTS = { style: "ring", warn: 60, critical: 90, showReset: false, showPace: true, colorMode: "threshold", showPercent: true, ctxWarn: 60, ctxCritical: 90, showComputer: true, showBranch: true, showAgents: true, showPrs: true, showSystem: true, showCpu: true, showMem: true, showDisk: true, showGpu: true, showNet: true, showUsage: true, showMedia: true, showProcs: true, showSpark: true, sysInterval: 3 };
+const BAR_ITEMS = ["showComputer", "showBranch", "showAgents", "showPrs", "showSystem", "showCpu", "showMem", "showDisk", "showGpu", "showNet", "showUsage", "showMedia", "showProcs", "showSpark"];
 
 export default class SettingsCustom extends View {
   init(_props, cx) {
@@ -246,6 +246,7 @@ export default class SettingsCustom extends View {
         tg("st-sys-cpu", "showCpu", "CPU", "CPU usage %."),
         tg("st-sys-mem", "showMem", "Memory", "Memory in use %."),
         tg("st-sys-disk", "showDisk", "Disk", "Root disk used %."),
+        tg("st-sys-gpu", "showGpu", "GPU", "NVIDIA GPU usage % and VRAM (needs nvidia-smi; hidden otherwise)."),
         tg("st-sys-net", "showNet", "Network", "Download / upload bytes per second."),
         this.row(t, "Refresh every", "How often the bar samples the system while the popup is closed (the popup samples faster while open).", intervals),
         tg("st-sys-procs", "showProcs", "Top processes in popup", "List the top 5 processes by CPU and memory. Runs ps only while the popup is open."),

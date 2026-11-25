@@ -9,6 +9,9 @@ export function fmtRate(bytesPerSec) {
   return String(Math.round(n));
 }
 
+/** Pads a number to 2 digits with figure spaces (digit-wide) so the layout does not shift. */
+export const pad2 = (v) => String(v).padStart(2, "\u2007");
+
 const clampPct = (v) => Math.max(0, Math.min(100, Math.round(v)));
 
 // ---- Linux ----
@@ -84,6 +87,13 @@ export function parseDf(text) {
   return used >= 0 && avail >= 0 && used + avail > 0 ? clampPct((used / (used + avail)) * 100) : null;
 }
 
+/** `nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits` -> first GPU. */
+export function parseNvidiaSmi(text) {
+  const f = (text ?? "").trim().split("\n")[0]?.split(",").map((x) => Number(x.trim()));
+  if (!f || f.length < 3 || !Number.isFinite(f[0])) return null;
+  return { util: clampPct(f[0]), memUsed: f[1] * 2 ** 20, memTotal: f[2] * 2 ** 20, temp: Number.isFinite(f[3]) ? f[3] : null };
+}
+
 async function sh(exec, cmd, args, timeout = 4000) {
   try {
     const r = await exec(cmd, args, { timeout });
@@ -101,6 +111,13 @@ export async function readStats({ mac, exec, readTextFile }, prev) {
   let mem = null;
   let net;
   let disk;
+  let gpu = null;
+  let gpuMissing = prev?.gpuMissing ?? false;
+  if (!mac && !gpuMissing) {
+    const out = await sh(exec, "nvidia-smi", ["--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu", "--format=csv,noheader,nounits"]);
+    gpu = parseNvidiaSmi(out);
+    if (out == null) gpuMissing = true; // no NVIDIA driver/binary: stop spawning
+  }
   if (mac) {
     const [top, vm, memsize, df, ns] = await Promise.all([
       sh(exec, "top", ["-l", "2", "-n", "0", "-s", "1"], 6000),
@@ -131,15 +148,15 @@ export async function readStats({ mac, exec, readTextFile }, prev) {
   const dt = prev?.net && net ? (now - prev.at) / 1000 : 0;
   const down = dt > 0 ? Math.max(0, (net.rx - prev.net.rx) / dt) : 0;
   const up = dt > 0 ? Math.max(0, (net.tx - prev.net.tx) / dt) : 0;
-  return { at: now, cpuRaw, net: net ?? prev?.net ?? null, cpu, mem, disk, down, up };
+  return { at: now, cpuRaw, net: net ?? prev?.net ?? null, cpu, mem, disk, down, up, gpu, gpuMissing };
 }
 
 // ---- history (sparklines) ----
 export const HIST_LEN = 60;
 export function pushHist(hist, s) {
-  const h = hist ?? { cpu: [], down: [], up: [] };
+  const h = hist ?? { cpu: [], mem: [], down: [], up: [], gpu: [] };
   const add = (k, v) => [...h[k], v ?? 0].slice(-HIST_LEN);
-  return { cpu: add("cpu", s.cpu), down: add("down", s.down), up: add("up", s.up) };
+  return { cpu: add("cpu", s.cpu), mem: add("mem", s.mem), down: add("down", s.down), up: add("up", s.up), gpu: add("gpu", s.gpu?.util) };
 }
 
 // ---- detail (read only while the card is open) ----

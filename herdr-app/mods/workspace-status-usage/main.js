@@ -28,7 +28,7 @@ import { cfg, applySettings, usageColor } from "./usage-settings.js";
 import { mediaCard } from "./media-card.js";
 import { readPlayers, pickActive, signature, sendCommand, pillLabel } from "./media.js";
 import { resolveFocusedAgent } from "./agent-focus.js";
-import { readStats, readDetail, pushHist, fmtRate } from "./sysstats.js";
+import { readStats, readDetail, pushHist, fmtRate, pad2 } from "./sysstats.js";
 import { sysCard } from "./sys-card.js";
 
 function findNode(node, id) {
@@ -526,7 +526,7 @@ export default class WorkspaceStatusUsage extends View {
   sysPill(s, t) {
     const icon = (name) => svg(`mods/workspace-status-usage/icons/${name}.svg`).size(13).flex_none().text_color(t.dim);
     const pct = (name, v) => h_flex().gap(5).items_center().child(icon(name))
-      .child(div().text_color(v == null ? t.dim : pctColor(v, t)).child(v == null ? "–" : `${v}%`));
+      .child(div().w(30).flex_none().text_right().text_color(v == null ? t.dim : pctColor(v, t)).child(v == null ? "\u2007–%" : `${pad2(v)}%`));
     const isOpen = Boolean(shared("sys.open"));
     const trigger = h_flex().id("status-sys").px(7).py(2).gap(12).items_center().rounded(5).cursor_pointer()
       .when(isOpen, (el) => el.bg(t.selected))
@@ -551,7 +551,8 @@ export default class WorkspaceStatusUsage extends View {
       .when(cfg.showCpu, (el) => el.child(pct("cpu", s.cpu)))
       .when(cfg.showMem, (el) => el.child(pct("memory", s.mem)))
       .when(cfg.showDisk, (el) => el.child(pct("disk", s.disk)))
-      .when(cfg.showNet, (el) => el.child(h_flex().gap(5).items_center().child(icon("net")).child(`${fmtRate(s.down)} / ${fmtRate(s.up)}`)));
+      .when(cfg.showGpu && Boolean(s.gpu), (el) => el.child(pct("gpu", s.gpu.util)))
+      .when(cfg.showNet, (el) => el.child(h_flex().gap(5).items_center().child(icon("net")).child(div().w(34).flex_none().text_right().child(fmtRate(s.down))).child("/").child(div().w(34).flex_none().text_right().child(fmtRate(s.up)))));
     return Popup.new("sys-popup", trigger)
       .anchor("top_center")
       .when(isOpen, (el) =>
@@ -997,7 +998,7 @@ export default class WorkspaceStatusUsage extends View {
             ),
           ),
       ))
-      .when(cfg.showSystem && Boolean(sys) && (cfg.showCpu || cfg.showMem || cfg.showDisk || cfg.showNet), (el) => el.child(this.sysPill(sys, t)))
+      .when(cfg.showSystem && Boolean(sys) && (cfg.showCpu || cfg.showMem || cfg.showDisk || cfg.showGpu || cfg.showNet), (el) => el.child(this.sysPill(sys, t)))
       .child(div().flex_1())
       .when(cfg.showMedia && Boolean(media), (el) => el.child(this.mediaPill(media, t)))
       .child(div().id("palette").text_color(t.dim).cursor_pointer().on_click(() => run("app.palette")).child(this.hint()));
