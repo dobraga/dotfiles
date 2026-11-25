@@ -1,6 +1,6 @@
 // User settings: <appHome>/data/workspace-status-usage/settings.json
 //   { "style": "ring" | "bar" | "text", "warn": 60, "critical": 90, "showReset": false }
-export const cfg = { style: "ring", warn: 60, critical: 90, showReset: false, showPace: true, showPercent: true, ctxWarn: 60, ctxCritical: 90 };
+export const cfg = { style: "ring", warn: 60, critical: 90, showReset: false, showPace: true, showPercent: true, ctxWarn: 60, ctxCritical: 90, showComputer: true, showBranch: true, showAgents: true, showPrs: true, showSystem: true, showCpu: true, showMem: true, showDisk: true, showNet: true };
 
 export function applySettings(raw) {
   let p = {};
@@ -11,6 +11,7 @@ export function applySettings(raw) {
   cfg.showReset = p.showReset === true;
   cfg.showPace = p.showPace !== false;
   cfg.showPercent = p.showPercent !== false;
+  for (const k of ["showComputer", "showBranch", "showAgents", "showPrs", "showSystem", "showCpu", "showMem", "showDisk", "showNet"]) cfg[k] = p[k] !== false;
   const cw = Number(p.ctxWarn);
   const cc = Number(p.ctxCritical);
   cfg.ctxWarn = Number.isFinite(cw) ? cw : 60;
