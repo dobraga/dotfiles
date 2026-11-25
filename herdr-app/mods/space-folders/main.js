@@ -672,6 +672,26 @@ export default class Spaces extends View {
     setShared("space-folders.profile", next);
   }
 
+  // The profile a space is under: its folder's, or its own when it's in no folder. null: none.
+  profileOf(s, ps) {
+    const f = folders(s.machine ?? null);
+    const fid = folderOf(s, f, ps);
+    return fid ? (f.list.find((x) => x.id === fid)?.profile ?? null) : (f.spaceProfiles[localId(s)] ?? null);
+  }
+
+  // A profile chip's click: filters the list and goes to that profile's last shown space (else its
+  // first), so the selected profile is always the shown space's.
+  pickProfile(pid) {
+    this.setProfile(pid);
+    if (!pid) return;
+    const sp = spaces(), ps = panes();
+    const shown = sp.find((x) => x.active);
+    if (shown && this.profileOf(shown, ps) === pid) return;
+    const mine = sp.filter((x) => this.profileOf(x, ps) === pid);
+    const to = mine.find((x) => x.id === this.lastShown?.[pid]) ?? mine[0];
+    if (to) run("space.select", { id: to.id });
+  }
+
   setFolderProfile(machine, folderId, profileId) {
     const f = folders(machine);
     saveFolders(machine, { ...f, list: f.list.map((x) => x.id === folderId ? { ...x, profile: profileId ?? null } : x) });
@@ -1314,6 +1334,26 @@ export default class Spaces extends View {
     const sp = spaces();
     const ps = panes();
     this.panes = ps;
+    // Follow focus: when the focused pane or the shown space changes to one under another profile
+    // (work/personal), switch the selected profile to it. Only on a change, so clicking a profile
+    // chip isn't undone while the old space still has focus.
+    const fp = ps.find((p) => p.focused)?.pane ?? null;
+    const shownId = sp.find((x) => x.active)?.id ?? null;
+    const fkey = `${shownId}|${fp}`;
+    if (fkey !== this.focusKey) {
+      const first = this.focusKey === undefined;
+      this.focusKey = fkey;
+      const pane = fp && ps.find((p) => p.pane === fp);
+      const host = (pane && sp.find((x) => x.tabs?.some((tb) => tb.id === pane.tab))) ?? sp.find((x) => x.active);
+      if (!first && host && shared("space-folders.follow") !== false) {
+        const prof = this.profileOf(host, ps);
+        if (prof && prof !== activeProfile()) this.setProfile(prof);
+      }
+      // Each profile's last shown space, for pickProfile.
+      const shown = sp.find((x) => x.active);
+      const sprof = shown && this.profileOf(shown, ps);
+      if (sprof) (this.lastShown ??= {})[sprof] = shown.id;
+    }
     const blocked = new Map();
     const done = new Map();
     for (const a of agents()) {
@@ -1373,7 +1413,7 @@ export default class Spaces extends View {
             cx.notify();
           }
         })
-        .on_click(() => this.setProfile(pid))
+        .on_click(() => this.pickProfile(pid))
         .when(Boolean(pid), (el) =>
           el.on_mouse_down("right", (_e, cx) => {
             cx.stop_propagation();
