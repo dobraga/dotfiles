@@ -45,6 +45,8 @@ const SECTIONS = [
   { id: "privacy", title: "Privacy", icon: "frame/settings/shield.svg" },
 ];
 
+const QUICK_OPEN_IGNORE = ["*.pyc", "__pycache__", ".venv", "venv", "node_modules", ".git", ".DS_Store", ".mypy_cache", ".pytest_cache", ".ruff_cache"];
+
 const LOOKS = { main: "Herdr", terminals: "Terminals", win98: "Herdr 98" };
 const APPEARANCES = [
   [null, "System"],
@@ -66,6 +68,12 @@ export default class SettingsCustom extends View {
     this.fontInput.on("change", (_e, cx) => {
       this.filter = this.fontInput.value();
       cx.notify();
+    });
+    this.ignoreInput = InputState.new({ placeholder: "*.pyc, .venv, node_modules" });
+    this.ignoreInput.on("change", (_e, cx) => {
+      const list = this.ignoreInput.value().split(",").map((x) => x.trim()).filter(Boolean);
+      if (JSON.stringify(list) === JSON.stringify(this.filesSettings?.quickOpenIgnore)) return;
+      this.updateFilesSettings({ quickOpenIgnore: list }, cx);
     });
     this.renameInput = InputState.new();
     this.renameInput.on("focus", (_e, cx) => {
@@ -425,8 +433,11 @@ export default class SettingsCustom extends View {
       if (Number.isFinite(tint) && tint >= 0 && tint <= 30) next.diffTint = tint;
       const tw = Number(parsed?.tabMaxWidth);
       if (Number.isFinite(tw) && tw >= 80 && tw <= 400) next.tabMaxWidth = tw;
+      if (Array.isArray(parsed?.quickOpenIgnore)) next.quickOpenIgnore = parsed.quickOpenIgnore.map(String);
     } catch {}
+    next.quickOpenIgnore ??= [...QUICK_OPEN_IGNORE];
     this.filesSettings = next;
+    this.ignoreInput.set_value(next.quickOpenIgnore.join(", "));
     setShared("files-tabs.settings", next);
   }
 
@@ -829,6 +840,14 @@ export default class SettingsCustom extends View {
             (_e, cx) => this.updateFilesSettings({ diffTint: Math.max(0, tint - 1) }, cx),
             (_e, cx) => this.updateFilesSettings({ diffTint: Math.min(30, tint + 1) }, cx),
           ),
+        ),
+      )
+      .child(
+        this.row(
+          t,
+          "Quick Open ignores",
+          "Comma-separated names or globs left out of Quick Open (Ctrl+P), on top of .gitignore. A name matches any folder or file with it; *.ext matches file names. Applies the next time Quick Open opens.",
+          div().w(260).h(28).px(8).rounded(6).border_1().border_color(t.border).bg(t.background).child(Input.new(this.ignoreInput).w_full().h_full().text_size(12.5).text_color(t.foreground)),
         ),
       )
       .when(Boolean(this.filesError), (el) =>

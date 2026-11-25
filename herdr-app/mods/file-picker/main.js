@@ -4,6 +4,28 @@ import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { spaces, panes, focused, exec, run, theme, settings, props, closeOverlay, shared, setShared, window, home, checking } from "herdr";
 
 const MAX_FILES = 10000;
+// Settings > Files > "Quick Open ignores". Names match any path segment; "*.ext" style globs match the file name.
+const DEFAULT_IGNORE = ["*.pyc", "__pycache__", ".venv", "venv", "node_modules", ".git", ".DS_Store", ".mypy_cache", ".pytest_cache", ".ruff_cache"];
+
+function ignoreFilter() {
+  const list = shared("files-tabs.settings")?.quickOpenIgnore;
+  const pats = (Array.isArray(list) ? list : DEFAULT_IGNORE).map((x) => String(x).trim().replace(/\/+$/, "")).filter(Boolean);
+  const names = new Set(), globs = [];
+  for (const x of pats) {
+    if (x.includes("*")) globs.push(new RegExp("^" + x.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$"));
+    else names.add(x);
+  }
+  if (!names.size && !globs.length) return () => true;
+  return (path) => {
+    const segs = path.split("/");
+    for (const seg of segs) if (names.has(seg) || globs.some((g) => g.test(seg))) return false;
+    return true;
+  };
+}
+
+function capFiles(list) {
+  return list.filter(ignoreFilter()).slice(0, MAX_FILES);
+}
 const MAX_SHOWN = 80;
 
 function location() {
@@ -203,17 +225,22 @@ async function listFiles(cwd, on) {
     const root = top.stdout.trim();
     const res = await exec("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "ls-files", "--cached", "--others", "--exclude-standard", "-z"], { cwd: root, on });
     if (res.code === 0) {
-      return {
-        root,
-        files: res.stdout.split("\0").filter(Boolean).slice(0, MAX_FILES),
-      };
+      const files = res.stdout.split("\0").filter(Boolean).filter((f) => !f.endsWith("/"));
+      // Sub-repos (ignored or untracked in this repo, e.g. a scaffold folder holding several services) are invisible to the parent's git: list each on its own.
+      const found = await exec("sh", ["-c", 'cd "$1" && find . -maxdepth 3 -name .git -not -path "./.git" -not -path "*/node_modules/*" -not -path "*/.venv/*" 2>/dev/null | sed "s|^\\./||; s|/\\.git$||"', "file-picker", root], { on }).catch(() => null);
+      const nested = (found?.stdout ?? "").split("\n").filter(Boolean).slice(0, 20);
+      const parts = await Promise.all(nested.map((dir) =>
+        exec("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "ls-files", "--cached", "--others", "--exclude-standard", "-z"], { cwd: `${root}/${dir}`, on })
+          .then((r) => (r.code === 0 ? r.stdout.split("\0").filter(Boolean).map((f) => `${dir}/${f}`) : []))
+          .catch(() => [])));
+      return { root, files: capFiles([...files, ...parts.flat()]) };
     }
   }
-  const rgRes = await exec("rg", ["--files", "--null"], { cwd, on }).catch(() => null);
+  const rgRes = await exec("rg", ["--files", "--null", "--hidden", "--glob", "!.git"], { cwd, on }).catch(() => null);
   if (rgRes?.code === 0) {
     return {
       root: cwd,
-      files: rgRes.stdout.split("\0").filter(Boolean).slice(0, MAX_FILES),
+      files: capFiles(rgRes.stdout.split("\0").filter(Boolean)),
     };
   }
   if (!on && window()?.platform === "windows") {
@@ -221,9 +248,9 @@ async function listFiles(cwd, on) {
     if (r.code !== 0) throw new Error(r.stderr || "Cannot list files");
     return { root: cwd, files: r.stdout.split(/\r?\n/).filter(Boolean).slice(0, MAX_FILES) };
   }
-  const r = await exec("sh", ["-c", 'cd "$1" && find . -maxdepth 6 -not -path "*/.*" -type f 2>/dev/null | sed "s|^\\./||" | head -n 5000', "file-picker", cwd], { on });
+  const r = await exec("sh", ["-c", 'cd "$1" && find . -maxdepth 6 -not -path "./.git/*" -not -path "*/node_modules/*" -type f 2>/dev/null | sed "s|^\\./||" | head -n 5000', "file-picker", cwd], { on });
   if (r.code !== 0) throw new Error(r.stderr || "Cannot list files");
-  return { root: cwd, files: r.stdout.split("\n").filter(Boolean).slice(0, MAX_FILES) };
+  return { root: cwd, files: capFiles(r.stdout.split("\n").filter(Boolean)) };
 }
 
 function cleanPathInput(raw) {
