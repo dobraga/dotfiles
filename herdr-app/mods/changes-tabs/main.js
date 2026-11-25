@@ -67,6 +67,7 @@ function location() {
 const key = () => JSON.stringify(location());
 // Reads write nothing under .git (no index refresh or lock, no fsmonitor cookie):
 // the folder watch would see it, and every refresh would start the next one.
+const AUTO_FETCH_MS = 5 * 60 * 1000; // background `git fetch` so the ↓/↑ indicators stay current
 const READ = ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "diff.autoRefreshIndex=false"];
 
 function openFileTab({ spaceId, kind, path, root, on, name, pin }) {
@@ -156,6 +157,26 @@ export default class ChangesTabs extends View {
     this.handle = cx.focus_handle();
     this.refresh(cx);
     cx.timer.every(500, (cx) => this.refreshIfDue(cx));
+    cx.timer.every(30000, (cx) => this.autoFetch(cx));
+  }
+
+  // Quiet background fetch (no notification, no error note) for repos with an upstream, at most once per AUTO_FETCH_MS.
+  autoFetch(cx) {
+    const state = this.state;
+    if (!state || window()?.active === false || this.busy || this.loading || this.context !== key()) return;
+    const now = Date.now(), on = this.on;
+    state.fetchedAt ??= new Map();
+    const due = this.repos.filter((r) => !r.error && r.hasUpstream && now - (state.fetchedAt.get(r.root) ?? 0) >= AUTO_FETCH_MS);
+    if (!due.length) return;
+    for (const r of due) state.fetchedAt.set(r.root, now);
+    cx.spawn(async (cx) => {
+      try {
+        await Promise.all(due.map((r) => exec("git", ["fetch", "--prune"], { cwd: r.root, on, timeout: 60000 }).catch(() => null)));
+      } finally {
+        if (this.current(state)) this.refresh(cx, true);
+        cx.notify();
+      }
+    });
   }
 
   inputFor(root) {
@@ -302,8 +323,11 @@ export default class ChangesTabs extends View {
         if (!this.current(state)) return;
         if (!roots.length) { this.repos = []; this.error = "Not a git repository"; return; }
         const scans = [];
-        const repos = await Promise.all(roots.map((root) => this.loadRepo(root, on, state, request, cx, scans)));
-        if (!this.current(state) || repos.some((r) => !r)) return;
+        const loaded = await Promise.all(roots.map((root) => this.loadRepo(root, on, state, request, cx, scans)));
+        if (!this.current(state) || loaded.some((r) => !r)) return;
+        // A repo whose folder was deleted (a removed worktree) is not listed; if none is left, say so.
+        const gone = (r) => r.error && /No such file or directory/.test(r.error);
+        const repos = loaded.some((r) => !gone(r)) ? loaded.filter((r) => !gone(r)) : loaded;
         if (scans.length) {
           state.pollAt = Math.min(...scans.map((x) => x.pollAt));
           state.watchAt = Math.min(...scans.map((x) => x.watchAt));
@@ -814,12 +838,41 @@ export default class ChangesTabs extends View {
             .cursor_pointer()
             .hover((s) => s.bg(t.hover))
             .on_click((_e, cx) => { this.collapsed[r.root] = !collapsed; cx.notify(); })
+            .on_hover((hovered, cx) => {
+              if (hovered ? this.hoverRoot === r.root : this.hoverRoot !== r.root) return;
+              this.hoverRoot = hovered ? r.root : null;
+              cx.notify();
+            })
             .child(div().w(10).text_size(10).text_color(t.dim).child(collapsed ? "▸" : "▾"))
             .child(div().min_w(0).truncate().font_semibold().text_size(12).child(r.name))
             .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(r.branch || ""))
+            .when(!r.error && r.behind > 0, (e) => e.child(div().text_size(11).text_color(t.ansi3).tooltip(`${r.behind} commit(s) to pull`).child(`↓${r.behind}`)))
+            .when(!r.error && r.ahead > 0, (e) => e.child(div().text_size(11).text_color(t.ansi2).tooltip(`${r.ahead} commit(s) to push`).child(`↑${r.ahead}`)))
             .when(rAdd > 0, (e) => e.child(div().text_size(11).text_color(t.ansi2).child(`+${rAdd}`)))
             .when(rDel > 0, (e) => e.child(div().text_size(11).text_color(t.ansi1).child(`−${rDel}`)))
-            .child(div().px(5).py(1).rounded(4).border_1().border_color(t.border).text_size(10).text_color(t.muted).child(`${count}`)),
+            .when(this.hoverRoot === r.root && !r.error && collapsed, (e) => {
+              // One contextual action: Pull when behind, Push when ahead (or no upstream), Fetch when in sync.
+              const [action, label] = r.behind > 0 ? ["pull", "Pull"] : r.ahead > 0 || !r.hasUpstream ? ["push", "Push"] : ["fetch", "Fetch"];
+              return e.child(
+                div()
+                  .id(`repo-quick-${r.root}`)
+                  .h(20)
+                  .px(7)
+                  .flex()
+                  .items_center()
+                  .rounded(5)
+                  .border_1()
+                  .border_color(t.border)
+                  .bg(t.raised)
+                  .text_size(10.5)
+                  .text_color(canSync ? t.muted : t.dim)
+                  .when(canSync, (b) => b.cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)))
+                  .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+                  .on_click((_e, cx) => { cx.stop_propagation(); this.syncGit(r, action, cx); })
+                  .child(this.syncAction?.root === r.root ? "…" : label),
+              );
+            })
+            .child(div().px(5).py(1).rounded(4).border_1().border_color(t.border).text_size(10).text_color(t.muted).tooltip(`${count} changed file${count === 1 ? "" : "s"}`).child(`${count}`)),
         )
         .when(!collapsed && Boolean(r.error), (e) => e.child(div().p(8).text_size(11).text_color(t.ansi1).child(r.error)))
         .when(!collapsed && !r.error, (e) =>
