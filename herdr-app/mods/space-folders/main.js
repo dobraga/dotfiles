@@ -11,6 +11,7 @@
 // another machine too, with its header and spaces, when a rule matches the
 // machine's name or the folder one of its spaces works in.
 
+import { groupTabs, tabKey, worktreesFirst } from "./groups.js";
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, ScrollHandle } from "gpui-base";
 import { spaces, agents, machines, panes, run, openOverlay, closeOverlay, props, exec, hc, theme, shared, setShared, watchFolder, window, layout, pickFolder, home, appHome, checking, nextCommand } from "herdr";
@@ -408,6 +409,8 @@ export default class Spaces extends View {
     const at = {};
     for (const s of sp) at[s.id] = where(s, ps);
     const keys = new Set(Object.values(at).filter((k) => JSON.parse(k)[1]));
+    // Every tab's own place too: a tab in a worktree is listed under it (see groupTabs).
+    for (const s of sp) for (const tab of s.tabs ?? []) { const k = tabKey(s.machine, tab.id, ps); if (k) keys.add(k); }
     for (const k of Object.keys(this.git)) if (!keys.has(k)) {
       delete this.git[k];
       delete this.checked[k];
@@ -504,7 +507,7 @@ export default class Spaces extends View {
         exec("git", ["config", "--get", "remote.origin.url"], { cwd, on }).catch(() => null),
       ]);
       const [ahead, behind] = counts.code === 0 ? counts.stdout.trim().split(/\s+/).map(Number) : [0, 0];
-      const info = { name: repoName(repo), branch: branch.code === 0 ? branch.stdout.trim().replace(/^refs\/heads\//, "") : "(detached)", ahead, behind, repo: JSON.stringify([on, repo]), repoSlug: remote?.code === 0 ? normalizeRemoteSlug(remote.stdout) : null, linked: repo !== `${top}/.git` };
+      const info = { top, name: repoName(repo), branch: branch.code === 0 ? branch.stdout.trim().replace(/^refs\/heads\//, "") : "(detached)", ahead, behind, repo: JSON.stringify([on, repo]), repoSlug: remote?.code === 0 ? normalizeRemoteSlug(remote.stdout) : null, linked: repo !== `${top}/.git` };
       this.git[key] = info;
       if (!on) this.watch(repo, cx);
     } catch {
@@ -773,9 +776,18 @@ export default class Spaces extends View {
   // Every space goes in `seen` in this order, folded away (`hidden`) or not,
   // for the keys that step through the list.
   foldered(rows, machine, t, collapsed, { guests = [], nested = false, hidden = false, seen = [] } = {}) {
-    const draw = (r, away) => {
-      seen.push({ id: r.w.id, shown: !away, folder: r.folder });
+    const draw = (r, away, bare = false) => {
+      // A worktree listed only through its tabs has no space of its own to step to or show in the rail.
+      if (r.virtual && collapsed) return [];
+      if (!r.virtual) seen.push({ id: r.w.id, shown: !away, folder: r.folder });
       if (away) return [];
+      if (bare && !collapsed && r.emptied) return []; // every tab of this space is under a worktree
+      // A checkout's own terminals go straight under the folder, without the space's own row: only worktrees get a header.
+      if (bare && !collapsed && (r.items ?? r.w.tabs ?? []).length) {
+        const els = this.tabRows(r, t, true);
+        if (r.w.active) this.activeEl = els[0];
+        return els;
+      }
       if (collapsed) {
         const el = this.compact(r, t);
         if (r.w.active) this.activeEl = el;
@@ -798,12 +810,13 @@ export default class Spaces extends View {
       ...list.flatMap((f, n) => {
         const inside = placed.filter((r) => r.folder === f.id);
         const visitors = guests.filter((g) => g.folder === f.id);
-        const counted = [...inside, ...visitors.flatMap((g) => g.rows)];
+        const counted = [...inside.filter((r) => !r.virtual), ...visitors.flatMap((g) => g.rows)];
         const profHidden = Boolean(prof) && f.profile !== prof;
         const away = hidden || profHidden || f.folded;
         return [
           ...(hidden || profHidden ? [] : [this.folderHead(f, n, machine, counted, t, collapsed, nested)]),
-          ...inside.flatMap((r) => draw(r, away)),
+          // Worktrees first, each with its header; then the checkout's own tabs with no header of theirs.
+          ...worktreesFirst(inside).flatMap((r) => draw(r, away, !r.tree)),
           ...visitors.flatMap((g) => this.machineSection(g.m, g.rows, t, collapsed, { nested: true, hidden: away, seen })),
         ];
       }),
@@ -982,10 +995,11 @@ export default class Spaces extends View {
     // still hidden is a plain row meanwhile (the folder logic reads `tree` as
     // "under the row above").
     const kept = new Set();
-    return out.filter((r) => this.shown.has(r.w.id)).map((r) => {
+    const rows = out.filter((r) => this.shown.has(r.w.id)).map((r) => {
       if (!r.tree) { if (r.g && !r.g.linked) kept.add(r.g.repo); return r; }
       return kept.has(r.g.repo) ? r : { ...r, tree: null };
     });
+    return groupTabs(rows, ps, this.git);
   }
 
   // Whether a machine's spaces are still coming in.
@@ -1031,11 +1045,22 @@ export default class Spaces extends View {
     return hidden ? [] : [head, ...(folded ? [] : body)];
   }
 
+  // Tell the tab bar which sidebar group each tab is listed in (only when it changed).
+  publishTabGroups(rows) {
+    const groups = {};
+    for (const r of rows) for (const { tab } of r.items ?? []) groups[tab.id] = r.w.id;
+    const json = JSON.stringify(groups);
+    if (json === this.tabGroupsJson) return;
+    this.tabGroupsJson = json;
+    setShared("space-folders.tabGroups", groups);
+  }
+
   // The rows, under a header per machine once one isn't this computer. A
   // machine a folder here takes in shows in that folder instead. `seen`
   // collects the spaces in this order (see foldered).
   grouped(t, collapsed, seen = []) {
     const rows = this.ordered(), ps = panes();
+    this.publishTabGroups(rows);
     const remote = [...new Set([...rows.map(r => r.w.machine).filter(Boolean), ...this.machines.map(m => m.name)])].sort();
     const guests = remote.map((m) => {
       const mine = rows.filter((r) => r.w.machine === m);
@@ -1056,7 +1081,7 @@ export default class Spaces extends View {
   // Only what's unusual, after the name: "herdr \u00b7 spike \u21912 \u21931". The repo or
   // branch goes when the name already says it (a worktree is named after its branch),
   // and master/main go: nearly every space is on one.
-  gitTail(g, tree, w, t, folderName = "", showAheadBehind = true) {
+  gitTail(g, tree, w, t, folderName = "", showAheadBehind = true, left = false) {
     const raw = g?.branch ?? "detached";
     const same = (a) =>
       a.toLowerCase() === w.name.toLowerCase() ||
@@ -1079,11 +1104,11 @@ export default class Spaces extends View {
       .flex_auto()
       .min_w(where ? SIDE_MIN : 0)
       .gap(5)
-      .justify_end()
+      .when(!left, (el) => el.justify_end())
       .items_center()
       .text_size(11.5)
       .text_color(t.dim)
-      .when(Boolean(where), (el) => el.child(div().min_w(0).truncate().child(where)))
+      .when(Boolean(where), (el) => el.child(div().min_w(0).truncate().when(left, (d) => d.flex_1().text_color(t.foreground)).child(where)))
       .when(Boolean(branchPr), (el) =>
         el.child(
           div()
@@ -1112,7 +1137,8 @@ export default class Spaces extends View {
   }
 
   tabsShown(w) {
-    return this.tabsOpen[w.id] ?? Boolean(w.active);
+    // A worktree listed through its tabs (w.top) starts open: the tabs are all it has.
+    return this.tabsOpen[w.id] ?? Boolean(w.active || w.top);
   }
 
   toggleTabs(w, cx) {
@@ -1122,15 +1148,16 @@ export default class Spaces extends View {
   }
 
   // One row per terminal/tab under its space's header, joined by tree lines.
-  tabRows({ w, folder, nested, tree }, t) {
-    const tabs = w.tabs ?? [];
-    if (!tabs.length || !this.tabsShown(w)) return [];
+  tabRows({ w, folder, nested, tree, items }, t, force = false) {
+    // Each tab with the space it really lives in: a tab listed under a worktree may belong to another space.
+    const tabs = items ?? (w.tabs ?? []).map((tab) => ({ w, tab }));
+    if (!tabs.length || !(force || this.tabsShown(w))) return [];
     const ps = this.panes ?? [];
-    return tabs.map((tab, n) => {
+    return tabs.map(({ w: host, tab }, n) => {
       const lead = ps.find((p) => p.tab === tab.id && p.program?.agent) ?? ps.find((p) => p.tab === tab.id);
       const prog = lead?.program;
       const isFile = lead?.mod === "file-view";
-      const current = w.active && tab.active;
+      const current = host.active && tab.active;
       const iconEl = isFile
         ? svg("mods/files/file.svg").size(12).flex_none().text_color(t.muted)
         : prog?.icon
@@ -1143,7 +1170,7 @@ export default class Spaces extends View {
         .id(`space-tab-${tab.id}`)
         .h(24)
         .flex_none()
-        .pl(indent(folder, nested) + (tree ? 22 : 0) + 8)
+        .pl(force ? indent(null, nested) : tree && folder ? indent(null, nested) + 16 : indent(folder, nested) + (tree ? 22 : 0) + 8)
         .pr(8)
         .gap(7)
         .items_center()
@@ -1156,7 +1183,7 @@ export default class Spaces extends View {
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click((_e, cx) => {
           cx.stop_propagation();
-          if (!w.active) run("space.select", { id: w.id });
+          if (!host.active) run("space.select", { id: host.id });
           if (!tab.active) run("tab.select", { id: tab.id });
         })
         .child(div().flex_none().text_color(t.dim).child(n === tabs.length - 1 ? "\u2514\u2500" : "\u251c\u2500"))
@@ -1167,17 +1194,17 @@ export default class Spaces extends View {
     });
   }
 
-  row({ w, i, g, tree, folder, nested }, t) {
+  row({ w, i, g, tree, folder, nested, items, virtual }, t) {
     const on = w.active;
     const blockedCount = this.blocked?.get(w.id) ?? (w.status === "blocked" ? 1 : 0);
     const doneCount = this.done?.get(w.id) ?? (w.status === "done" ? 1 : 0);
-    const tabs = w.tabs ?? [];
+    const tabs = items ?? w.tabs ?? [];
     const folderName = folder ? (folders(w.machine ?? null).list.find((x) => x.id === folder)?.name ?? "") : "";
     const showLeftName = !tree && !w.named;
     return v_flex()
       .relative()
       .id(`space-${w.id}`)
-      .pl(indent(folder, nested))
+      .pl(tree && folder ? indent(null, nested) : indent(folder, nested))
       .pr(8)
       .h(rowHeight({ tree }))
       .flex_none()
@@ -1191,39 +1218,47 @@ export default class Spaces extends View {
           .when(this.pressed < i, line => line.bottom(0))
           .when(this.pressed > i, line => line.top(0)),
       ))
-      .on_mouse_down("left", () => {
-        this.pressed = i;
-        this.over = i;
-      })
-      .on_mouse_move((_e, cx) => {
-        const source = spaces()[this.pressed];
-        const over = source && (source.machine ?? null) === (w.machine ?? null) ? i : null;
-        if (this.pressed !== null && (this.over !== over || this.overFolder !== null || this.overProfile !== null)) {
-          this.over = over;
-          this.overFolder = null;
+      // A worktree listed through its tabs has no space of its own: no drag, no menu, a click goes to its first tab.
+      .when(!virtual, (el) => el
+        .on_mouse_down("left", () => {
+          this.pressed = i;
+          this.over = i;
+        })
+        .on_mouse_move((_e, cx) => {
+          const source = spaces()[this.pressed];
+          const over = source && (source.machine ?? null) === (w.machine ?? null) ? i : null;
+          if (this.pressed !== null && (this.over !== over || this.overFolder !== null || this.overProfile !== null)) {
+            this.over = over;
+            this.overFolder = null;
+            this.overProfile = null;
+            cx.notify();
+          }
+        })
+        .on_mouse_up("left", (_e, cx) => {
+          const from = this.pressed;
+          const over = this.over;
+          this.pressed = null;
+          this.over = null;
           this.overProfile = null;
+          // Dropped on a space: it goes to that place, and into that space's folder.
+          if (from !== null && over === i && from !== i) { this.drop(from, folder); run("space.move", { id: spaces()[from].id, index: i + 1 }); }
+          else if (from === i) run("space.select", { id: w.id });
           cx.notify();
-        }
-      })
-      .on_mouse_up("left", (_e, cx) => {
-        const from = this.pressed;
-        const over = this.over;
-        this.pressed = null;
-        this.over = null;
-        this.overProfile = null;
-        // Dropped on a space: it goes to that place, and into that space's folder.
-        if (from !== null && over === i && from !== i) { this.drop(from, folder); run("space.move", { id: spaces()[from].id, index: i + 1 }); }
-        else if (from === i) run("space.select", { id: w.id });
-        cx.notify();
-      })
-      .on_mouse_down("right", () => this.menu(w))
+        })
+        .on_mouse_down("right", () => this.menu(w)))
+      .when(Boolean(virtual), (el) => el.cursor_pointer().on_click((_e, cx) => {
+        const first = items?.[0];
+        if (!first) return;
+        if (!first.w.active) run("space.select", { id: first.w.id });
+        if (!first.tab.active) run("tab.select", { id: first.tab.id });
+      }))
       .child(
         h_flex()
           .gap(9)
           .items_center()
-          .when(Boolean(tree), el => el.pl(22).child(svg("mods/workspace-chrome/branch.svg").size(13).text_color(t.dim)))
+          .when(Boolean(tree), el => el.pl(folder ? 0 : 22).child(svg("mods/workspace-chrome/branch.svg").size(13).text_color(t.dim)))
           .when(showLeftName, el => el.child(div().flex_initial().min_w(SIDE_MIN).truncate().text_color(t.foreground).child(w.name)))
-          .child(g || tree || w.named ? this.gitTail(g, tree, w, t, folderName, !folder || Boolean(tree)) : div().flex_1())
+          .child(g || tree || w.named ? this.gitTail(g, tree, w, t, folderName, !folder || Boolean(tree), Boolean(tree && folder)) : div().flex_1())
           .when(blockedCount > 0, (el) => el.child(blockedBadge(t, blockedCount)))
           .when(doneCount > 0, (el) => el.child(doneBadge(t, doneCount)))
           .when(blockedCount === 0 && doneCount === 0 && w.status === "working", (el) => el.child(svg("mods/workspace-chrome/spinner.svg").size(11).flex_none().text_color(t.working).spin(900)))

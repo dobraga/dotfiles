@@ -162,10 +162,18 @@ export default class TabsFolders extends View {
     const activeSpace = allSpaces.find((p) => p.active);
     if (!activeSpace) return { activeSpace: null, allSpaces, ps: [], groupSpaces: [], shown: [] };
     const ps = panes();
-    const groupSpaces = [activeSpace];
-    const shown = groupSpaces.flatMap((sp) =>
-      (sp.tabs ?? []).map((tab, indexInSpace) => ({ space: sp, tab, indexInSpace })),
-    );
+    const entries = (sps) => sps.flatMap((sp) => (sp.tabs ?? []).map((tab, indexInSpace) => ({ space: sp, tab, indexInSpace })));
+    let groupSpaces = [activeSpace];
+    let shown = entries(groupSpaces);
+    // Spaces mod: which sidebar group (a space, or a worktree listed by its tabs' cwd) each tab sits in.
+    // The bar then shows only the active tab's group, wherever its tabs' spaces are.
+    const groups = shared("space-folders.tabGroups");
+    const here = shown.find((e) => e.space.active && e.tab.active);
+    const group = here && groups?.[here.tab.id];
+    if (group) {
+      shown = entries(allSpaces).filter((e) => (groups[e.tab.id] ?? e.space.id) === group);
+      groupSpaces = allSpaces.filter((sp) => shown.some((e) => e.space.id === sp.id));
+    }
     return { activeSpace, allSpaces, ps, groupSpaces, shown };
   }
 
