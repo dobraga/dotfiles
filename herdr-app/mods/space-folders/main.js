@@ -1186,48 +1186,77 @@ export default class Spaces extends View {
     const tabs = items ?? (w.tabs ?? []).map((tab) => ({ w, tab }));
     if (!tabs.length || !(force || this.tabsShown(w))) return [];
     const ps = this.panes ?? [];
+    // Terminal panes only: a mod pane (terminal null, e.g. the chat view) is the same tab's UI, not a second terminal.
+    const group = (tab) => {
+      const all = ps.filter((p) => p.tab === tab.id);
+      const terms = all.filter((p) => p.terminal);
+      return terms.length ? terms : all.slice(0, 1);
+    };
     return tabs.map(({ w: host, tab }, n) => {
-      const lead = ps.find((p) => p.tab === tab.id && p.program?.agent) ?? ps.find((p) => p.tab === tab.id);
-      const prog = lead?.program;
-      const isFile = lead?.mod === "file-view";
+      const tabPs = group(tab);
+      const multi = tabPs.length > 1;
+      const lead = tabPs.find((p) => p.program?.agent) ?? tabPs[0];
       const current = host.active && tab.active;
-      const iconEl = isFile
-        ? svg("mods/files/file.svg").size(12).flex_none().text_color(t.muted)
-        : prog?.icon
-          ? (prog.tint
-              ? svg(prog.icon).size(12).flex_none().text_color(current ? t.foreground : t.muted)
-              : image(prog.icon).size(12).flex_none())
-          : div().size(6).rounded(3).bg(t.dim);
-      return h_flex()
+      const gap = n > 0 && (multi || group(tabs[n - 1].tab).length > 1) ? 4 : 0;
+      const select = (pane) => {
+        if (!host.active) run("space.select", { id: host.id });
+        if (!tab.active) run("tab.select", { id: tab.id });
+        if (pane && multi) run("pane.focus", { pane: pane.pane });
+      };
+      // One line: a tab, or (when the tab is split) one of its panes under a shared bar.
+      const line = (pane, k) => {
+        const prog = pane?.program;
+        const isFile = pane?.mod === "file-view";
+        const on = !multi || pane?.focused || (current && !tabPs.some((x) => x.focused) && k === 0);
+        const iconEl = isFile
+          ? svg("mods/files/file.svg").size(12).flex_none().text_color(t.muted)
+          : prog?.icon
+            ? (prog.tint
+                ? svg(prog.icon).size(12).flex_none().text_color(current && on ? t.foreground : t.muted)
+                : image(prog.icon).size(12).flex_none())
+            : div().size(6).rounded(3).bg(t.dim);
+        const status = multi ? (pane?.status === "working" ? "working" : k === 0 ? tab.status : null) : tab.status;
+        const connector = multi ? "\u2503" : n === tabs.length - 1 ? "\u2514\u2500" : "\u251c\u2500";
+        return h_flex()
+          .id(multi ? `space-pane-${pane?.pane ?? k}` : `space-tab-${tab.id}`)
+          .h(24)
+          .flex_none()
+          .pl(force || (tree && folder) ? indent(null, nested) : indent(folder, nested) + (tree ? 22 : 0) + 8)
+          .pr(8)
+          .gap(7)
+          .items_center()
+          .rounded(6)
+          .text_size(11.5)
+          .cursor_pointer()
+          .text_color(current && on ? t.foreground : t.muted)
+          .when(current && !multi, (el) => el.bg(t.raised))
+          .when(!current && !multi, (el) => el.hover((s) => s.bg(t.hover)))
+          .when(multi, (el) => el.hover((s) => s.bg(t.hover)))
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .on_click((_e, cx) => {
+            cx.stop_propagation();
+            select(pane);
+          })
+          .child(div().flex_none().text_color(multi && current ? t.muted : t.dim).child(connector))
+          .child(
+            div().relative().flex_none()
+              .child(iconEl)
+              .when(status === "working", (el) => el.child(div().absolute().right(-4).bottom(-4).child(svg("mods/workspace-chrome/spinner.svg").size(10).flex_none().text_color(t.working).spin(900))))
+              .when(status === "done", (el) => el.child(div().absolute().right(-2).bottom(-2).size(7).rounded(4).bg(t.done).border(1).border_color(current ? t.raised : t.chrome))),
+          )
+          .child(div().flex_1().min_w(0).truncate().child(tabLabel(multi ? { ...tab, named: false } : tab, pane)))
+          .when(!multi && Boolean(prog?.name) && tab.named && !prog?.icon, (el) => el.child(div().flex_none().text_color(t.dim).child(prog.name)))
+          .when(status === "blocked", (el) => el.child(div().size(14).flex_none().rounded(4).bg(t.blocked + "26").text_size(10.5).font_bold().text_color(t.blocked).flex().items_center().justify_center().child("!")));
+      };
+      if (!multi) return line(lead, 0).mt(gap);
+      // A split tab: its panes stacked under one bar, the whole block highlighted when it is the current tab.
+      return v_flex()
         .id(`space-tab-${tab.id}`)
-        .h(24)
         .flex_none()
-        .pl(force || (tree && folder) ? indent(null, nested) : indent(folder, nested) + (tree ? 22 : 0) + 8)
-        .pr(8)
-        .gap(7)
-        .items_center()
+        .mt(gap)
         .rounded(6)
-        .text_size(11.5)
-        .cursor_pointer()
-        .text_color(current ? t.foreground : t.muted)
         .when(current, (el) => el.bg(t.raised))
-        .when(!current, (el) => el.hover((s) => s.bg(t.hover)))
-        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .on_click((_e, cx) => {
-          cx.stop_propagation();
-          if (!host.active) run("space.select", { id: host.id });
-          if (!tab.active) run("tab.select", { id: tab.id });
-        })
-        .child(div().flex_none().text_color(t.dim).child(n === tabs.length - 1 ? "\u2514\u2500" : "\u251c\u2500"))
-        .child(
-          div().relative().flex_none()
-            .child(iconEl)
-            .when(tab.status === "working", (el) => el.child(div().absolute().right(-4).bottom(-4).child(svg("mods/workspace-chrome/spinner.svg").size(10).flex_none().text_color(t.working).spin(900))))
-            .when(tab.status === "done", (el) => el.child(div().absolute().right(-2).bottom(-2).size(7).rounded(4).bg(t.done).border(1).border_color(current ? t.raised : t.chrome))),
-        )
-        .child(div().flex_1().min_w(0).truncate().child(tabLabel(tab, lead)))
-        .when(Boolean(prog?.name) && tab.named && !prog?.icon, (el) => el.child(div().flex_none().text_color(t.dim).child(prog.name)))
-        .when(tab.status === "blocked", (el) => el.child(div().size(14).flex_none().rounded(4).bg(t.blocked + "26").text_size(10.5).font_bold().text_color(t.blocked).flex().items_center().justify_center().child("!")));
+        .children(tabPs.map((pane, k) => line(pane, k)));
     });
   }
 
