@@ -57,6 +57,9 @@ const APPEARANCES = [
 const DEFAULT_FONT = "JetBrains Mono";
 const DEFAULT_UI_FONT = "Geist";
 
+const USAGE_DEFAULTS = { style: "ring", warn: 60, critical: 90, showReset: false, showPace: true, showPercent: true, ctxWarn: 60, ctxCritical: 90, showComputer: true, showBranch: true, showAgents: true, showPrs: true, showSystem: true, showCpu: true, showMem: true, showDisk: true, showNet: true };
+const BAR_ITEMS = ["showComputer", "showBranch", "showAgents", "showPrs", "showSystem", "showCpu", "showMem", "showDisk", "showNet"];
+
 export default class SettingsCustom extends View {
   init(_props, cx) {
     const p = props() ?? {};
@@ -161,7 +164,7 @@ export default class SettingsCustom extends View {
   }
 
   async loadUsageSettings() {
-    const next = { style: "ring", warn: 60, critical: 90, showReset: false, showPace: true, showPercent: true, ctxWarn: 60, ctxCritical: 90 };
+    const next = { ...USAGE_DEFAULTS };
     try {
       const p = JSON.parse((await readTextFile(this.usageSettingsFile())) || "{}");
       if (["ring", "bar", "text"].includes(p?.style)) next.style = p.style;
@@ -170,6 +173,7 @@ export default class SettingsCustom extends View {
       if (p?.showReset === true) next.showReset = true;
       if (p?.showPace === false) next.showPace = false;
       if (p?.showPercent === false) next.showPercent = false;
+      for (const k of BAR_ITEMS) if (p?.[k] === false) next[k] = false;
       if (Number.isFinite(Number(p?.ctxWarn))) next.ctxWarn = Number(p.ctxWarn);
       if (Number.isFinite(Number(p?.ctxCritical))) next.ctxCritical = Number(p.ctxCritical);
     } catch {}
@@ -177,7 +181,7 @@ export default class SettingsCustom extends View {
   }
 
   updateUsageSettings(patch, cx) {
-    const cur = this.usageSettings ?? { style: "ring", warn: 60, critical: 90, showReset: false, showPace: true, showPercent: true, ctxWarn: 60, ctxCritical: 90 };
+    const cur = this.usageSettings ?? { ...USAGE_DEFAULTS };
     const next = { ...cur, ...patch };
     next.warn = Math.max(0, Math.min(next.warn, next.critical - 5));
     next.ctxWarn = Math.max(0, Math.min(next.ctxWarn, next.ctxCritical - 5));
@@ -200,7 +204,7 @@ export default class SettingsCustom extends View {
   }
 
   usageTab(t) {
-    const st = this.usageSettings ?? { style: "ring", warn: 60, critical: 90, showReset: false, showPace: true, showPercent: true, ctxWarn: 60, ctxCritical: 90 };
+    const st = this.usageSettings ?? { ...USAGE_DEFAULTS };
     const pill = (id, on, label, onClick) => div()
       .id(id).px(10).py(5).rounded(7).cursor_pointer().text_size(12.5).border_1()
       .border_color(on ? t.accent : t.border).bg(on ? t.selected : t.raised).text_color(on ? t.foreground : t.muted)
@@ -214,6 +218,16 @@ export default class SettingsCustom extends View {
       .child(this.row(t, "Show percentage", "Off keeps only the gauge and its label (Ctx, 5h, 7d). Ignored for Text only.", this.toggle(t, "st-usage-pct", st.showPercent, (_e, cx) => this.updateUsageSettings({ showPercent: !st.showPercent }, cx))))
       .child(this.row(t, "Show pace marker", "A tick on the bar marking how much of the 5h/7d window has elapsed. Fill past the tick means you are burning faster than the window.", this.toggle(t, "st-usage-pace", st.showPace, (_e, cx) => this.updateUsageSettings({ showPace: !st.showPace }, cx))))
       .child(this.row(t, "Show reset time", "Append the time until the 5h and 7d limits reset, e.g. ↻2h 10m.", this.toggle(t, "st-usage-reset", st.showReset, (_e, cx) => this.updateUsageSettings({ showReset: !st.showReset }, cx))))
+      .child(div().pt(16).text_size(12.5).text_color(t.dim).child("Status bar items"))
+      .child(this.row(t, "Show computer name", "The “This computer” / machine label at the left of the status bar.", this.toggle(t, "st-bar-computer", st.showComputer, (_e, cx) => this.updateUsageSettings({ showComputer: !st.showComputer }, cx))))
+      .child(this.row(t, "Show branch", "Current git branch and its PR/CI chip.", this.toggle(t, "st-bar-branch", st.showBranch, (_e, cx) => this.updateUsageSettings({ showBranch: !st.showBranch }, cx))))
+      .child(this.row(t, "Show agents", "The “N agents” counter.", this.toggle(t, "st-bar-agents", st.showAgents, (_e, cx) => this.updateUsageSettings({ showAgents: !st.showAgents }, cx))))
+      .child(this.row(t, "Show PRs", "The PRs button that toggles the Pull Requests panel.", this.toggle(t, "st-bar-prs", st.showPrs, (_e, cx) => this.updateUsageSettings({ showPrs: !st.showPrs }, cx))))
+      .child(this.row(t, "Show system monitor", "CPU, memory, disk and network throughput (macOS and Linux).", this.toggle(t, "st-bar-system", st.showSystem, (_e, cx) => this.updateUsageSettings({ showSystem: !st.showSystem }, cx))))
+      .child(this.row(t, "  CPU", "CPU usage % in the system monitor.", this.toggle(t, "st-sys-cpu", st.showCpu, (_e, cx) => this.updateUsageSettings({ showCpu: !st.showCpu }, cx))))
+      .child(this.row(t, "  Memory", "Memory in use %.", this.toggle(t, "st-sys-mem", st.showMem, (_e, cx) => this.updateUsageSettings({ showMem: !st.showMem }, cx))))
+      .child(this.row(t, "  Disk", "Root disk used %.", this.toggle(t, "st-sys-disk", st.showDisk, (_e, cx) => this.updateUsageSettings({ showDisk: !st.showDisk }, cx))))
+      .child(this.row(t, "  Network", "Download / upload bytes per second.", this.toggle(t, "st-sys-net", st.showNet, (_e, cx) => this.updateUsageSettings({ showNet: !st.showNet }, cx))))
       .child(this.row(t, "Warning color from", "Usage percentage where the gauge turns to the warning color.", this.stepper(t, "st-usage-warn", `${st.warn}%`,
         (_e, cx) => this.updateUsageSettings({ warn: Math.max(0, st.warn - 5) }, cx),
         (_e, cx) => this.updateUsageSettings({ warn: st.warn + 5 }, cx))))

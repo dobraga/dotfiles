@@ -28,6 +28,8 @@ import { cfg, applySettings } from "./usage-settings.js";
 import { mediaCard } from "./media-card.js";
 import { readPlayers, pickActive, signature, sendCommand, pillLabel } from "./media.js";
 import { resolveFocusedAgent } from "./agent-focus.js";
+import { readStats, readDetail, pushHist, fmtRate } from "./sysstats.js";
+import { sysCard } from "./sys-card.js";
 
 function findNode(node, id) {
   if (node?.id === id) return node;
@@ -275,15 +277,21 @@ export default class WorkspaceStatusUsage extends View {
     cx.timer.after(1500, (cx) => this.syncForge(cx));
     cx.timer.every(15000, (cx) => this.maybeSyncForge(cx));
     cx.timer.every(2000, (cx) => this.pollMedia(cx));
+    this.sysBusy = false;
+    this.sysPrev = null;
+    this.sysHist = null;
+    for (const k of ["pillHovered", "cardHovered", "pinned", "open"]) setShared(`sys.${k}`, false);
+    cx.timer.every(1500, (cx) => this.pollSys(cx));
     // Safety net: hover-leave is unreliable for the popup layer, so close an unpinned card when the pointer is
     // geometrically outside both its trigger and the card, or when no hover flag is left.
     cx.timer.every(500, () => {
       for (const [k, pillRect, cardRect, close] of [
         ["usage", this.pillRect, this.cardRect, () => this.closeCard()],
+        ["sys", this.sysPillRect, this.sysCardRect, () => this.closeSysCard()],
         ["media", this.mediaPillRect, this.mediaCardRect, () => this.closeMediaCard()],
       ]) {
         if (!shared(`${k}.open`) || shared(`${k}.pinned`)) continue;
-        const hoverKey = k === "usage" ? "usage.pillHovered" : "media.hovered";
+        const hoverKey = k === "usage" ? "usage.pillHovered" : k === "sys" ? "sys.pillHovered" : "media.hovered";
         if (pillRect && cardRect) {
           try {
             const p = globalThis.window.mouse_position();
@@ -488,6 +496,85 @@ export default class WorkspaceStatusUsage extends View {
     setShared("usage.open", false);
     setShared("usage.pinned", false);
     setShared("usage.cardHovered", false);
+  }
+
+  closeSysCard() {
+    this.sysCardRect = null;
+    for (const k of ["open", "pinned", "cardHovered"]) setShared(`sys.${k}`, false);
+  }
+
+  pollSys(cx) {
+    if (!cfg.showSystem || this.sysBusy || checking()) return;
+    const open = Boolean(shared("sys.open"));
+    if (Date.now() - (this.sysPrev?.at ?? 0) < (open ? 1400 : 2900)) return;
+    this.sysBusy = true;
+    cx.spawn(async () => {
+      try {
+        const env = { mac: window()?.platform === "macos", exec, readTextFile };
+        const [s, detail] = await Promise.all([readStats(env, this.sysPrev), open ? readDetail(env) : null]);
+        this.sysPrev = s;
+        this.sysHist = pushHist(this.sysHist, s);
+        setShared("sys.stats", s);
+        setShared("sys.hist", this.sysHist);
+        if (detail) setShared("sys.detail", detail);
+      } catch {} finally {
+        this.sysBusy = false;
+      }
+    });
+  }
+
+  sysPill(s, t) {
+    const icon = (name) => svg(`mods/workspace-status-usage/icons/${name}.svg`).size(13).flex_none().text_color(t.dim);
+    const pct = (name, v) => h_flex().gap(5).items_center().child(icon(name))
+      .child(div().text_color(v == null ? t.dim : pctColor(v, t)).child(v == null ? "–" : `${v}%`));
+    const isOpen = Boolean(shared("sys.open"));
+    const trigger = h_flex().id("status-sys").px(7).py(2).gap(12).items_center().rounded(5).cursor_pointer()
+      .when(isOpen, (el) => el.bg(t.selected))
+      .hover((x) => x.bg(t.hover).text_color(t.foreground))
+      .on_mouse_move((e) => { this.sysPillRect = e.bounds; })
+      .on_hover((hovered, cx) => {
+        setShared("sys.pillHovered", hovered);
+        if (hovered) setShared("sys.open", true);
+        else if (!shared("sys.pinned")) {
+          cx.timer.after(260, () => {
+            if (!shared("sys.pillHovered") && !shared("sys.cardHovered") && !shared("sys.pinned")) this.closeSysCard();
+          });
+        }
+      })
+      .on_click(() => {
+        if (!shared("sys.open")) {
+          setShared("sys.pinned", true);
+          setShared("sys.open", true);
+        } else if (shared("sys.pinned")) this.closeSysCard();
+        else setShared("sys.pinned", true);
+      })
+      .when(cfg.showCpu, (el) => el.child(pct("cpu", s.cpu)))
+      .when(cfg.showMem, (el) => el.child(pct("memory", s.mem)))
+      .when(cfg.showDisk, (el) => el.child(pct("disk", s.disk)))
+      .when(cfg.showNet, (el) => el.child(h_flex().gap(5).items_center().child(icon("net")).child(`${fmtRate(s.down)} / ${fmtRate(s.up)}`)));
+    return Popup.new("sys-popup", trigger)
+      .anchor("top_center")
+      .when(isOpen, (el) =>
+        el.content(
+          sysCard({
+            t,
+            s,
+            hist: shared("sys.hist"),
+            detail: shared("sys.detail"),
+            pinned: Boolean(shared("sys.pinned")),
+            onHover: (hovered, cx) => {
+              setShared("sys.cardHovered", hovered);
+              if (!hovered && !shared("sys.pinned")) {
+                cx.timer.after(260, () => {
+                  if (!shared("sys.cardHovered") && !shared("sys.pillHovered") && !shared("sys.pinned")) this.closeSysCard();
+                });
+              }
+            },
+            onMove: (e) => { this.sysCardRect = e.bounds; },
+            onDismiss: () => this.closeSysCard(),
+          }),
+        ),
+      );
   }
 
   hint() {
@@ -737,6 +824,7 @@ export default class WorkspaceStatusUsage extends View {
     const isOpen = Boolean(shared("usage.open"));
     this.mediaCmdRef = (c) => ((this.dbg = "cmd " + c), setShared("media.cmdReq", { cmd: c, arg: null, n: Date.now() }));
     const media = shared("media.state");
+    const sys = shared("sys.stats");
     const label = (icon, text) => h_flex().gap(6).items_center().child(svg(`mods/workspace-chrome/${icon}.svg`).size(13)).child(text);
 
     return h_flex()
@@ -749,9 +837,9 @@ export default class WorkspaceStatusUsage extends View {
       .border_color(t.border)
       .text_size(11.8)
       .text_color(t.muted)
-      .child(label(space?.machine ? "server" : "monitor", space?.machine ?? "This computer"))
-      .when(Boolean(branch), (el) => el.child(label("branch", branch)))
-      .when(Boolean(branchPr), (el) => {
+      .when(cfg.showComputer, (el) => el.child(label(space?.machine ? "server" : "monitor", space?.machine ?? "This computer")))
+      .when(cfg.showBranch && Boolean(branch), (el) => el.child(label("branch", branch)))
+      .when(cfg.showBranch && Boolean(branchPr), (el) => {
         const ciMark = branchPr.ciState === "failure" ? "✕ CI" : branchPr.ciState === "success" ? "✓ CI" : branchPr.ciState === "pending" ? "● CI" : null;
         const ciCol = branchPr.ciState === "failure" ? t.ansi1 : branchPr.ciState === "success" ? t.ansi2 : branchPr.ciState === "pending" ? t.working : t.dim;
         const revCol = branchPr.reviewState === "changes_requested" ? t.ansi1 : branchPr.reviewState === "approved" ? t.ansi2 : t.muted;
@@ -780,14 +868,14 @@ export default class WorkspaceStatusUsage extends View {
             .when(Boolean(revMark), (e2) => e2.child(div().text_color(revCol).child(revMark))),
         );
       })
-      .child(
+      .when(cfg.showAgents, (el) => el.child(
         h_flex()
           .gap(6)
           .items_center()
           .child(div().size(6).rounded(3).bg(t.dim))
           .child(`${list.length} agents`)
-          .when(needs > 0, (el) => el.child(div().text_color(t.blocked).child(`· ${needs} needs you`))),
-      )
+          .when(needs > 0, (e2) => e2.child(div().text_color(t.blocked).child(`· ${needs} needs you`))),
+      ))
       .child(
         Popup.new("usage-popup", h_flex()
           .id("status-usage")
@@ -867,7 +955,7 @@ export default class WorkspaceStatusUsage extends View {
             ),
           ),
       )
-      .child(
+      .when(cfg.showPrs, (el) => el.child(
         h_flex()
           .id("status-prs")
           .px(7)
@@ -908,7 +996,8 @@ export default class WorkspaceStatusUsage extends View {
               ),
             ),
           ),
-      )
+      ))
+      .when(cfg.showSystem && Boolean(sys) && (cfg.showCpu || cfg.showMem || cfg.showDisk || cfg.showNet), (el) => el.child(this.sysPill(sys, t)))
       .child(div().flex_1())
       .when(Boolean(media), (el) => el.child(this.mediaPill(media, t)))
       .child(div().id("palette").text_color(t.dim).cursor_pointer().on_click(() => run("app.palette")).child(this.hint()));
