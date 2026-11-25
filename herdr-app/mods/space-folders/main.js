@@ -1165,7 +1165,6 @@ export default class Spaces extends View {
               ? svg(prog.icon).size(12).flex_none().text_color(current ? t.foreground : t.muted)
               : image(prog.icon).size(12).flex_none())
           : div().size(6).rounded(3).bg(t.dim);
-      const stColor = tab.status === "blocked" ? t.blocked : tab.status === "done" ? t.done : tab.status === "working" ? t.working : null;
       return h_flex()
         .id(`space-tab-${tab.id}`)
         .h(24)
@@ -1187,10 +1186,15 @@ export default class Spaces extends View {
           if (!tab.active) run("tab.select", { id: tab.id });
         })
         .child(div().flex_none().text_color(t.dim).child(n === tabs.length - 1 ? "\u2514\u2500" : "\u251c\u2500"))
-        .child(iconEl)
+        .child(
+          div().relative().flex_none()
+            .child(iconEl)
+            .when(tab.status === "working", (el) => el.child(div().absolute().right(-4).bottom(-4).child(svg("mods/workspace-chrome/spinner.svg").size(10).flex_none().text_color(t.working).spin(900))))
+            .when(tab.status === "done", (el) => el.child(div().absolute().right(-2).bottom(-2).size(7).rounded(4).bg(t.done).border(1).border_color(current ? t.raised : t.chrome))),
+        )
         .child(div().flex_1().min_w(0).truncate().child(tab.name))
-        .when(Boolean(prog?.name) && tab.named, (el) => el.child(div().flex_none().text_color(t.dim).child(prog.name)))
-        .when(Boolean(stColor), (el) => el.child(div().size(6).rounded(3).flex_none().bg(stColor)));
+        .when(Boolean(prog?.name) && tab.named && !prog?.icon, (el) => el.child(div().flex_none().text_color(t.dim).child(prog.name)))
+        .when(tab.status === "blocked", (el) => el.child(div().size(14).flex_none().rounded(4).bg(t.blocked + "26").text_size(10.5).font_bold().text_color(t.blocked).flex().items_center().justify_center().child("!")));
     });
   }
 
