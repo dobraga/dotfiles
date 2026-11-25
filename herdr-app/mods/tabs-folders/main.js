@@ -1,7 +1,23 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, ScrollHandle } from "gpui-base";
 import { iconFor, iconPath } from "./icon-for.js";
-import { spaces, agents, panes, run, openOverlay, theme, window, shared, setShared, layout, settings, nextCommand, checking } from "herdr";
+import { spaces, agents, panes, run, openOverlay, theme, window, shared, setShared, layout, settings, nextCommand, checking, exec, hc, notify } from "herdr";
+import { randomBytes } from "crypto";
+import { dropPlace, mergeTab, terminalsOf, findTab } from "./move.js";
+
+// One request to the core over `hc connect` (as herdr-chat's hostpane.js): its
+// result, or a thrown error with the core's `kind` ("conflict" on a stale doc.set).
+const HELLO = '{"jsonrpc":"2.0","id":1,"method":"hello","params":{"generation":1}}';
+const q = (s) => `'${String(s).replace(/'/g, "'\\''")}'`;
+async function rpc(method, params) {
+  const req = JSON.stringify({ jsonrpc: "2.0", id: 2, method, params });
+  const r = await exec("/bin/sh", ["-c", `{ printf '%s\\n' ${q(HELLO)}; printf '%s\\n' ${q(req)}; } | hc connect`]);
+  if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim() || `hc connect: exit ${r.code}`);
+  const res = r.stdout.trim().split("\n").filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).find((x) => x?.id === 2);
+  if (!res) throw new Error(`${method}: no answer`);
+  if (res.error) throw Object.assign(new Error(res.error.message ?? `${method} failed`), { kind: res.error.data?.kind ?? null });
+  return res.result;
+}
 
 function tabStatusBadge(t, kind, count) {
   const isBlocked = kind === "blocked";
@@ -107,6 +123,37 @@ export default class TabsFolders extends View {
           cx.notify();
         }
       });
+    }
+  }
+
+  // A tab dropped on the content: all its panes join tab `to` as a split
+  // (docs/tasks/plan-tab-drag-split.md). The layout document is rewritten;
+  // the moved terminals are labeled for their new tab first, or a chat would
+  // restart a host it finds labeled for another tab.
+  async moveTabToSplit(from, to, place) {
+    if (this.moving) return;
+    this.moving = true;
+    const labeled = [];
+    const label = (list, tab) => Promise.all(list.map((t) => hc(["label", t, `herdr.tab=${tab}`])));
+    try {
+      for (let tries = 0; ; tries++) {
+        const r = await rpc("doc.get", { name: "herdr-app" });
+        const next = mergeTab(r?.value, from, to, place, () => `s${randomBytes(16).toString("hex")}`);
+        if (!next) throw new Error("these tabs can't be joined (another space, or a layout this mod doesn't know)");
+        if (!labeled.length) { labeled.push(...terminalsOf(findTab(r.value, from).tab)); await label(labeled, to); }
+        try { await rpc("doc.set", { name: "herdr-app", value: next, version: r.version ?? 0 }); break; }
+        catch (e) { if (e.kind !== "conflict" || tries >= 2) throw e; }
+      }
+      // A file tab's slot names its tab: point it at the new one, pinned (a preview closes its whole tab).
+      const slots = shared("file-view.slots") ?? {};
+      if (Object.values(slots).some((sl) => sl?.tabId === from)) {
+        setShared("file-view.slots", Object.fromEntries(Object.entries(slots).map(([k, sl]) => [k, sl?.tabId === from ? { ...sl, tabId: to, preview: false } : sl])));
+      }
+    } catch (e) {
+      if (labeled.length) await label(labeled, from).catch(() => {});
+      notify({ title: "Tab not moved", body: String(e?.message ?? e), level: "warning" });
+    } finally {
+      this.moving = false;
     }
   }
 
@@ -269,7 +316,7 @@ export default class TabsFolders extends View {
       return h_flex().id(`tab-${c.id}`).h(29).px(10).gap(7).rounded(7).items_center().flex_none().text_size(12.8)
         // A rename or status dot on this or an earlier tab can push the active one out.
         .on_size_change((size, cx) => { this.w[i] = size.width; if (i <= active) { this.scroll.scroll_to_item(active); this.reveal(active); cx.notify(); } })
-        .border(1).border_color(borderColor).bg(isActive ? t.raised : t.chrome).text_color(isPreview ? (isActive ? t.muted : t.dim) : (isActive ? t.foreground : t.muted))
+        .border(1).border_color(this.dragOut && this.pressed === i ? t.accent ?? t.foreground : borderColor).bg(isActive ? t.raised : t.chrome).text_color(isPreview ? (isActive ? t.muted : t.dim) : (isActive ? t.foreground : t.muted))
         .hover(s => s.bg(t.hover))
         .on_mouse_down("left", (e, cx) => {
           cx.stop_propagation();
@@ -284,10 +331,17 @@ export default class TabsFolders extends View {
             run("tab.rename", { id: c.id });
           }
         })
-        .on_mouse_up("left", () => {
+        .on_mouse_up("left", (e, cx) => {
           const from = this.pressed; this.pressed = null;
           if (from !== null && from !== i) {
             const src = shown[from];
+            // Dropped on the middle half of another tab: join it as a split (Shift: under it). Its edges reorder.
+            const x = e.local_position?.x, w = e.bounds?.width;
+            if (src.space.id === sp.id && w > 0 && x > w * 0.25 && x < w * 0.75) {
+              const place = e.modifiers?.shift ? "down" : "right";
+              cx.spawn(async (cx) => { await this.moveTabToSplit(src.tab.id, c.id, place); if (!c.active) run("tab.select", { id: c.id }); cx.notify(); });
+              return;
+            }
             if (src.space.id === sp.id) run("tab.move", { id: src.tab.id, index: indexInSpace + 1 });
             else run("space.move", { id: src.space.id, index: allSpaces.findIndex(x => x.id === sp.id) + 1 });
           } else {
@@ -366,7 +420,30 @@ export default class TabsFolders extends View {
           )
       : null;
     return h_flex().size_full().min_w(0).px(10).pl(lightsPadding).gap(3).items_center().bg(t.chrome).border_b(1).border_color(t.border)
-      .on_mouse_up("left", () => { this.pressed = null; })
+      .on_mouse_up("left", () => { this.pressed = null; this.dragOut = false; })
+      // A pressed tab released below the bar joins the active tab as a split: right, or down
+      // (Shift held, or dropped near the window's bottom, known from the lowest the pointer has been).
+      .on_window_mouse_move((e, cx) => {
+        if (e.position.y > (this.maxY ?? 0)) this.maxY = e.position.y;
+        if (this.pressed === null) return;
+        const out = e.pressed_button === "left" && e.local_position.y > e.bounds.height;
+        if (out !== Boolean(this.dragOut)) { this.dragOut = out; cx.notify(); }
+      })
+      .on_window_mouse_up("left", (e, cx) => {
+        const from = this.pressed !== null ? shown[this.pressed] : null;
+        const was = this.dragOut;
+        this.dragOut = false;
+        if (!from || !e.bounds || e.position.x < e.bounds.x) return; // (left of the bar: the sidebar)
+        const barBottom = e.bounds.y + e.bounds.height;
+        const where = dropPlace(e.position, barBottom, Math.max(this.maxY ?? 0, e.position.y));
+        if (!where) { if (was) cx.notify(); return; } // in the bar: the tab's own mouse up reorders or selects
+        this.pressed = null;
+        cx.notify();
+        const to = shown[active]?.tab;
+        if (!to || to.id === from.tab.id) return void notify({ title: "Tab not moved", body: "Drop another tab here to split it with this one.", level: "info" });
+        const place = e.modifiers?.shift ? "down" : where;
+        cx.spawn(async (cx) => { await this.moveTabToSplit(from.tab.id, to.id, place); cx.notify(); });
+      })
       .on_scroll_wheel((e, cx) => { this.wheel(e); cx?.notify?.(); })
       .child(h_flex().id("tab-scroll").flex_1().min_w(0).h_full().items_center().gap(3).overflow_x_scrollbar().track_scroll(this.scroll)
         .on_size_change((size, cx) => { this.barW = size.width; if (active >= 0) { this.scroll.scroll_to_item(active); this.reveal(active); cx.notify(); } })
