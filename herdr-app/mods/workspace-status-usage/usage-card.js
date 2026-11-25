@@ -24,11 +24,22 @@ function formatAge(ts) {
   return `${Math.floor(min / 60)}h ago`;
 }
 
+const H = 3600000;
+export const WINDOW_MS = { "5h": 5 * H, "7d": 168 * H, weekly: 168 * H };
+
+// Percent of the window already elapsed, or null when unknown.
+export function paceOf(resetIso, windowMs) {
+  const ms = Date.parse(resetIso ?? "") - Date.now();
+  if (!windowMs || !Number.isFinite(ms) || ms <= 0 || ms > windowMs) return null;
+  return Math.round((100 * (windowMs - ms)) / windowMs);
+}
+
 function barColor(pct, t) {
   return pct >= cfg.critical ? t.ansi1 : pct >= cfg.warn ? t.blocked : t.ansi2;
 }
 
-function meterRow(id, label, pct, resetIso, t) {
+function meterRow(id, label, pct, resetIso, t, windowMs) {
+  const pace = cfg.showPace ? paceOf(resetIso, windowMs) : null;
   const clamped = Math.max(0, Math.min(100, Math.round(pct ?? 0)));
   const color = barColor(clamped, t);
   const reset = formatReset(resetIso);
@@ -51,7 +62,9 @@ function meterRow(id, label, pct, resetIso, t) {
         .rounded(3)
         .bg(t.raised)
         .overflow_hidden()
-        .child(div().h_full().w(Math.round((310 * clamped) / 100)).bg(color).rounded(3)),
+        .relative()
+        .child(div().h_full().w(Math.round((310 * clamped) / 100)).bg(color).rounded(3))
+        .when(pace !== null, (el) => el.child(div().absolute().top(0).h_full().w(2).left(Math.round((308 * pace) / 100)).bg(t.foreground).opacity(0.7))),
     );
 }
 
@@ -142,8 +155,8 @@ function card({ t, data, claude, agy, pinned, loading, onRefresh, onDismiss, sto
             )
             .when(Boolean(claude && !claude.error) || Boolean(claude?.fiveHour), (el) =>
               el
-                .child(meterRow("cl-5h", "5h session", claude?.fiveHour?.utilization ?? 0, claude?.fiveHour?.resets_at, t))
-                .child(meterRow("cl-7d", "7d weekly", claude?.sevenDay?.utilization ?? 0, claude?.sevenDay?.resets_at, t))
+                .child(meterRow("cl-5h", "5h session", claude?.fiveHour?.utilization ?? 0, claude?.fiveHour?.resets_at, t, WINDOW_MS["5h"]))
+                .child(meterRow("cl-7d", "7d weekly", claude?.sevenDay?.utilization ?? 0, claude?.sevenDay?.resets_at, t, WINDOW_MS["7d"]))
                 .when(Boolean(claude?.scoped?.length), (e2) =>
                   e2.children(claude.scoped.map((s, idx) => meterRow(`cl-sc-${idx}`, s.label, s.percent, s.resets_at, t))),
                 )
@@ -197,6 +210,7 @@ function card({ t, data, claude, agy, pinned, loading, onRefresh, onDismiss, sto
                             used,
                             b.resetTime,
                             t,
+                            WINDOW_MS[b.window],
                           );
                         }),
                     ),

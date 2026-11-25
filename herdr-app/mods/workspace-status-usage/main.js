@@ -23,7 +23,7 @@ import {
   checking,
 } from "herdr";
 
-import { usageCard, formatReset } from "./usage-card.js";
+import { usageCard, formatReset, paceOf, WINDOW_MS } from "./usage-card.js";
 import { cfg, applySettings } from "./usage-settings.js";
 import { mediaCard } from "./media-card.js";
 import { readPlayers, pickActive, signature, sendCommand, pillLabel } from "./media.js";
@@ -78,11 +78,12 @@ function pctColor(pct, t, ctx = false) {
   return pct >= crit ? t.ansi1 : pct >= warn ? t.blocked : t.muted;
 }
 
-function gauge(pct, color, t) {
+function gauge(pct, color, t, pace) {
   if (cfg.style === "text") return null;
   if (cfg.style === "bar") {
-    return div().w(26).h(4).flex_none().rounded(2).bg(t.raised).overflow_hidden()
-      .child(div().h_full().w(Math.round((26 * Math.max(0, Math.min(100, pct))) / 100)).bg(color).rounded(2));
+    return div().w(26).h(4).flex_none().rounded(2).bg(t.raised).overflow_hidden().relative()
+      .child(div().h_full().w(Math.round((26 * Math.max(0, Math.min(100, pct))) / 100)).bg(color).rounded(2))
+      .when(pace != null && cfg.showPace, (el) => el.child(div().absolute().top(0).h_full().w(1).left(Math.round((25 * pace) / 100)).bg(t.foreground).opacity(0.8)));
   }
   const step = Math.max(0, Math.min(100, Math.round(pct / 5) * 5));
   return div()
@@ -509,11 +510,11 @@ export default class WorkspaceStatusUsage extends View {
       const cl = data?.claude;
       if (cl?.fiveHour) {
         const p = Math.round(cl.fiveHour.utilization ?? 0);
-        items.push({ label: `5h ${p}%`, pct: p, reset: cl.fiveHour.resets_at, color: pctColor(p, t) });
+        items.push({ label: `5h ${p}%`, pct: p, reset: cl.fiveHour.resets_at, pace: paceOf(cl.fiveHour.resets_at, WINDOW_MS["5h"]), color: pctColor(p, t) });
       }
       if (cl?.sevenDay) {
         const p = Math.round(cl.sevenDay.utilization ?? 0);
-        items.push({ label: `7d ${p}%`, pct: p, reset: cl.sevenDay.resets_at, color: pctColor(p, t) });
+        items.push({ label: `7d ${p}%`, pct: p, reset: cl.sevenDay.resets_at, pace: paceOf(cl.sevenDay.resets_at, WINDOW_MS["7d"]), color: pctColor(p, t) });
       }
       return { title: "Claude", items };
     }
@@ -531,8 +532,8 @@ export default class WorkspaceStatusUsage extends View {
         const bw = group.buckets.find((b) => b.window === "weekly");
         const p5h = bucketUsed(b5h);
         const pw = bucketUsed(bw);
-        if (p5h !== null) items.push({ label: `5h ${p5h}%`, pct: p5h, reset: b5h.resetTime, color: pctColor(p5h, t) });
-        if (pw !== null) items.push({ label: `W ${pw}%`, pct: pw, reset: bw.resetTime, color: pctColor(pw, t) });
+        if (p5h !== null) items.push({ label: `5h ${p5h}%`, pct: p5h, reset: b5h.resetTime, pace: paceOf(b5h.resetTime, WINDOW_MS["5h"]), color: pctColor(p5h, t) });
+        if (pw !== null) items.push({ label: `W ${pw}%`, pct: pw, reset: bw.resetTime, pace: paceOf(bw.resetTime, WINDOW_MS.weekly), color: pctColor(pw, t) });
       }
       return { title: "AGY", items };
     }
@@ -833,7 +834,7 @@ export default class WorkspaceStatusUsage extends View {
                   .gap(4)
                   .items_center()
                   .child(div().text_color(t.dim).child("·"))
-                  .when(cfg.style !== "text", (el) => el.child(gauge(item.pct, item.color, t)))
+                  .when(cfg.style !== "text", (el) => el.child(gauge(item.pct, item.color, t, item.pace)))
                   .child(div().text_color(item.color).child(cfg.showPercent || cfg.style === "text" ? item.label : item.label.replace(/ \d+%$/, "")))
                   .when(cfg.showReset && Boolean(item.reset), (el) => el.child(div().text_size(10.5).text_color(t.dim).child(`↻${formatReset(item.reset)}`))),
               ),
