@@ -905,7 +905,29 @@ export default class ChangesTabs extends View {
           .child(Scrollbar.vertical("changes-list").absolute().inset_0()),
       )
       .when(limited, (el) => el.child(div().px(12).py(4).text_size(11).text_color(t.dim).child("Showing the first 1,000 changed files per repo")))
-      .when(Boolean(this.note), (e) => e.child(div().px(10).pb(8).text_size(11).text_color(t.ansi1).child(this.note)))
+      .when(Boolean(this.note), (e) =>
+        e.child(
+          h_flex()
+            .px(10)
+            .pb(8)
+            .gap(6)
+            .items_start()
+            .text_size(11)
+            .text_color(t.ansi1)
+            .child(div().flex_1().min_w(0).child(this.note))
+            .child(
+              div()
+                .id("changes-note-dismiss")
+                .flex_none()
+                .px(4)
+                .rounded(4)
+                .cursor_pointer()
+                .hover((s) => s.bg(t.hover).text_color(t.foreground))
+                .on_click((_e, cx) => { this.note = null; cx.notify(); })
+                .child("✕"),
+            ),
+        ),
+      )
       .when(Boolean(single) && !single.error, (el) => el.child(commitBox(single)));
   }
 }
