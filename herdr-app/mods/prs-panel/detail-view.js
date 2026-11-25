@@ -1,7 +1,17 @@
 // Inline PR detail view with CI checks, reviewers, unresolved comments/tasks, and workflow actions.
 import { div, svg } from "gpui-kit";
-import { v_flex, h_flex, Scrollbar } from "gpui-base";
+import { v_flex, h_flex, Scrollbar, TextView } from "gpui-base";
 import { appHome, exec, notify, openOverlay, panes, run, spaces } from "herdr";
+
+const EMOJI = { mag: "🔍", clipboard: "📋", white_check_mark: "✅", x: "❌", warning: "⚠️", bulb: "💡", memo: "📝", rocket: "🚀", bug: "🐛", lock: "🔒", eyes: "👀", question: "❓", information_source: "ℹ️", tada: "🎉", wrench: "🔧", sparkles: "✨" };
+
+// Comment bodies are GitHub-flavoured Markdown; map :shortcodes: and drop the ```expand fence label.
+export function prepMarkdown(text, max) {
+  return String(text || "")
+    .slice(0, max)
+    .replace(/:([a-z0-9_+-]+):/g, (m, k) => EMOJI[k] ?? m)
+    .replace(/^```expand\s*$/gm, "");
+}
 
 export function formatRelTime(iso) {
   if (!iso) return "";
@@ -416,7 +426,7 @@ export function renderDetailView(panel, pr, detail, t, cx) {
                             .when(!c.path, (el) => el.child(div().flex_1()))
                             .child(div().text_color(t.dim).child(formatRelTime(c.createdAt))),
                         )
-                        .child(div().text_size(11.5).text_color(t.muted).child((c.text || "").slice(0, 240)));
+                        .child(TextView.markdown(`pr-cmt-md-${idx}`, prepMarkdown(c.text, 1500)).text_size(11.5).text_color(t.muted).max_h(260).overflow_hidden());
                     }),
                   ),
                 ),
@@ -445,7 +455,7 @@ export function renderDetailView(panel, pr, detail, t, cx) {
                       .child(div().text_size(11).text_color(t.dim).child(panel.showDescription ? "Hide" : "Show")),
                   )
                   .when(panel.showDescription, (e2) =>
-                    e2.child(div().text_size(11.5).text_color(t.muted).child(detail.description.slice(0, 2000))),
+                    e2.child(TextView.markdown("pr-desc-md", prepMarkdown(detail.description, 4000)).text_size(11.5).text_color(t.muted)),
                   ),
               ),
             ),
