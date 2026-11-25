@@ -57,7 +57,7 @@ const APPEARANCES = [
 const DEFAULT_FONT = "JetBrains Mono";
 const DEFAULT_UI_FONT = "Geist";
 
-const USAGE_DEFAULTS = { style: "ring", warn: 60, critical: 90, showReset: false, showPace: true, showPercent: true, ctxWarn: 60, ctxCritical: 90, showComputer: true, showBranch: true, showAgents: true, showPrs: true, showSystem: true, showCpu: true, showMem: true, showDisk: true, showNet: true, showUsage: true, showMedia: true, showProcs: true, showSpark: true, sysInterval: 3 };
+const USAGE_DEFAULTS = { style: "ring", warn: 60, critical: 90, showReset: false, showPace: true, colorMode: "threshold", showPercent: true, ctxWarn: 60, ctxCritical: 90, showComputer: true, showBranch: true, showAgents: true, showPrs: true, showSystem: true, showCpu: true, showMem: true, showDisk: true, showNet: true, showUsage: true, showMedia: true, showProcs: true, showSpark: true, sysInterval: 3 };
 const BAR_ITEMS = ["showComputer", "showBranch", "showAgents", "showPrs", "showSystem", "showCpu", "showMem", "showDisk", "showNet", "showUsage", "showMedia", "showProcs", "showSpark"];
 
 export default class SettingsCustom extends View {
@@ -172,6 +172,7 @@ export default class SettingsCustom extends View {
       if (Number.isFinite(Number(p?.critical))) next.critical = Number(p.critical);
       if (p?.showReset === true) next.showReset = true;
       if (p?.showPace === false) next.showPace = false;
+      if (p?.colorMode === "pace") next.colorMode = "pace";
       if (p?.showPercent === false) next.showPercent = false;
       for (const k of BAR_ITEMS) if (p?.[k] === false) next[k] = false;
       if ([2, 3, 5, 10].includes(Number(p?.sysInterval))) next.sysInterval = Number(p.sysInterval);
@@ -234,7 +235,8 @@ export default class SettingsCustom extends View {
         tg("st-usage-pct", "showPercent", "Show percentage", "Off keeps only the gauge and its label (Ctx, 5h, 7d). Ignored for Text only."),
         tg("st-usage-pace", "showPace", "Show pace marker", "A tick on the bar marking how much of the 5h/7d window has elapsed. Fill past the tick means you are burning faster than the window."),
         tg("st-usage-reset", "showReset", "Show reset time", "Append the time until the 5h and 7d limits reset, e.g. ↻2h 10m."),
-        this.row(t, "Warning color from", "Usage percentage where the gauge turns to the warning color.", this.stepper(t, "st-usage-warn", `${st.warn}%`, set({ warn: Math.max(0, st.warn - 5) }), set({ warn: st.warn + 5 }))),
+        this.row(t, "Color mode", "Threshold: fixed warning/critical percentages. Pace: green at or below the tick, amber above it, red 15+ points above it or at 90%+.", h_flex().gap(6).children([["threshold", "Threshold"], ["pace", "Pace"]].map(([v, l]) => pill(`st-usage-cmode-${v}`, st.colorMode === v, l, (cx) => this.updateUsageSettings({ colorMode: v }, cx))))),
+        this.row(t, "Warning color from", "Usage percentage where the gauge turns to the warning color. Used in Threshold mode, and in Pace mode when the window position is unknown.", this.stepper(t, "st-usage-warn", `${st.warn}%`, set({ warn: Math.max(0, st.warn - 5) }), set({ warn: st.warn + 5 }))),
         this.row(t, "Critical color from", "Usage percentage where the gauge turns red.", this.stepper(t, "st-usage-crit", `${st.critical}%`, set({ critical: Math.max(st.warn + 5, st.critical - 5) }), set({ critical: Math.min(100, st.critical + 5) }))),
         this.row(t, "Ctx warning color from", "Context usage percentage where the Ctx gauge turns to the warning color.", this.stepper(t, "st-usage-ctx-warn", `${st.ctxWarn}%`, set({ ctxWarn: Math.max(0, st.ctxWarn - 5) }), set({ ctxWarn: st.ctxWarn + 5 }))),
         this.row(t, "Ctx critical color from", "Context usage percentage where the Ctx gauge turns red.", this.stepper(t, "st-usage-ctx-crit", `${st.ctxCritical}%`, set({ ctxCritical: Math.max(st.ctxWarn + 5, st.ctxCritical - 5) }), set({ ctxCritical: Math.min(100, st.ctxCritical + 5) }))),

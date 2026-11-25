@@ -24,7 +24,7 @@ import {
 } from "herdr";
 
 import { usageCard, formatReset, paceOf, WINDOW_MS } from "./usage-card.js";
-import { cfg, applySettings } from "./usage-settings.js";
+import { cfg, applySettings, usageColor } from "./usage-settings.js";
 import { mediaCard } from "./media-card.js";
 import { readPlayers, pickActive, signature, sendCommand, pillLabel } from "./media.js";
 import { resolveFocusedAgent } from "./agent-focus.js";
@@ -599,11 +599,11 @@ export default class WorkspaceStatusUsage extends View {
       const cl = data?.claude;
       if (cl?.fiveHour) {
         const p = Math.round(cl.fiveHour.utilization ?? 0);
-        items.push({ label: `5h ${p}%`, pct: p, reset: cl.fiveHour.resets_at, pace: paceOf(cl.fiveHour.resets_at, WINDOW_MS["5h"]), color: pctColor(p, t) });
+        items.push({ label: `5h ${p}%`, pct: p, reset: cl.fiveHour.resets_at, pace: paceOf(cl.fiveHour.resets_at, WINDOW_MS["5h"]), color: usageColor(p, paceOf(cl.fiveHour.resets_at, WINDOW_MS["5h"]), t, t.muted) });
       }
       if (cl?.sevenDay) {
         const p = Math.round(cl.sevenDay.utilization ?? 0);
-        items.push({ label: `7d ${p}%`, pct: p, reset: cl.sevenDay.resets_at, pace: paceOf(cl.sevenDay.resets_at, WINDOW_MS["7d"]), color: pctColor(p, t) });
+        items.push({ label: `7d ${p}%`, pct: p, reset: cl.sevenDay.resets_at, pace: paceOf(cl.sevenDay.resets_at, WINDOW_MS["7d"]), color: usageColor(p, paceOf(cl.sevenDay.resets_at, WINDOW_MS["7d"]), t, t.muted) });
       }
       return { title: "Claude", items };
     }
@@ -621,8 +621,8 @@ export default class WorkspaceStatusUsage extends View {
         const bw = group.buckets.find((b) => b.window === "weekly");
         const p5h = bucketUsed(b5h);
         const pw = bucketUsed(bw);
-        if (p5h !== null) items.push({ label: `5h ${p5h}%`, pct: p5h, reset: b5h.resetTime, pace: paceOf(b5h.resetTime, WINDOW_MS["5h"]), color: pctColor(p5h, t) });
-        if (pw !== null) items.push({ label: `W ${pw}%`, pct: pw, reset: bw.resetTime, pace: paceOf(bw.resetTime, WINDOW_MS.weekly), color: pctColor(pw, t) });
+        if (p5h !== null) items.push({ label: `5h ${p5h}%`, pct: p5h, reset: b5h.resetTime, pace: paceOf(b5h.resetTime, WINDOW_MS["5h"]), color: usageColor(p5h, paceOf(b5h.resetTime, WINDOW_MS["5h"]), t, t.muted) });
+        if (pw !== null) items.push({ label: `W ${pw}%`, pct: pw, reset: bw.resetTime, pace: paceOf(bw.resetTime, WINDOW_MS.weekly), color: usageColor(pw, paceOf(bw.resetTime, WINDOW_MS.weekly), t, t.muted) });
       }
       return { title: "AGY", items };
     }

@@ -1,6 +1,6 @@
 import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { cfg } from "./usage-settings.js";
+import { cfg, usageColor } from "./usage-settings.js";
 
 export function formatReset(iso) {
   if (!iso) return "";
@@ -34,14 +34,11 @@ export function paceOf(resetIso, windowMs) {
   return Math.round((100 * (windowMs - ms)) / windowMs);
 }
 
-function barColor(pct, t) {
-  return pct >= cfg.critical ? t.ansi1 : pct >= cfg.warn ? t.blocked : t.ansi2;
-}
-
 function meterRow(id, label, pct, resetIso, t, windowMs) {
-  const pace = cfg.showPace ? paceOf(resetIso, windowMs) : null;
+  const rawPace = paceOf(resetIso, windowMs);
+  const pace = cfg.showPace ? rawPace : null;
   const clamped = Math.max(0, Math.min(100, Math.round(pct ?? 0)));
-  const color = barColor(clamped, t);
+  const color = usageColor(clamped, rawPace, t, t.ansi2);
   const reset = formatReset(resetIso);
   return v_flex()
     .id(id)
