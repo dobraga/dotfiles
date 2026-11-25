@@ -1170,7 +1170,7 @@ export default class Spaces extends View {
         .id(`space-tab-${tab.id}`)
         .h(24)
         .flex_none()
-        .pl(force ? indent(null, nested) : tree && folder ? indent(null, nested) + 16 : indent(folder, nested) + (tree ? 22 : 0) + 8)
+        .pl(force || (tree && folder) ? indent(null, nested) : indent(folder, nested) + (tree ? 22 : 0) + 8)
         .pr(8)
         .gap(7)
         .items_center()
