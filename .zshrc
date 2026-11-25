@@ -130,7 +130,17 @@ _herdr_open_chat() {
     local id="c-$(openssl rand -hex 4)"
     local cwd="${PWD//\\/\\\\}"
     cwd="${cwd//\"/\\\"}"
-    herdr-app do tab.new --name "$provider" --mod chat --props "{\"chat\":\"${id}\",\"provider\":\"${provider}\",\"cwd\":\"${cwd}\"}" >/dev/null 2>&1 && return 0
+    local props="{\"chat\":\"${id}\",\"provider\":\"${provider}\",\"cwd\":\"${cwd}\"}"
+    # In a split tab, open the chat beside this pane instead of a new tab.
+    local pane=""
+    if command -v jq >/dev/null 2>&1; then
+      pane=$(herdr-app ls 2>/dev/null | jq -r --arg t "$HC_TERMINAL_ID" \
+        '[.spaces[].tabs[] | select((.terminals|length) > 1) | .terminals[] | select(.terminal==$t) | .pane][0] // empty')
+    fi
+    if [[ -n "$pane" ]]; then
+      herdr-app do pane.split --direction right --pane "$pane" --mod chat --props "$props" >/dev/null 2>&1 && return 0
+    fi
+    herdr-app do tab.new --name "$provider" --mod chat --props "$props" >/dev/null 2>&1 && return 0
   fi
   if [[ "${1:-}" == "--tui" ]]; then
     shift
