@@ -49,17 +49,17 @@ export function sysCard({ t, s, hist, detail, pinned, onHover, onMove, onDismiss
   if (cfg.showCpu) {
     body.child(section(t)
       .child(head("cpu", "CPU", s.cpu == null ? "–" : `${s.cpu}%`, t, s.cpu == null ? t.dim : pctColor(s.cpu, t)))
-      .child(spark(hist?.cpu ?? [], t, pctColor(s.cpu ?? 0, t), 100))
+      .when(cfg.showSpark, (el) => el.child(spark(hist?.cpu ?? [], t, pctColor(s.cpu ?? 0, t), 100)))
       .when(Boolean(detail?.cores), (el) => el.child(div().text_size(10.5).text_color(t.dim)
         .child(`${detail.cores} cores${detail.load ? ` · load ${detail.load.map((n) => n.toFixed(2)).join(" ")}` : ""}`)))
-      .when(Boolean(detail?.procs), (el) => el.child(procs(detail.procs.cpu, "cpu", t))));
+      .when(cfg.showProcs && Boolean(detail?.procs), (el) => el.child(procs(detail.procs.cpu, "cpu", t))));
   }
   if (cfg.showMem) {
     body.child(section(t)
       .child(head("memory", "Memory", detail?.mem ? `${fmtBytes(detail.mem.used)} / ${fmtBytes(detail.mem.total)}` : `${memPct ?? "–"}%`, t, memPct == null ? t.dim : pctColor(memPct, t)))
       .child(bar(memPct, t))
       .when(Boolean(detail?.swap?.total), (el) => el.child(div().text_size(10.5).text_color(t.dim).child(`Swap ${fmtBytes(detail.swap.used)} / ${fmtBytes(detail.swap.total)}`)))
-      .when(Boolean(detail?.procs), (el) => el.child(procs(detail.procs.mem, "mem", t))));
+      .when(cfg.showProcs && Boolean(detail?.procs), (el) => el.child(procs(detail.procs.mem, "mem", t))));
   }
   if (cfg.showDisk) {
     body.child(section(t)
@@ -70,8 +70,7 @@ export function sysCard({ t, s, hist, detail, pinned, onHover, onMove, onDismiss
   if (cfg.showNet) {
     body.child(section(t)
       .child(head("net", "Network", `↓ ${fmtRate(s.down)}/s  ↑ ${fmtRate(s.up)}/s`, t))
-      .child(spark(hist?.down ?? [], t, t.ansi2))
-      .child(spark(hist?.up ?? [], t, t.accent)));
+      .when(cfg.showSpark, (el) => el.child(spark(hist?.down ?? [], t, t.ansi2)).child(spark(hist?.up ?? [], t, t.accent))));
   }
 
   return v_flex().id("sys-card-hit").pb(12).on_hover(onHover).on_mouse_move(onMove).child(

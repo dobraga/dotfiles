@@ -506,12 +506,12 @@ export default class WorkspaceStatusUsage extends View {
   pollSys(cx) {
     if (!cfg.showSystem || this.sysBusy || checking()) return;
     const open = Boolean(shared("sys.open"));
-    if (Date.now() - (this.sysPrev?.at ?? 0) < (open ? 1400 : 2900)) return;
+    if (Date.now() - (this.sysPrev?.at ?? 0) < (open ? 1400 : cfg.sysInterval * 1000 - 100)) return;
     this.sysBusy = true;
     cx.spawn(async () => {
       try {
         const env = { mac: window()?.platform === "macos", exec, readTextFile };
-        const [s, detail] = await Promise.all([readStats(env, this.sysPrev), open ? readDetail(env) : null]);
+        const [s, detail] = await Promise.all([readStats(env, this.sysPrev), open && cfg.showProcs ? readDetail(env) : null]);
         this.sysPrev = s;
         this.sysHist = pushHist(this.sysHist, s);
         setShared("sys.stats", s);
@@ -876,7 +876,7 @@ export default class WorkspaceStatusUsage extends View {
           .child(`${list.length} agents`)
           .when(needs > 0, (e2) => e2.child(div().text_color(t.blocked).child(`· ${needs} needs you`))),
       ))
-      .child(
+      .when(cfg.showUsage, (el) => el.child(
         Popup.new("usage-popup", h_flex()
           .id("status-usage")
           .px(7)
@@ -954,7 +954,7 @@ export default class WorkspaceStatusUsage extends View {
               }),
             ),
           ),
-      )
+      ))
       .when(cfg.showPrs, (el) => el.child(
         h_flex()
           .id("status-prs")
@@ -999,7 +999,7 @@ export default class WorkspaceStatusUsage extends View {
       ))
       .when(cfg.showSystem && Boolean(sys) && (cfg.showCpu || cfg.showMem || cfg.showDisk || cfg.showNet), (el) => el.child(this.sysPill(sys, t)))
       .child(div().flex_1())
-      .when(Boolean(media), (el) => el.child(this.mediaPill(media, t)))
+      .when(cfg.showMedia && Boolean(media), (el) => el.child(this.mediaPill(media, t)))
       .child(div().id("palette").text_color(t.dim).cursor_pointer().on_click(() => run("app.palette")).child(this.hint()));
   }
 }

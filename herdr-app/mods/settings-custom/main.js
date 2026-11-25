@@ -38,7 +38,7 @@ const SECTIONS = [
   { id: "git", title: "GitHub & Bitbucket", icon: "mods/prs-panel/pull-request.svg" },
   { id: "chat", title: "Herdr Chat", icon: "frame/welcome/messages.svg" },
   { id: "files", title: "Files", icon: "mods/files/file.svg" },
-  { id: "usage", title: "Usage", icon: "frame/settings/refresh.svg" },
+  { id: "usage", title: "Status bar", icon: "frame/settings/refresh.svg" },
   { id: "tasks", title: "Tasks", icon: "mods/tasks/tasks.svg" },
   { id: "inbox", title: "Inbox", icon: "mods/inbox/inbox.svg" },
   { id: "updates", title: "Updates", icon: "frame/settings/refresh.svg" },
@@ -57,8 +57,8 @@ const APPEARANCES = [
 const DEFAULT_FONT = "JetBrains Mono";
 const DEFAULT_UI_FONT = "Geist";
 
-const USAGE_DEFAULTS = { style: "ring", warn: 60, critical: 90, showReset: false, showPace: true, showPercent: true, ctxWarn: 60, ctxCritical: 90, showComputer: true, showBranch: true, showAgents: true, showPrs: true, showSystem: true, showCpu: true, showMem: true, showDisk: true, showNet: true };
-const BAR_ITEMS = ["showComputer", "showBranch", "showAgents", "showPrs", "showSystem", "showCpu", "showMem", "showDisk", "showNet"];
+const USAGE_DEFAULTS = { style: "ring", warn: 60, critical: 90, showReset: false, showPace: true, showPercent: true, ctxWarn: 60, ctxCritical: 90, showComputer: true, showBranch: true, showAgents: true, showPrs: true, showSystem: true, showCpu: true, showMem: true, showDisk: true, showNet: true, showUsage: true, showMedia: true, showProcs: true, showSpark: true, sysInterval: 3 };
+const BAR_ITEMS = ["showComputer", "showBranch", "showAgents", "showPrs", "showSystem", "showCpu", "showMem", "showDisk", "showNet", "showUsage", "showMedia", "showProcs", "showSpark"];
 
 export default class SettingsCustom extends View {
   init(_props, cx) {
@@ -174,6 +174,7 @@ export default class SettingsCustom extends View {
       if (p?.showPace === false) next.showPace = false;
       if (p?.showPercent === false) next.showPercent = false;
       for (const k of BAR_ITEMS) if (p?.[k] === false) next[k] = false;
+      if ([2, 3, 5, 10].includes(Number(p?.sysInterval))) next.sysInterval = Number(p.sysInterval);
       if (Number.isFinite(Number(p?.ctxWarn))) next.ctxWarn = Number(p.ctxWarn);
       if (Number.isFinite(Number(p?.ctxCritical))) next.ctxCritical = Number(p.ctxCritical);
     } catch {}
@@ -211,35 +212,43 @@ export default class SettingsCustom extends View {
       .hover((x) => x.bg(t.hover)).on_click((_e, cx) => onClick(cx)).child(label);
     const styles = h_flex().gap(6).children([["ring", "Ring"], ["bar", "Bar"], ["text", "Text only"]].map(([v, l]) =>
       pill(`st-usage-style-${v}`, st.style === v, l, (cx) => this.updateUsageSettings({ style: v }, cx))));
+    const set = (patch) => (_e, cx) => this.updateUsageSettings(patch, cx);
+    const tg = (id, key, title, about) => this.row(t, title, about, this.toggle(t, id, st[key], set({ [key]: !st[key] })));
+    const group = (on, ...rows) => v_flex().w_full().opacity(on ? 1 : 0.45).children(rows);
+    const sub = (text) => div().pt(18).pb(2).text_size(12.5).font_semibold().text_color(t.muted).child(text);
+    const intervals = h_flex().gap(6).children([2, 3, 5, 10].map((n) => pill(`st-sys-int-${n}`, st.sysInterval === n, `${n}s`, (cx) => this.updateUsageSettings({ sysInterval: n }, cx))));
     return v_flex()
       .w_full()
-      .child(this.heading(t, "Usage"))
-      .child(this.row(t, "Gauge style", "How Ctx, 5h and 7d usage is drawn in the status bar pill, next to the percentage.", styles))
-      .child(this.row(t, "Show percentage", "Off keeps only the gauge and its label (Ctx, 5h, 7d). Ignored for Text only.", this.toggle(t, "st-usage-pct", st.showPercent, (_e, cx) => this.updateUsageSettings({ showPercent: !st.showPercent }, cx))))
-      .child(this.row(t, "Show pace marker", "A tick on the bar marking how much of the 5h/7d window has elapsed. Fill past the tick means you are burning faster than the window.", this.toggle(t, "st-usage-pace", st.showPace, (_e, cx) => this.updateUsageSettings({ showPace: !st.showPace }, cx))))
-      .child(this.row(t, "Show reset time", "Append the time until the 5h and 7d limits reset, e.g. ↻2h 10m.", this.toggle(t, "st-usage-reset", st.showReset, (_e, cx) => this.updateUsageSettings({ showReset: !st.showReset }, cx))))
-      .child(div().pt(16).text_size(12.5).text_color(t.dim).child("Status bar items"))
-      .child(this.row(t, "Show computer name", "The “This computer” / machine label at the left of the status bar.", this.toggle(t, "st-bar-computer", st.showComputer, (_e, cx) => this.updateUsageSettings({ showComputer: !st.showComputer }, cx))))
-      .child(this.row(t, "Show branch", "Current git branch and its PR/CI chip.", this.toggle(t, "st-bar-branch", st.showBranch, (_e, cx) => this.updateUsageSettings({ showBranch: !st.showBranch }, cx))))
-      .child(this.row(t, "Show agents", "The “N agents” counter.", this.toggle(t, "st-bar-agents", st.showAgents, (_e, cx) => this.updateUsageSettings({ showAgents: !st.showAgents }, cx))))
-      .child(this.row(t, "Show PRs", "The PRs button that toggles the Pull Requests panel.", this.toggle(t, "st-bar-prs", st.showPrs, (_e, cx) => this.updateUsageSettings({ showPrs: !st.showPrs }, cx))))
-      .child(this.row(t, "Show system monitor", "CPU, memory, disk and network throughput (macOS and Linux).", this.toggle(t, "st-bar-system", st.showSystem, (_e, cx) => this.updateUsageSettings({ showSystem: !st.showSystem }, cx))))
-      .child(this.row(t, "  CPU", "CPU usage % in the system monitor.", this.toggle(t, "st-sys-cpu", st.showCpu, (_e, cx) => this.updateUsageSettings({ showCpu: !st.showCpu }, cx))))
-      .child(this.row(t, "  Memory", "Memory in use %.", this.toggle(t, "st-sys-mem", st.showMem, (_e, cx) => this.updateUsageSettings({ showMem: !st.showMem }, cx))))
-      .child(this.row(t, "  Disk", "Root disk used %.", this.toggle(t, "st-sys-disk", st.showDisk, (_e, cx) => this.updateUsageSettings({ showDisk: !st.showDisk }, cx))))
-      .child(this.row(t, "  Network", "Download / upload bytes per second.", this.toggle(t, "st-sys-net", st.showNet, (_e, cx) => this.updateUsageSettings({ showNet: !st.showNet }, cx))))
-      .child(this.row(t, "Warning color from", "Usage percentage where the gauge turns to the warning color.", this.stepper(t, "st-usage-warn", `${st.warn}%`,
-        (_e, cx) => this.updateUsageSettings({ warn: Math.max(0, st.warn - 5) }, cx),
-        (_e, cx) => this.updateUsageSettings({ warn: st.warn + 5 }, cx))))
-      .child(this.row(t, "Critical color from", "Usage percentage where the gauge turns red.", this.stepper(t, "st-usage-crit", `${st.critical}%`,
-        (_e, cx) => this.updateUsageSettings({ critical: Math.max(st.warn + 5, st.critical - 5) }, cx),
-        (_e, cx) => this.updateUsageSettings({ critical: Math.min(100, st.critical + 5) }, cx))))
-      .child(this.row(t, "Ctx warning color from", "Context usage percentage where the Ctx gauge turns to the warning color.", this.stepper(t, "st-usage-ctx-warn", `${st.ctxWarn}%`,
-        (_e, cx) => this.updateUsageSettings({ ctxWarn: Math.max(0, st.ctxWarn - 5) }, cx),
-        (_e, cx) => this.updateUsageSettings({ ctxWarn: st.ctxWarn + 5 }, cx))))
-      .child(this.row(t, "Ctx critical color from", "Context usage percentage where the Ctx gauge turns red.", this.stepper(t, "st-usage-ctx-crit", `${st.ctxCritical}%`,
-        (_e, cx) => this.updateUsageSettings({ ctxCritical: Math.max(st.ctxWarn + 5, st.ctxCritical - 5) }, cx),
-        (_e, cx) => this.updateUsageSettings({ ctxCritical: Math.min(100, st.ctxCritical + 5) }, cx))))
+      .child(this.heading(t, "Status bar"))
+      .child(sub("Items"))
+      .child(tg("st-bar-computer", "showComputer", "Computer name", "The “This computer” / machine label."))
+      .child(tg("st-bar-branch", "showBranch", "Branch & PR", "Current git branch and its PR/CI chip."))
+      .child(tg("st-bar-agents", "showAgents", "Agents", "The “N agents” counter."))
+      .child(tg("st-bar-usage", "showUsage", "Usage gauges", "Claude / Antigravity subscription gauges and their popup."))
+      .child(tg("st-bar-prs", "showPrs", "Pull requests", "The PRs button that toggles the Pull Requests panel."))
+      .child(tg("st-bar-system", "showSystem", "System monitor", "CPU, memory, disk and network throughput (macOS and Linux)."))
+      .child(tg("st-bar-media", "showMedia", "Media player", "The now-playing pill, when a player is active."))
+      .child(sub("Usage gauges"))
+      .child(group(st.showUsage,
+        this.row(t, "Gauge style", "How Ctx, 5h and 7d usage is drawn in the status bar pill, next to the percentage.", styles),
+        tg("st-usage-pct", "showPercent", "Show percentage", "Off keeps only the gauge and its label (Ctx, 5h, 7d). Ignored for Text only."),
+        tg("st-usage-pace", "showPace", "Show pace marker", "A tick on the bar marking how much of the 5h/7d window has elapsed. Fill past the tick means you are burning faster than the window."),
+        tg("st-usage-reset", "showReset", "Show reset time", "Append the time until the 5h and 7d limits reset, e.g. ↻2h 10m."),
+        this.row(t, "Warning color from", "Usage percentage where the gauge turns to the warning color.", this.stepper(t, "st-usage-warn", `${st.warn}%`, set({ warn: Math.max(0, st.warn - 5) }), set({ warn: st.warn + 5 }))),
+        this.row(t, "Critical color from", "Usage percentage where the gauge turns red.", this.stepper(t, "st-usage-crit", `${st.critical}%`, set({ critical: Math.max(st.warn + 5, st.critical - 5) }), set({ critical: Math.min(100, st.critical + 5) }))),
+        this.row(t, "Ctx warning color from", "Context usage percentage where the Ctx gauge turns to the warning color.", this.stepper(t, "st-usage-ctx-warn", `${st.ctxWarn}%`, set({ ctxWarn: Math.max(0, st.ctxWarn - 5) }), set({ ctxWarn: st.ctxWarn + 5 }))),
+        this.row(t, "Ctx critical color from", "Context usage percentage where the Ctx gauge turns red.", this.stepper(t, "st-usage-ctx-crit", `${st.ctxCritical}%`, set({ ctxCritical: Math.max(st.ctxWarn + 5, st.ctxCritical - 5) }), set({ ctxCritical: Math.min(100, st.ctxCritical + 5) }))),
+      ))
+      .child(sub("System monitor"))
+      .child(group(st.showSystem,
+        tg("st-sys-cpu", "showCpu", "CPU", "CPU usage %."),
+        tg("st-sys-mem", "showMem", "Memory", "Memory in use %."),
+        tg("st-sys-disk", "showDisk", "Disk", "Root disk used %."),
+        tg("st-sys-net", "showNet", "Network", "Download / upload bytes per second."),
+        this.row(t, "Refresh every", "How often the bar samples the system while the popup is closed (the popup samples faster while open).", intervals),
+        tg("st-sys-procs", "showProcs", "Top processes in popup", "List the top 5 processes by CPU and memory. Runs ps only while the popup is open."),
+        tg("st-sys-spark", "showSpark", "Sparklines in popup", "Short history graphs for CPU and network."),
+      ))
       .when(Boolean(this.usageError), (el) => el.child(div().pt(12).text_size(12.5).text_color(t.ansi1).child(this.usageError)))
       .child(div().pt(12).text_size(12).text_color(t.dim).child(`Settings file: ${this.usageSettingsFile()} · applied on the next usage refresh`));
   }
