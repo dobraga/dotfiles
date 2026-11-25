@@ -173,7 +173,7 @@ function card({ t, data, claude, agy, pinned, loading, onRefresh, onDismiss, sto
                 ),
             ),
         )
-        .child(
+        .when(Boolean(agy), (root) => root.child(
           v_flex()
             .p(10)
             .gap(8)
@@ -217,7 +217,7 @@ function card({ t, data, claude, agy, pinned, loading, onRefresh, onDismiss, sto
                 ),
               ),
             ),
-        ),
+        )),
     )
     .child(
       h_flex()

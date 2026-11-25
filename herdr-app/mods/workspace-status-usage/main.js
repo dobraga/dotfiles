@@ -204,6 +204,7 @@ async function readAgyCache() {
 async function fetchAgyUsage() {
   try {
     const res = await exec("agy", ["-p", "/usage", "--output-format", "json"], { timeout: 25000 });
+    if (res.code === 127 || /not found|ENOENT|no such file/i.test(res.stderr ?? "")) return null; // not installed: hide
     if (res.code !== 0) return { error: res.stderr?.trim() || "agy /usage failed" };
     const parsed = JSON.parse(res.stdout);
     const rawGroups = parsed?.command?.data?.groups ?? [];
@@ -217,6 +218,7 @@ async function fetchAgyUsage() {
     }));
     return { groups, error: groups.length ? null : "No usage groups returned" };
   } catch (e) {
+    if (/not found|ENOENT|no such file/i.test(String(e))) return null; // not installed: hide
     return { error: String(e || "Failed to run agy /usage") };
   }
 }
