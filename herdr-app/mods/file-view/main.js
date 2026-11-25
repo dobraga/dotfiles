@@ -1,5 +1,5 @@
 // Fast file editor, media previewer (image/SVG/audio/video), git diff viewer, and inline Open With screen.
-import { View, div, svg } from "gpui-kit";
+import { View, div, svg, list } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, TextView, Scrollbar, v_virtual_list, Input, InputState, SliderState, ScrollHandle, VirtualListScrollHandle } from "gpui-base";
 import { props, shared, setShared, spaces, panes, focused, run, exec, readTextFile, writeTextFile, watchFolder, theme, settings, home, checking, notify } from "herdr";
 import { colorRows } from "./syntax.js";
@@ -137,6 +137,8 @@ function mdLineSegs(l) {
 
 function countBlockHits(block, q) {
   if (isFencedBlock(block)) return 0;
+  // Cheap prefilter: a segment can only match if the raw block text does, so skip the parse otherwise.
+  if (!block.toLowerCase().includes(q)) return 0;
   let n = 0;
   for (const l of parseMdBlockLines(block)) for (const sg of mdLineSegs(l)) n += countOccurrences(sg.text.toLowerCase(), q);
   return n;
@@ -313,7 +315,7 @@ export default class FileView extends View {
     this.fileSearchQuery = "";
     this.fileMatches = [];
     this.fileMatchIdx = 0;
-    this.mdScroll = ScrollHandle.new();
+    this.mdScroll = VirtualListScrollHandle.new();
     this.codeScroll = VirtualListScrollHandle.new();
     this.searchLines = [];
     this.mdBlocks = [];
@@ -1626,12 +1628,15 @@ export default class FileView extends View {
       this.mdBlocks = splitMdBlocks(this.markdownText);
       this.fileMatches = [];
       this.fileMatchIdx = 0;
+      const hits = this.mdBlocks.map(() => false);
       if (q) {
         this.mdBlocks.forEach((b, block) => {
           const n = countBlockHits(b, q);
+          hits[block] = n > 0;
           for (let local = 0; local < n; local++) this.fileMatches.push({ block, local });
         });
       }
+      this.mdHitCache = { q, blocks: this.mdBlocks, hits };
       if (jump) this.showFileMatch(cx);
       return;
     }
@@ -1741,28 +1746,82 @@ export default class FileView extends View {
       .child(Scrollbar.vertical(`fv-code-search-${this.slotId}`).viewport_from_layout().absolute().inset_0());
   }
 
+  // Blocks are rendered lazily (only the visible ones) so a huge markdown file doesn't lay out whole.
+  renderMdPreview() {
+    if (this.mdBlocksSrc !== this.markdownText) {
+      this.mdBlocks = splitMdBlocks(this.markdownText);
+      this.mdBlocksSrc = this.markdownText;
+    }
+    const blocks = this.mdBlocks;
+    const id = `fv-md-list-${this.slotId}`;
+    return v_flex()
+      .relative()
+      .flex_1()
+      .min_h(0)
+      .child(
+        list(
+          id,
+          blocks.length,
+          (i) => `${i}`,
+          (i) => div().px(20).py(6).child(TextView.markdown(`fv-md-${this.slotId}-p${i}`, blocks[i])),
+        ).size_full(),
+      )
+      .child(Scrollbar.vertical(id).absolute().inset_0());
+  }
+
   renderMdSearchView(t) {
     const q = this.fileSearchQuery.toLowerCase();
     if (!this.mdBlocks.length) this.mdBlocks = splitMdBlocks(this.markdownText);
     const cur = this.fileMatches[this.fileMatchIdx];
-    const el = v_flex()
-      .id("fv-markdown-scroll-search")
-      .track_scroll(this.mdScroll)
+    if (this.mdHitCache?.q !== q || this.mdHitCache.blocks !== this.mdBlocks)
+      this.mdHitCache = { q, blocks: this.mdBlocks, hits: this.mdBlocks.map((b) => countBlockHits(b, q) > 0) };
+    const blocks = this.mdBlocks;
+    const hits = this.mdHitCache.hits;
+    // Fixed per-block heights (a virtual list needs them, and scroll_to_item works with it): estimate
+    // from line count and wrapped length, generously so wrapped text doesn't overlap the next block.
+    if (this.mdHeights?.blocks !== blocks)
+      this.mdHeights = {
+        blocks,
+        sizes: blocks.map((b) => {
+          let lines = 0;
+          for (const l of b.split("\n")) lines += Math.max(1, Math.ceil(l.length / 80));
+          return lines * 24 + 24;
+        }),
+      };
+    const id = `fv-md-search-${this.slotId}`;
+    return v_flex()
+      .relative()
       .flex_1()
       .min_h(0)
-      .overflow_y_scrollbar()
-      .p(20)
-      .gap(12);
-    this.mdBlocks.forEach((b, i) => {
-      const local = cur && cur.block === i ? cur.local : -1;
-      const hasHit = countBlockHits(b, q) > 0;
-      el.child(
-        hasHit
-          ? renderMdMatchBlock(b, q, local, t).id(`fv-md-hit-${this.slotId}-${i}`)
-          : TextView.markdown(`fv-md-${this.slotId}-s${i}`, b),
-      );
-    });
-    return el;
+      .child(
+        v_virtual_list(
+          id,
+          blocks.length,
+          this.mdHeights.sizes,
+          (i) => `${i}-${hits[i] ? q : ""}-${cur && cur.block === i ? cur.local : ""}`,
+          (range) => {
+            const out = [];
+            for (let i = range.start; i < range.end; i++) {
+              const local = cur && cur.block === i ? cur.local : -1;
+              out.push(
+                div()
+                  .px(20)
+                  .py(6)
+                  .overflow_hidden()
+                  .child(
+                    hits[i]
+                      ? renderMdMatchBlock(blocks[i], q, local, t)
+                      : TextView.markdown(`fv-md-${this.slotId}-s${i}`, blocks[i]),
+                  ),
+              );
+            }
+            return out;
+          },
+        )
+          .track_scroll(this.mdScroll)
+          .size_full(),
+      )
+      .child(Scrollbar.vertical(id).viewport_from_layout().absolute().inset_0());
   }
 
   copyPdfPageText(fullPath, cx) {
@@ -2348,13 +2407,7 @@ export default class FileView extends View {
               : this.mdPreview && this.markdownText
                 ? this.fileSearchOpen && this.fileSearchQuery.trim()
                   ? this.renderMdSearchView(t)
-                  : v_flex()
-                    .id("fv-markdown-scroll")
-                    .flex_1()
-                    .min_h(0)
-                    .overflow_y_scrollbar()
-                    .p(20)
-                    .child(TextView.markdown(`fv-md-${this.slotId}`, this.markdownText))
+                  : this.renderMdPreview()
                 : this.code && this.fileSearchOpen && this.fileSearchQuery.trim()
                   ? this.renderCodeSearchView(t)
                   : this.code
