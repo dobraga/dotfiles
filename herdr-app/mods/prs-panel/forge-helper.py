@@ -1246,7 +1246,7 @@ def fetch_github_prs(
     actor = (gh_cfg.get("account") or "").strip() or "@me"
     scope = _gh_scope_clauses(gh_cfg)
     mine_q = f"is:pr is:open author:{actor} {scope}".strip()
-    rev_q = f"is:pr is:open review-requested:{actor} -author:{actor} {scope}".strip()
+    rev_q = f"is:pr is:open user-review-requested:{actor} -author:{actor} {scope}".strip()
 
     query = f"""
     query($mineQ: String!, $revQ: String!) {{
