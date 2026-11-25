@@ -13,8 +13,6 @@
     "alt-j": "pane.go:down",
     "alt-k": "pane.go:up",
     "alt-l": "pane.go:right",
-    "alt-left": "pane.go:left",
-    "alt-right": "pane.go:right",
     "alt-shift-h": "pane.swap:left",
     "alt-shift-j": "pane.swap:down",
     "alt-shift-k": "pane.swap:up",
