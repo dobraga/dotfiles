@@ -1462,7 +1462,7 @@ export default class Spaces extends View {
             .gap(4)
             .flex_wrap()
             .items_center()
-            .child(profChip(null, "All"))
+            .when(profilesList.length === 0, (el) => el.child(profChip(null, "All")))
             .children(profilesList.map((p) => profChip(p.id, p.name)))
             .child(
               div()
