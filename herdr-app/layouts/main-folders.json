@@ -1,6 +1,6 @@
 {
   "id": "root",
-  "toast": "desktop-toast",
+  "toast": "dg-desktop-toast",
   "cloned_from": {
     "name": "main",
     "version": "0.1.10"
@@ -55,7 +55,7 @@
               },
               "min": 90,
               "content": {
-                "mod": "space-folders"
+                "mod": "dg-spaces"
               }
             },
             {
@@ -66,7 +66,7 @@
               },
               "min": 90,
               "content": {
-                "mod": "agents-custom"
+                "mod": "dg-agents"
               }
             }
           ]
@@ -78,7 +78,7 @@
             "px": 69
           },
           "content": {
-            "mod": "workspace-chrome-custom",
+            "mod": "dg-workspace-chrome",
             "props": {
               "footer": true
             }
@@ -99,7 +99,7 @@
           },
           "window_drag": true,
           "content": {
-            "mod": "tabs-folders"
+            "mod": "dg-tabs"
           }
         },
         {
@@ -156,42 +156,42 @@
                       "id": "files",
                       "type": "block",
                       "content": {
-                        "mod": "files-tabs"
+                        "mod": "dg-files"
                       }
                     },
                     {
                       "id": "changes",
                       "type": "block",
                       "content": {
-                        "mod": "changes-tabs"
+                        "mod": "dg-changes"
                       }
                     },
                     {
                       "id": "prs",
                       "type": "block",
                       "content": {
-                        "mod": "prs-panel"
+                        "mod": "dg-prs"
                       }
                     },
                     {
                       "id": "loadout",
                       "type": "block",
                       "content": {
-                        "mod": "loadout"
+                        "mod": "dg-loadout"
                       }
                     },
                     {
                       "id": "tasks",
                       "type": "block",
                       "content": {
-                        "mod": "tasks"
+                        "mod": "dg-tasks"
                       }
                     },
                     {
                       "id": "inbox",
                       "type": "block",
                       "content": {
-                        "mod": "inbox"
+                        "mod": "dg-inbox"
                       }
                     }
                   ]
@@ -207,7 +207,7 @@
             "px": 28
           },
           "content": {
-            "mod": "workspace-status-usage"
+            "mod": "dg-workspace-status"
           }
         }
       ]

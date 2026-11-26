@@ -45,10 +45,10 @@
     "ctrl-shift-?": "app.help",
     "ctrl-shift-b": "layout.toggle:sidebar",
     "ctrl-shift-n": "space.new",
-    "ctrl-t": "mod.open:new-tab",
+    "ctrl-t": "mod.open:dg-new-tab",
     "ctrl-shift-k": "mod.open:picker",
     "ctrl-shift-p": "app.palette",
-    "ctrl-,": "mod.open:settings-custom",
+    "ctrl-,": "mod.open:dg-settings",
     "ctrl-shift-o": "pane.split:right",
     "ctrl-shift-e": "pane.split:down",
     "ctrl-w": {
@@ -81,14 +81,14 @@
     "shift-insert": "terminal.paste"
   },
   "layout:main-folders": {
-    "alt-down": "space-folders.next",
-    "alt-up": "space-folders.prev",
-    "ctrl-shift-pagedown": "space-folders.next",
-    "ctrl-shift-pageup": "space-folders.prev",
-    "ctrl-space shift-n": "space-folders.next",
-    "ctrl-space shift-p": "space-folders.prev",
-    "ctrl-tab": "tabs-folders.next",
-    "ctrl-shift-tab": "tabs-folders.prev",
-    "ctrl-p": "mod.open:file-picker"
+    "alt-down": "dg-spaces.next",
+    "alt-up": "dg-spaces.prev",
+    "ctrl-shift-pagedown": "dg-spaces.next",
+    "ctrl-shift-pageup": "dg-spaces.prev",
+    "ctrl-space shift-n": "dg-spaces.next",
+    "ctrl-space shift-p": "dg-spaces.prev",
+    "ctrl-tab": "dg-tabs.next",
+    "ctrl-shift-tab": "dg-tabs.prev",
+    "ctrl-p": "mod.open:dg-file-picker"
   }
 }

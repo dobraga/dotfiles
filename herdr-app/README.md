@@ -16,8 +16,8 @@ My [Herdr](https://herdr.dev) setup: the `main-folders` layout, custom and forke
 
 ### Mods
 
-- **Forks of shipped mods:** `space-folders` (spaces), `tabs-folders` (tabs), `files-tabs`, `changes-tabs`, `workspace-status-usage`, `workspace-chrome-custom`, `new-menu-custom`, `agents-custom`
-- **Mine:** `prs-panel` (pull requests), `tasks`, `inbox`, `loadout`, `file-view`, `file-picker`, `media-card`, `settings-custom`, `desktop-toast`
+- **Forks of shipped mods:** `dg-spaces` (spaces), `dg-tabs` (tabs), `dg-files`, `dg-changes`, `dg-workspace-status`, `dg-workspace-chrome`, `dg-new-menu`, `dg-agents`
+- **Mine:** `dg-prs` (pull requests), `dg-tasks`, `dg-inbox`, `dg-loadout`, `dg-file-view`, `dg-file-picker`, `media-card`, `dg-settings`, `dg-desktop-toast`
 
 ## Requirements
 
@@ -62,14 +62,14 @@ ln -sfn ~/src/herdr-mods/mods/<name> "$DST/mods/<name>"
 
 | Mod | What it gives you | Also needs |
 |-----|-------------------|-----------|
-| `space-folders`, `tabs-folders`, `workspace-chrome-custom`, `new-menu-custom`, `agents-custom` | Folder-style spaces and tabs, sidebar chrome, new-tab menu, agents list | Nothing; these are the layout's core |
-| `files-tabs`, `changes-tabs` | Files and Changes panels | `git` |
-| `file-view`, `file-picker` | File viewer (syntax, images, media) and Quick Open | `python3`; `ffmpeg` for media; `xdg-open` for "open with" |
-| `prs-panel` | Pull request panel | `gh` (logged in with `gh auth login`), `git` |
-| `tasks` | Tasks panel | `herdr-tasks` scheduler (below) |
-| `inbox`, `loadout` | Inbox, and a read-only list of skills and MCP servers | Nothing |
-| `workspace-status-usage` | Sidebar usage card | Claude Code, Codex or Antigravity (`agy`) CLIs for their usage |
-| `media-card`, `desktop-toast`, `settings-custom` | Media card, desktop notifications, custom Settings screen | Nothing |
+| `dg-spaces`, `dg-tabs`, `dg-workspace-chrome`, `dg-new-menu`, `dg-agents` | Folder-style spaces and tabs, sidebar chrome, new-tab menu, agents list | Nothing; these are the layout's core |
+| `dg-files`, `dg-changes` | Files and Changes panels | `git` |
+| `dg-file-view`, `dg-file-picker` | File viewer (syntax, images, media) and Quick Open | `python3`; `ffmpeg` for media; `xdg-open` for "open with" |
+| `dg-prs` | Pull request panel | `gh` (logged in with `gh auth login`), `git` |
+| `dg-tasks` | Tasks panel | `herdr-tasks` scheduler (below) |
+| `dg-inbox`, `dg-loadout` | Inbox, and a read-only list of skills and MCP servers | Nothing |
+| `dg-workspace-status` | Sidebar usage card | Claude Code, Codex or Antigravity (`agy`) CLIs for their usage |
+| `media-card`, `dg-desktop-toast`, `dg-settings` | Media card, desktop notifications, custom Settings screen | Nothing |
 
 The layout loads mods by name, so a panel whose mod isn't linked will be empty.
 
