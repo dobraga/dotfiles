@@ -11,7 +11,6 @@ My [Herdr](https://herdr.dev) setup: the `main-folders` layout, custom and forke
 | `keys.json` | Keybindings (`alt-1..9` spaces, `ctrl-1..9` tabs, `alt-h/j/k/l` panes, zoom) |
 | `settings.json` | App settings (font, zoom, appearance) |
 | `data/<mod>/settings.json` | Per-mod settings (Files, Inbox, Tasks, Usage) |
-| `data/tasks/tasks.json` | Tasks panel config: commands, prompts, sets, schedules |
 | `data/herdr-chat/keys.json` | Keys for herdr-chat |
 
 ### Mods
@@ -105,13 +104,10 @@ done
 Only needed for scheduled and background runs. Needs `bun`.
 
 ```sh
-mkdir -p ~/.local/bin ~/.local/state/herdr/tasks
-ln -sf "$HOME/src/dotfiles/tools/herdr-tasks/bin/herdr-tasks" ~/.local/bin/herdr-tasks
-HERDR_TASKS_BIN="$HOME/src/dotfiles/tools/herdr-tasks/bin/herdr-tasks" herdr-tasks service install
-mkdir -p "$DST/data/tasks"; ln -sfn "$SRC/data/tasks/tasks.json" "$DST/data/tasks/tasks.json"   # my task list; optional
+~/src/herdr-mods/install.sh dg-tasks
 ```
 
-The last line links my own task list. Skip it to start with an empty Tasks panel.
+This links the scheduler from herdr-mods and installs it as a login service. The task list (`data/tasks/tasks.json`: commands, prompts, sets, schedules) is not versioned: it stays local to each machine.
 
 ### herdr-chat (chat UI and launcher)
 
