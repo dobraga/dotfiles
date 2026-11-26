@@ -112,7 +112,10 @@ export function buildItems({ agents = [], notifs = [], runs = [], asks = [], set
       out.push({ key: `task-${r.run_id}`, group: "tasks", section: bad ? 0 : 2, kind: "TASK", tone: bad ? "error" : "done", title: `${r.name ?? r.task} ${r.status}`, body: r.error || r.reason || "", time: toMs(r.at), read: Boolean(r.seen), profiles: folderProfiles(r.task), data: { runId: r.run_id, task: r.task, status: r.status, outputFile: r.output_file } });
     }
   }
-  return out.map((i) => ({ ...i, seen: i.read || Boolean(state?.seen?.[i.key]), dismissed: Boolean(state?.dismissed?.[i.key]) }));
+  // An ask's key is its question, which an agent can ask again later: a dismissal hides only the card it was made on
+  // (dismissed at or after the card appeared), never a later ask of the same question.
+  const dismissed = (i) => { const at = state?.dismissed?.[i.key]; return Boolean(at) && (i.group !== "asks" || at >= i.time); };
+  return out.map((i) => ({ ...i, seen: i.read || Boolean(state?.seen?.[i.key]), dismissed: dismissed(i) }));
 }
 
 /** With a profile selected, only its rows and the ones with no profile. A task run follows the spaces working in its folder (`profiles`); a folder no space uses is shown everywhere. */

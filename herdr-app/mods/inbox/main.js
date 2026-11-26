@@ -9,7 +9,7 @@ import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar } from "gpui-base";
 import { agents, layout, spaces, appHome, checking, exec, hc, home, notify, readTextFile, run, setShared, shared, theme, writeTextFile } from "herdr";
 import { buildItems, rank, autoSeenItems, profilesOfFolder, hiddenElsewhere, inProfile, normalizeSettings, parseState, serializeState, pruneState, profileOf, classifierFor, needsYouCount, SECTIONS } from "./items.js";
-import { parseDialog, lastMessage, parseStopped, classifyPrompt, parseClassifier, answerPlan, composeAnswers, decisionLine, hash, SUPPORTED_APPS } from "./asks.js";
+import { parseDialog, lastMessage, parseStopped, classifyPrompt, parseClassifier, answerPlan, composeAnswers, decisionLine, dialogId, hash, SUPPORTED_APPS } from "./asks.js";
 
 const FILTERS = [["all", "All"], ["asks", "Asks"], ["agents", "Agents"], ["prs", "PRs"], ["tasks", "Tasks"]];
 const MAX_CLASSIFY_PER_MIN = 6;
@@ -168,12 +168,14 @@ export default class Inbox extends View {
     const screen = await this.readScreen(a.address);
     if (!screen) return;
     const base = { profile: profileOf({ id: a.space }, shared("space-folders")), address: a.address, title: `${a.space_name} · ${a.tab_name}`, space: a.space_name, agent: a.app ?? "agent", spaceId: a.space, state: "open", at: Date.now() };
-    for (const [k, c] of this.cards) if (c.address === a.address && c.state === "open") { this.cards.delete(k); this.release(k); }
+    // A card read again (same key) keeps the time it first appeared: a dismissal made since then still hides it.
+    const firstSeen = new Map();
+    for (const [k, c] of this.cards) if (c.address === a.address && c.state === "open") { firstSeen.set(k, c.at); this.cards.delete(k); this.release(k); }
     if (a.status === "blocked") {
       const d = parseDialog(screen);
       if (!d) return;
-      const key = `ask-${a.address}-${hash(d.question + d.options.map((o) => o.label).join("|"))}`;
-      this.cards.set(key, { ...base, key, mode: "dialog", nav: /antigravity|agy/i.test(a.app ?? "") ? "arrows" : "number", kind: d.multi ? "QUESTIONS" : d.kind, question: d.question, context: d.context, options: d.options, multi: d.multi });
+      const key = `ask-${a.address}-${dialogId(d)}`;
+      this.cards.set(key, { ...base, at: firstSeen.get(key) ?? base.at, key, dialog: dialogId(d), mode: "dialog", nav: /antigravity|agy/i.test(a.app ?? "") ? "arrows" : "number", kind: d.multi ? "QUESTIONS" : d.kind, question: d.question, context: d.context, options: d.options, multi: d.multi });
       return;
     }
     const stopped = parseStopped(screen);
@@ -236,12 +238,16 @@ export default class Inbox extends View {
 
   // ---- answering ----
 
-  async answer(card, answer, cx) {
+  // Called from a click: the click's `cx` dies at the first `await`, so the work runs in a task with its own context.
+  answer(card, answer, cx) {
     if (card.state === "sending") return;
-    card.state = "sending";
-    card.error = null;
+    card.state = "sending"; // a previous error stays on the card until this try ends, so a Retry moves nothing
     card.lastAnswer = answer;
     cx.notify();
+    cx.spawn((cx) => this.deliver(card, answer, cx));
+  }
+
+  async deliver(card, answer, cx) {
     const plan = answerPlan(card, answer);
     try {
       if (plan.keys) await this.must(await hc(["keys", card.address, ...plan.keys]));
@@ -257,6 +263,9 @@ export default class Inbox extends View {
     }
     this.cards.delete(card.key);
     this.release(card.key);
+    // A set of questions (Antigravity's "Question 1/4") keeps the agent blocked with the same status and seq: forget the
+    // signature so the next scan reads the screen again and makes the card for the next question.
+    this.sig.delete(card.address);
     const text = answer.text ?? card.options.find((o) => o.n === answer.option)?.label ?? String(answer.option);
     const entry = { at: Date.now(), agent: card.agent, space: card.space, question: card.question, answer: text };
     this.state.answered = [...this.state.answered, entry].slice(-100);
@@ -275,7 +284,11 @@ export default class Inbox extends View {
         await this.sleep(700);
         const a = agents().find((x) => x.address === card.address);
         if (!a) return true; // closed: nothing left to answer
-        if (plan.keys && !plan.then && !plan.send) { if (a.status !== "blocked") return true; }
+        if (plan.keys && !plan.then && !plan.send) {
+          if (a.status !== "blocked") return true;
+          // Still blocked is also a reaction when the dialog on screen is another one (the next question of a set).
+          if (dialogId(parseDialog(await this.readScreen(card.address))) !== card.dialog) return true;
+        }
         else if (a.status === "working") return true;
       }
       return false;
@@ -387,10 +400,11 @@ export default class Inbox extends View {
         .hover((s) => s.bg(t.hover)).on_click((_e, c) => { this.filter = id; c.notify(); })
         .child(label).child(div().text_color(t.dim).child(String(n)));
     };
-    const btn = (id, label, fn, primary = false, danger = false) => div().id(id).px(9).py(3).rounded(5).text_size(11.5).font_medium().border_1().cursor_pointer()
+    // `off`: drawn the same size (no layout shift), dimmed, and a click does nothing.
+    const btn = (id, label, fn, primary = false, danger = false, off = false) => div().id(id).px(9).py(3).rounded(5).text_size(11.5).font_medium().border_1()
       .border_color(primary ? t.solid : t.border).bg(primary ? t.solid : t.raised).text_color(primary ? t.solid_foreground : danger ? t.ansi1 : t.foreground)
-      .hover((s) => s.opacity(0.85)).on_mouse_down("left", stop)
-      .on_click((_e, c) => { c.stop_propagation(); fn(c); }).child(label);
+      .when(off, (el) => el.opacity(0.45)).when(!off, (el) => el.cursor_pointer().hover((s) => s.opacity(0.85))).on_mouse_down("left", stop)
+      .on_click((_e, c) => { c.stop_propagation(); if (!off) fn(c); }).child(label);
     const link = (id, label, fn) => div().id(id).text_size(11).cursor_pointer().text_color(t.dim).hover((s) => s.text_color(t.foreground)).on_click((_e, c) => fn(c)).child(label);
     const badge = (kind, tone) => div().w(64).flex_none().mt(1).py(2).rounded(4).bg(t.raised).text_color(t[tone] ?? (tone === "error" ? t.ansi1 : tone === "done" ? t.ansi2 : t.muted)).text_size(10).font_semibold().text_center().child(kind);
 
@@ -402,41 +416,41 @@ export default class Inbox extends View {
         .child(div().flex_none().text_size(11).text_color(t.dim).child(since(c.at))));
       col.child(div().text_size(12).text_color(t.foreground).child(c.question));
       if (c.context) col.child(div().text_size(11).text_color(t.dim).child(c.context));
-      if (c.state === "failed") col.child(div().text_size(11.5).text_color(t.ansi1).child(c.error));
-      if (c.state === "sending") col.child(div().text_size(11.5).text_color(t.dim).child("Sending…"));
+      if (c.error) col.child(div().text_size(11.5).text_color(t.ansi1).child(c.error));
+      // While an answer is on its way every control of the card is off; nothing is added, so nothing moves.
       const busy = c.state === "sending";
-      if (c.mode === "dialog" && !c.multi) {
-        col.child(v_flex().mt(2).gap(4).children(c.options.map((o) => btn(`${c.key}-o${o.n}`, `${o.n}. ${o.label}${o.recommended ? "  ★" : ""}`, (x) => !busy && this.answer(c, { option: o.n }, x), o.recommended))));
-      } else if (c.mode === "dialog") {
-        col.child(div().text_size(11.5).text_color(t.muted).child("Several questions in one dialog: answer them in the terminal."));
+      const cbtn = (id, label, fn, primary = false) => btn(id, label, fn, primary, false, busy);
+      if (c.mode === "dialog") {
+        col.child(v_flex().mt(2).gap(4).children(c.options.map((o) => cbtn(`${c.key}-o${o.n}`, `${o.n}. ${o.label}${o.recommended ? "  ★" : ""}`, (x) => this.answer(c, { option: o.n }, x), o.recommended))));
       } else if (c.mode === "text") {
         c.questions.forEach((q, n) => {
           const openQ = c.openQ === n;
           col.child(v_flex().gap(3).child(
-            h_flex().id(`${c.key}-q${n}`).gap(6).cursor_pointer().on_click((_e, x) => { c.openQ = openQ ? -1 : n; x.notify(); })
+            h_flex().id(`${c.key}-q${n}`).gap(6).cursor_pointer().on_click((_e, x) => { if (busy) return; c.openQ = openQ ? -1 : n; x.notify(); })
               .child(div().text_size(11).text_color(t.dim).child(openQ ? "▾" : "▸"))
               .child(div().flex_1().text_size(12).text_color(t.foreground).child(c.questions.length > 1 ? `${n + 1}. ${q.text}` : q.text))
               .when(Boolean(c.drafts[n]), (el) => el.child(div().text_size(11).text_color(t.accent).child(`→ ${c.drafts[n]}`)))));
-          if (openQ && q.options.length) col.child(h_flex().gap(5).flex_wrap().children(q.options.map((o, k) => btn(`${c.key}-q${n}-o${k}`, o,
+          if (openQ && q.options.length) col.child(h_flex().gap(5).flex_wrap().children(q.options.map((o, k) => cbtn(`${c.key}-q${n}-o${k}`, o,
             (x) => { if (c.questions.length === 1) this.answer(c, { text: o }, x); else { c.drafts[n] = o; x.notify(); } }))));
         });
       }
-      if (c.mode !== "dialog" || !c.multi) {
+      {
         const input = this.inputFor(c.key);
         const sendText = (x) => {
           const typed = input ? input.value().trim() : "";
           const text = c.mode === "text" && c.questions.length > 1 ? composeAnswers(c.questions, c.drafts.map((d, n) => (n === c.openQ && typed ? typed : d))) : typed;
-          if (text && !busy) this.answer(c, { text }, x);
+          if (text) this.answer(c, { text }, x);
         };
         col.child(h_flex().mt(2).gap(6).items_center()
-          .child(input ? div().flex_1().min_w(0).h(26).px(6).rounded(5).border_1().border_color(t.border).bg(t.background).child(Input.new(input).w_full().h_full().text_size(12).text_color(t.foreground)) : div().flex_1())
-          .child(btn(`${c.key}-send`, c.mode === "text" && c.questions.length > 1 ? `Send answers (${c.drafts.filter(Boolean).length}/${c.questions.length})` : "Send", sendText)));
+          .child(input ? div().flex_1().min_w(0).h(26).px(6).rounded(5).border_1().border_color(t.border).bg(t.background).when(busy, (el) => el.opacity(0.45))
+            .child(Input.new(input).w_full().h_full().text_size(12).text_color(t.foreground)) : div().flex_1())
+          .child(cbtn(`${c.key}-send`, c.mode === "text" && c.questions.length > 1 ? `Send answers (${c.drafts.filter(Boolean).length}/${c.questions.length})` : "Send", sendText)));
       }
       col.child(h_flex().mt(2).gap(6).flex_wrap()
-        .when(c.mode === "stopped" && !c.loggedOut, (el) => el.child(btn(`${c.key}-continue`, "Continue", (x) => !busy && this.answer(c, { text: "continue" }, x), true)))
-        .when(c.state === "failed", (el) => el.child(btn(`${c.key}-retry`, "Retry", (x) => this.answer(c, c.lastAnswer, x), true)))
-        .child(btn(`${c.key}-term`, "Open terminal", () => run("agent.focus", { terminal: c.address })))
-        .child(btn(`${c.key}-dismiss`, "Dismiss", (x) => this.dismiss(i, x))));
+        .when(c.mode === "stopped" && !c.loggedOut, (el) => el.child(cbtn(`${c.key}-continue`, "Continue", (x) => this.answer(c, { text: "continue" }, x), true)))
+        .when(Boolean(c.error), (el) => el.child(cbtn(`${c.key}-retry`, "Retry", (x) => this.answer(c, c.lastAnswer, x), true)))
+        .child(cbtn(`${c.key}-term`, "Open terminal", () => run("agent.focus", { terminal: c.address })))
+        .child(cbtn(`${c.key}-dismiss`, "Dismiss", (x) => this.dismiss(i, x))));
       return h_flex().id(i.key).w_full().px(14).py(9).gap(10).items_start().border_b(1).border_color(t.border).child(badge(i.kind, i.tone)).child(col);
     };
 

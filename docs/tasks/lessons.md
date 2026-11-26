@@ -17,3 +17,9 @@
 - Herdr mods: on `kind: "popup"`, `openOverlay`'s `height` is a max cap (omitting it falls back to a small default cap), while wrapping short lists in `min_h(0).overflow_y_scroll()` clips the last row's bottom pixels; render short lists as plain `v_flex().w_full()` and attach `max_h(...).overflow_y_scrollbar()` only when the item count exceeds the viewport.
 
 - Herdr mods: a mod cannot `import` a file from another mod (`../other-mod/x.js` makes the importing mod fail with "did not load"). Keep each mod self-contained; share assets by path (`icons/<program>.svg`, `mods/<mod>/x.svg`) and runtime state via `shared`/`setShared`, never code.
+
+- Herdr mods: an event handler's `cx` (from `on_click`) is dead after its first `await` ("cx is no longer valid"). Any async work started from a click goes through `cx.spawn(async (cx) => ...)` and uses that `cx`; never pass the click's `cx` into an async method.
+
+- Herdr Inbox: an agent that keeps the same status across steps (Antigravity's "Question 1/4", "2/4", all `blocked`) is not re-read by a status/seq signature. After acting on it, drop the signature, and judge delivery by what is on screen (a different dialog), not by a status change alone.
+
+- Herdr Inbox: a key built from content (question + options) recurs. Anything persisted against it (dismissed, seen) must also check *when* (`dismissedAt >= card.at`), or one Dismiss silently hides every later identical ask.

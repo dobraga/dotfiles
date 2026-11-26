@@ -18,7 +18,7 @@ export function hash(text) {
 /**
  * Reads a dialog at the bottom of the screen: consecutive numbered options and the question above them.
  * Returns null when the screen shows no dialog. `multi` is true for Claude Code's several-questions dialog (a tab bar of
- * ☐/✔ steps), which is never answered from a card.
+ * ☐/✔ steps): it is answered one tab at a time, each answer moves it to the next tab, which reads as a new dialog.
  */
 export function parseDialog(screen) {
   const lines = tail(screen, 45).map(clean).map((l) => l.replace(/^\s*[│┃]\s?/, "").replace(/\s*[│┃]$/, ""));
@@ -51,25 +51,43 @@ export function parseDialog(screen) {
   const below = lines.slice(end + 1).join("\n");
   const live = opts.some((o) => o.current) || /Esc to|Enter to|to select|to navigate|to cancel|Navigate|enter Select|esc Skip/i.test(below);
   if (!live) return null;
+  // Claude Code's several-questions tab bar ("← ☐ Layout ☐ Defaults ✔ Submit →") is chrome, not context.
+  const TABS = /[☐☒✔]\s.*[☐☒✔]\s|←.*[☐☒✔].*→|^\s*[☐☒✔]\s/;
   let q = start - 1;
   const ctx = [];
-  while (q >= 0 && ctx.length < 6) {
+  while (q >= 0 && ctx.length < 14) {
     if (RULE.test(lines[q])) break;
-    if (lines[q].trim() && !/^\s*[☐☒✔]\s/.test(lines[q])) ctx.unshift(lines[q].trim());
+    if (lines[q].trim() && !TABS.test(lines[q])) ctx.unshift(lines[q].trim());
     q--;
   }
+  // The last step of the several-questions dialog lists the questions with their answers ("● Q" / "→ A") above
+  // Submit/Cancel: the question is whether to submit, and those pairs are the context.
+  const review = ctx.findIndex((l) => /^Review your answers/i.test(l));
+  if (review >= 0) {
+    const pairs = ctx.slice(review + 1).filter((l) => /^[●→]/.test(l));
+    return { kind: "DECISION", question: "Submit your answers?", context: pairs.join("\n"), multi: true, options: cleanOptions(opts) };
+  }
+  ctx.splice(0, Math.max(0, ctx.length - 6));
   const question = (ctx.filter((l) => /\?$|^Do you|^Allow|^Would you/i.test(l)).pop() ?? ctx[ctx.length - 1] ?? "Waiting for your choice").replace(/^Question \d+\/\d+:\s*/i, "");
   const above = ctx.join(" ");
   const multi = lines.some((l) => /[☐☒✔]\s.*[☐☒✔]\s|←.*☐.*→/.test(l));
-  // Claude Code adds its own "Type something." / "Chat about this" rows: they are not choices of the agent.
-  const own = (o) => /^(type something|chat about this|other|write-in)\.*$/i.test(o.label.trim());
-  const real = opts.filter((o) => !own(o));
+  const real = cleanOptions(opts);
   const yesNo = real.some((o) => /^yes\b/i.test(o.label)) && real.some((o) => /^no\b/i.test(o.label));
   return {
     kind: yesNo || /permission|allow|proceed|approve/i.test(`${question} ${above}`) ? "APPROVAL" : "DECISION",
-    question, context: ctx.filter((l) => l !== question).slice(-3).join("\n"), multi,
-    options: real.map((o) => ({ n: o.n, current: o.current, label: o.label.replace(/\s*\(Recommended\)\s*/i, "").trim(), recommended: /\(Recommended\)/i.test(o.label), desc: o.desc ?? "" })),
+    question, context: ctx.filter((l) => l !== question).slice(-3).join("\n"), multi, options: real,
   };
+}
+
+// Claude Code adds its own "Type something." / "Chat about this" rows: they are not choices of the agent.
+function cleanOptions(opts) {
+  const own = (o) => /^(type something|chat about this|other|write-in)\.*$/i.test(o.label.trim());
+  return opts.filter((o) => !own(o)).map((o) => ({ n: o.n, current: o.current, label: o.label.replace(/\s*\(Recommended\)\s*/i, "").trim(), recommended: /\(Recommended\)/i.test(o.label), desc: o.desc ?? "" }));
+}
+
+/** Identity of a dialog: the same question and options give the same id, the next question of a set gives another. */
+export function dialogId(d) {
+  return d ? hash(d.question + d.options.map((o) => o.label).join("|")) : null;
 }
 
 /** The agent's last message, for classification: from the last "●" bullet to the footer. Empty if none. */

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { parseDialog, lastMessage, parseStopped, parseClassifier, answerPlan, composeAnswers, decisionLine, hash, classifyPrompt } from "../asks.js";
+import { parseDialog, lastMessage, parseStopped, parseClassifier, answerPlan, composeAnswers, decisionLine, dialogId, hash, classifyPrompt } from "../asks.js";
 import { autoSeenItems, profilesOfFolder, inProfile, hiddenElsewhere, profileOf, classifierFor, buildItems, rank, normalizeSettings, pruneState, emptyState, parseState, needsYouCount, DEFAULT_SETTINGS } from "../items.js";
 
 const PERMISSION = `
@@ -42,6 +42,29 @@ const MULTI = `
  Enter to select · Esc to cancel
 `;
 
+test("the review step of the several-questions dialog asks to submit, with the answers as context", () => {
+  const d = parseDialog(`
+ ←  ✔ Card  ☒ Second  ✔ Submit  →
+
+ Review your answers
+
+  ● Teste de captura: wait ~5s, then check the Inbox. What does the card show?
+    → Card com opções
+  ● Second question, to keep it multi-question
+
+ Ready to submit your answers?
+
+ ❯ 1. Submit answers
+   2. Cancel
+
+ Enter to select · Tab/Arrow keys to navigate · Esc to cancel
+`);
+  assert.equal(d.question, "Submit your answers?");
+  assert.equal(d.multi, true);
+  assert.match(d.context, /^● Teste de captura.*\n→ Card com opções\n● Second question/);
+  assert.deepEqual(d.options.map((o) => o.label), ["Submit answers", "Cancel"]);
+});
+
 test("permission dialog becomes an APPROVAL card with its options", () => {
   const d = parseDialog(PERMISSION.replace(/[│╭╮╰╯─]/g, " "));
   assert.equal(d.kind, "APPROVAL");
@@ -59,8 +82,13 @@ test("a choice dialog is a DECISION and marks the recommended option", () => {
   assert.match(d.question, /layout/i);
 });
 
-test("the several-questions dialog is flagged multi", () => {
-  assert.equal(parseDialog(MULTI).multi, true);
+test("the several-questions dialog is flagged multi and read as its current tab, without the tab bar", () => {
+  const d = parseDialog(MULTI);
+  assert.equal(d.multi, true);
+  assert.equal(d.question, "Which layout?");
+  assert.equal(d.context, "");
+  assert.deepEqual(d.options.map((o) => o.label), ["Panel", "Tab"]);
+  assert.deepEqual(answerPlan({ mode: "dialog", nav: "number", options: d.options }, { option: 2 }), { keys: ["2"] });
 });
 
 test("a numbered list in prose is not a dialog", () => {
@@ -242,6 +270,27 @@ test("Antigravity's dialog (> cursor, Navigate footer, Write-in row) is a card a
   const moved = { ...card, options: d.options.map((o) => ({ ...o, current: o.n === 3 })) };
   assert.deepEqual(answerPlan(moved, { option: 1 }), { keys: ["up", "up", "enter"] });
   assert.deepEqual(answerPlan({ mode: "dialog", nav: "number", options: d.options }, { option: 2 }), { keys: ["2"] });
+});
+
+test("the next question of a set is another dialog, so answering one is seen as delivered", () => {
+  const screen = readFileSync(new URL("./fixture-agy-question.txt", import.meta.url), "utf8");
+  const next = screen.replace("Question 1/1: Qual bebida você prefere agora?", "Question 2/2: Quantos passageiros?")
+    .replace("1. (Recommended) Café", "1. (Recommended) 1 adulto").replace("2. Chá", "2. 2 adultos").replace("3. Água", "3. 3 adultos");
+  const a = parseDialog(screen), b = parseDialog(next);
+  assert.equal(b.question, "Quantos passageiros?");
+  assert.equal(dialogId(a), dialogId(parseDialog(screen)));
+  assert.notEqual(dialogId(a), dialogId(b));
+  assert.equal(dialogId(null), null);
+});
+
+test("a dismissed ask hides only that card, not the same question asked again later", () => {
+  const card = (at) => ({ key: "ask-t1-abc", address: "t1", kind: "DECISION", title: "s · 1", question: "Q?", at, options: [] });
+  const state = { ...emptyState(), dismissed: { "ask-t1-abc": 200, "pr-x": 1 } };
+  const one = (at) => buildItems({ asks: [card(at)], settings: DEFAULT_SETTINGS, state }).find((i) => i.key === "ask-t1-abc");
+  assert.equal(one(100).dismissed, true); // dismissed after it appeared
+  assert.equal(one(300).dismissed, false); // asked again after the dismissal
+  const pr = buildItems({ notifs: [{ id: "x", prKey: "k", level: "info", title: "t", body: "", at: 999 }], settings: DEFAULT_SETTINGS, state })[0];
+  assert.equal(pr.dismissed, true); // other rows stay dismissed for good
 });
 
 test("auto-seen takes only informational rows of the active profile", () => {
