@@ -240,8 +240,16 @@ if [ -d "${HERDR_SRC}" ]; then
   for layout in "${HERDR_SRC}/layouts/"*.json; do
     [ -f "$layout" ] && link_herdr "$layout" "${HERDR_HOME}/layouts/$(basename "$layout")"
   done
-  for mod in "${HERDR_SRC}/mods/"*/; do
-    [ -d "$mod" ] && link_herdr "${mod%/}" "${HERDR_HOME}/mods/$(basename "${mod%/}")"
+  # Mods live in their own public repo (herdr.dev/mods): clone it, then link each mod folder.
+  HERDR_MODS_REPO="https://github.com/dobraga/herdr-mods.git"
+  HERDR_MODS_DIR="${HOME}/src/herdr-mods"
+  if [ ! -d "${HERDR_MODS_DIR}/.git" ]; then
+    echo "  - Cloning dobraga/herdr-mods -> ${HERDR_MODS_DIR}..."
+    mkdir -p "$(dirname "${HERDR_MODS_DIR}")"
+    git clone "${HERDR_MODS_REPO}" "${HERDR_MODS_DIR}" || echo "  [!] herdr-mods clone failed; mods not linked"
+  fi
+  for mod in "${HERDR_MODS_DIR}/mods/"*/; do
+    [ -f "${mod}mod.json" ] && link_herdr "${mod%/}" "${HERDR_HOME}/mods/$(basename "${mod%/}")"
   done
   if [ -f "${HERDR_SRC}/data/herdr-chat/keys.json" ]; then
     link_herdr "${HERDR_SRC}/data/herdr-chat/keys.json" "${HERDR_HOME}/data/herdr-chat/keys.json"
@@ -254,7 +262,7 @@ if [ -d "${HERDR_SRC}" ]; then
     mod_name="$(basename "$(dirname "$settings")")"
     link_herdr "$settings" "${HERDR_HOME}/data/${mod_name}/settings.json"
   done
-  echo "  - Linked Herdr config, layouts, and mods -> ${HERDR_SRC}"
+  echo "  - Linked Herdr config and layouts -> ${HERDR_SRC}, mods -> ${HERDR_MODS_DIR}"
 
   # herdr-chat fork (Antigravity ACP provider + unified Ctrl+T launcher)
   HERDR_CHAT_REPO="https://github.com/dobraga/herdr-chat.git"
