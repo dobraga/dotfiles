@@ -107,7 +107,32 @@ export default class DesktopToast extends View {
               ),
           )
           .when(!login && Boolean(p.body), (el) =>
-            el.child(div().truncate().text_size(12).text_color(t.muted).child(p.body ?? "")),
+            el.child(
+              h_flex()
+                .gap(8)
+                .items_center()
+                .child(div().flex_1().min_w(0).truncate().tooltip(p.body).text_size(12).text_color(t.muted).child(p.body ?? ""))
+                .child(
+                  div()
+                    .id("toast-body-copy")
+                    .flex_none()
+                    .px(6)
+                    .py(3)
+                    .rounded(4)
+                    .bg(t.raised)
+                    .text_size(12)
+                    .text_color(t.foreground)
+                    .cursor_pointer()
+                    .hover((s) => s.bg(t.hover))
+                    .on_click((_e, cx) => {
+                      cx.stop_propagation();
+                      cx.write_to_clipboard(`${p.title ?? ""}\n${p.body ?? ""}`.trim());
+                      this.copied = true;
+                      cx.notify();
+                    })
+                    .child(this.copied ? "Copied" : "Copy"),
+                ),
+            ),
           )
           .when(Boolean(login), (el) =>
             el.child(
