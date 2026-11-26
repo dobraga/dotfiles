@@ -1306,11 +1306,10 @@ export default class Spaces extends View {
       const pool = terms.length ? terms : all;
       return pool.find((p) => p.program?.agent) ?? pool.find((p) => p.focused) ?? pool[0];
     };
-    const isShell = (lead) => Boolean(lead?.terminal) && !lead.program?.agent && !lead.mod;
     const lines = groups.flatMap(({ r, branch }) => {
       const entries = (r.items ?? (r.w.tabs ?? []).map((tab) => ({ w: r.w, tab }))).map((x) => ({ ...x, lead: leadOf(x.tab) }));
-      const others = entries.filter((e) => !isShell(e.lead));
-      return [...(others.length ? [others] : []), ...entries.filter((e) => isShell(e.lead)).map((e) => [e])].map((l) => Object.assign(l, { branch }));
+      // One line per space/worktree, its tabs in the tab bar's order.
+      return entries.length ? [Object.assign(entries, { branch })] : [];
     });
     const icon = (pane, bright) => {
       const prog = pane?.program;
