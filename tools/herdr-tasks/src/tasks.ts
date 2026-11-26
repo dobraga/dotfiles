@@ -1,6 +1,7 @@
 // Reads the task store the Tasks panel writes (~/.config/herdr-app/data/tasks/tasks.json: folders -> tasks).
 // Only command, script and set tasks are ours; prompt tasks belong to herdr-automations.
 
+import { homedir } from "node:os";
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 
 export interface Step {
@@ -50,7 +51,7 @@ export function parseTasks(text: string): Task[] {
   const out: Task[] = [];
   for (const [folder, list] of Object.entries<any>(j?.folders ?? {})) {
     if (!Array.isArray(list)) continue;
-    for (const t of list) if (t && typeof t.id === "string" && typeof t.name === "string") out.push({ ...t, folder });
+    for (const t of list) if (t && typeof t.id === "string" && typeof t.name === "string") out.push({ ...t, folder: folder.startsWith("@") ? homedir() : folder }); // "@work": a space-profile task, runs from home
   }
   return out;
 }

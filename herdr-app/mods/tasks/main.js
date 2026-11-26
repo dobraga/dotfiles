@@ -132,7 +132,6 @@ export default class Tasks extends View {
     this.showRead = false;
     this.feed = "inbox";
     this.page = 0;
-    this.scope = "folder";
     this.error = null;
     this.note = null;
     this.known = null;
@@ -281,9 +280,12 @@ export default class Tasks extends View {
 
   // Everything shown for the active folder: saved tasks (with the daemon's next/last run) + detected scripts.
   model() {
-    const own = this.scope === "all" ? Object.entries(this.store.folders).flatMap(([f, l]) => l.map((t) => ({ ...t, folder: f }))) : tasksFor(this.store, this.folder).map((t) => ({ ...t, folder: this.folder }));
+    const own = tasksFor(this.store, this.folder).map((t) => ({ ...t, folder: this.folder }));
+    // Tasks saved for a space profile (key "@work") show in every folder of that profile.
+    const prof = activeProfile();
+    if (prof) for (const t of tasksFor(this.store, `@${prof}`)) own.push({ ...t, folder: `@${prof}` });
     const rows = own.map((t) => ({ ...t, source: "task", info: this.info(t.id) }));
-    const scripts = this.scope === "all" ? [] : this.scripts.map((s) => ({ ...s, id: `script:${s.source}:${s.name}`, kind: "script" }));
+    const scripts = this.scripts.map((s) => ({ ...s, id: `script:${s.source}:${s.name}`, kind: "script" }));
     return { rows, scripts, names: new Set(rows.map((r) => r.name)) };
   }
 
@@ -357,7 +359,8 @@ export default class Tasks extends View {
 
   runRow(r, cx, split = false) {
     if (r.kind === "prompt" || r.kind === "set") return this.runNow(r, cx);
-    this.runInTab(r.name, r.command, r.cwd ? `${r.folder}/${r.cwd}` : r.folder, cx, split);
+    const base = r.folder.startsWith("@") ? (this.folder || home()) : r.folder;
+    this.runInTab(r.name, r.command, r.cwd ? `${base}/${r.cwd}` : base, cx, split);
   }
 
   open(r, cx) {
@@ -380,7 +383,7 @@ export default class Tasks extends View {
       kind: ["prompt", "set"].includes(t.kind) ? t.kind : "command",
       steps: (t.steps ?? []).reduce((acc, st) => (acc.push(this.stepEditor(st, acc.map((x) => x.id))), acc), []), agent: t.agent || "claude", workspace: t.workspace === "root" ? "root" : "worktree",
       schedule: Boolean(t.schedule?.cron), original: task ? { ...task } : null,
-      effort: t.effort ?? "",
+      effort: t.effort ?? "", profile: task?.folder?.startsWith("@") ? task.folder.slice(1) : null,
       name: field(t.name, "backup, nightly-tests, issue-triage"), cwd: field(t.cwd, "optional subfolder"),
       cron: field(t.schedule?.cron ?? "0 9 * * 1-5", "0 9 * * 1-5"), model: field(t.model, "agent default"),
       command: TextareaState.new({ placeholder: "A shell command, e.g. ./scripts/backup.sh --full", value: t.command ?? "" }),
@@ -391,6 +394,7 @@ export default class Tasks extends View {
     this.form.command.set_auto_grow(3, 8);
     this.form.prompt.set_auto_grow(4, 12);
     this.view = { kind: "form" };
+    this.preview(cx);
     cx.spawn(async (cx) => {
       await this.loadAgents();
       cx.notify();
@@ -535,7 +539,7 @@ export default class Tasks extends View {
     if (!name) { f.error = "Give the task a name."; cx.notify(); return; }
     if (!text) { f.error = f.kind === "prompt" ? "Write the prompt." : "Write the command."; cx.notify(); return; }
     if (f.schedule && f.result?.problem) { f.error = f.result.problem; cx.notify(); return; }
-    const folder = this.folder;
+    const folder = this.folder, target = f.profile ? `@${f.profile}` : folder;
     if (!folder) { f.error = "No folder in the active space."; cx.notify(); return; }
     const steps = f.kind === "set" ? this.stepsOut(f) : null;
     if (steps) {
@@ -558,7 +562,8 @@ export default class Tasks extends View {
     cx.spawn(async (cx) => {
       try {
         if (!validTask({ ...task, command: task.command ?? task.prompt ?? "set" })) throw new Error("Incomplete task");
-        this.store = upsert(this.store, folder, task);
+        for (const k of Object.keys(this.store.folders)) if (k !== target && tasksFor(this.store, k).some((x) => x.id === task.id)) this.store = remove(this.store, k, task.id);
+        this.store = upsert(this.store, target, task);
         await this.saveStore();
         this.view = { kind: "detail", ref: { id: task.id } };
         this.form = null;
@@ -662,14 +667,10 @@ export default class Tasks extends View {
 
   header(t, cx) {
     const back = this.view.kind !== "list";
-    const paused = Boolean(this.list?.paused_all);
     return h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border)
       .when(back, (el) => el.child(this.button("back", "‹", t, (cx) => { this.view = { kind: "list" }; this.form = null; cx.notify(); }, { px: 7 })))
       .child(div().font_semibold().child("Tasks"))
-      .child(div().flex_1().min_w(0).truncate().text_right().text_size(12).text_color(t.dim).child(this.scope === "folder" ? (this.folder?.split("/").pop() ?? "") : "all folders"))
-      .when(Boolean(this.list) && !back, (el) => el
-        .child(div().text_size(11).text_color(paused ? t.blocked : t.dim).child(paused ? "All paused" : "Active"))
-        .child(this.switch_("pause-all", !paused, t, (cx) => this.act(cx, [paused ? "resume" : "pause", "--all"]))))
+      .child(div().flex_1())
       .when(!back, (el) => el.child(this.button("new", "+", t, (cx) => this.edit(null, cx), { px: 8 })));
   }
 
@@ -707,7 +708,7 @@ export default class Tasks extends View {
     const showRow = (r) => this.chip === "all" || (this.chip === "scheduled" ? this.isScheduled(r) : r.kind === this.chip);
     const shown = rows.filter(showRow);
     const shownScripts = this.chip === "all" || this.chip === "script" ? scripts : [];
-    const finished = (this.scope === "all" ? this.runs : this.runs.filter((r) => rows.some((x) => x.id === r.task))).filter((r) => FINISHED.has(r.status));
+    const finished = this.runs.filter((r) => rows.some((x) => x.id === r.task)).filter((r) => FINISHED.has(r.status));
     const unread = finished.filter((r) => !r.seen);
     const upcoming = rows.filter((r) => this.isScheduled(r) && r.info?.next).sort((a, b) => Date.parse(a.info.next) - Date.parse(b.info.next));
     const feed = this.feed === "next" ? "next" : "inbox";
@@ -717,9 +718,7 @@ export default class Tasks extends View {
     const pageItems = items.slice(this.page * PAGE, this.page * PAGE + PAGE);
     const col = v_flex().pb(10);
     col.child(h_flex().px(14).pt(10).gap(4).flex_wrap().items_center()
-      .children(CHIPS.map(([id, label]) => chip(`chip-${id}`, label, this.chip === id, (cx) => { this.chip = id; cx.notify(); })))
-      .child(div().flex_1())
-      .child(chip("scope-toggle", this.scope === "folder" ? "This folder" : "All folders", false, (cx) => { this.scope = this.scope === "folder" ? "all" : "folder"; cx.notify(); })));
+      .children(CHIPS.map(([id, label]) => chip(`chip-${id}`, label, this.chip === id, (cx) => { this.chip = id; cx.notify(); }))));
     if (finished.length || upcoming.length) {
       const link = (id, label, fn) => div().id(id).text_size(11).font_normal().cursor_pointer().text_color(t.dim).hover((s) => s.text_color(t.foreground)).on_click((_e, cx) => fn(cx)).child(label);
       const tab = (id, label, n) => h_flex().id(`feed-${id}`).h(22).px(8).gap(5).items_center().rounded(5).text_size(11.5).cursor_pointer()
@@ -747,9 +746,9 @@ export default class Tasks extends View {
     }
     const others = shown.filter((r) => !r.pinned);
     col.child(section("TASKS", others.length));
-    if (!others.length) col.child(div().px(14).py(4).text_size(12).text_color(t.dim).child(this.scope === "folder" ? "No tasks for this folder yet. + defines one." : "No tasks yet. + defines one."));
+    if (!others.length) col.child(div().px(14).py(4).text_size(12).text_color(t.dim).child("No tasks for this folder yet. + defines one."));
     for (const r of others) col.child(this.taskRow(r, t));
-    if (this.scope === "folder" && this.chip !== "command" && this.chip !== "prompt" && this.chip !== "scheduled") {
+    if (this.chip !== "command" && this.chip !== "prompt" && this.chip !== "scheduled") {
       const restScripts = shownScripts.filter((s) => !pinnedScripts.includes(s));
       col.child(section("SCRIPTS", restScripts.length));
       if (!restScripts.length) col.child(div().px(14).py(4).text_size(12).text_color(t.dim).child("No package.json, Makefile, justfile or pyproject scripts found here."));
@@ -841,7 +840,7 @@ export default class Tasks extends View {
         .child(this.button("d-del", deleting ? "Confirm delete" : "Delete", t, (cx) => this.remove(r, deleting, cx), { danger: true })))
       .child(v_flex().gap(4)
         .child(kv("Kind", r.kind === "prompt" ? "Agent prompt" : r.kind === "set" ? "Set of steps" : "Shell command"))
-        .child(kv("Folder", tilde(r.folder)))
+        .child(kv("Folder", r.folder.startsWith("@") ? `All ${profileName(r.folder.slice(1))} spaces` : tilde(r.folder)))
         .when(r.kind === "command" && r.cwd, (el) => el.child(kv("Subfolder", r.cwd)))
         .child(kv("Schedule", r.schedule ? `${human(r.schedule.cron)}${r.paused ? " (paused)" : ""}` : "manual only"))
         .when(r.info?.next && scheduledNow, (el) => el.child(kv("Next", until(r.info.next))))
@@ -925,9 +924,8 @@ export default class Tasks extends View {
     const area = (state) => div().p(8).rounded(7).border_1().border_color(t.input).on_mouse_down("left", (_e, cx) => cx.stop_propagation()).child(Textarea.new(state).w_full().text_size(12));
     const title = f.id ? `Edit ${f.original?.name ?? "task"}` : "New task";
     const col = v_flex().p(14).gap(10)
-      .child(h_flex().gap(8).items_center().child(div().text_size(15).font_semibold().child(title)).child(div().flex_1())
-        .child(div().text_size(11).text_color(t.dim).child(`Step ${f.step} of 2: ${f.step === 1 ? "what runs" : "when"}`)));
-    if (f.step === 1) {
+      .child(div().text_size(15).font_semibold().child(title));
+    {
       col.child(label("KIND")).child(this.pills("kind", KINDS, f.kind, t, (v, cx) => { f.kind = v; cx.notify(); }))
         .child(label("NAME")).child(input(f.name));
       if (f.kind === "set") {
@@ -947,7 +945,7 @@ export default class Tasks extends View {
         }));
         if (opts.length === 1) col.child(div().text_size(11).text_color(t.dim).child("Nothing to add yet: no saved tasks and no scripts found in this folder."));
       } else if (f.kind === "command") {
-        col.child(label("COMMAND")).child(area(f.command)).child(label("SUBFOLDER (OPTIONAL)")).child(input(f.cwd));
+        col.child(label("COMMAND")).child(area(f.command));
       } else {
         const agents = (this.agentList ?? []).map((x) => [x.id, x.name]);
         if (!agents.length) col.child(div().text_size(12).text_color(this.agentsLoading ? t.dim : t.ansi1).child(this.agentsLoading ? "Loading agents…" : "No agent executable found on the PATH."));
@@ -970,8 +968,11 @@ export default class Tasks extends View {
           .child(div().text_size(11).text_color(f.permission === "full" ? t.ansi1 : t.dim).child(PERMISSION_NOTE[f.permission]))
           .child(label("PROMPT")).child(area(f.prompt));
       }
-    } else {
+    }
+    {
       const res = f.result;
+      const prof = f.profile ?? activeProfile();
+      if (prof) col.child(label("SHOW IN")).child(this.pills("show", [["folder", "This folder"], ["profile", `All ${profileName(prof)} spaces`]], f.profile ? "profile" : "folder", t, (v, cx) => { f.profile = v === "profile" ? prof : null; cx.notify(); }));
       col.child(label("WHEN"))
         .child(this.pills("when", [["manual", "Run manually"], ["cron", "On a schedule"]], f.schedule ? "cron" : "manual", t, (v, cx) => { f.schedule = v === "cron"; this.preview(cx); cx.notify(); }));
       if (f.schedule) {
@@ -986,11 +987,13 @@ export default class Tasks extends View {
     col.when(Boolean(f.error), (el) => el.child(div().text_size(12).text_color(t.ansi1).child(f.error)));
     return col.child(h_flex().gap(6).justify_end()
       .child(this.button("f-cancel", "Cancel", t, (cx) => { this.view = f.id ? { kind: "detail", ref: { id: f.id } } : { kind: "list" }; this.form = null; cx.notify(); }))
-      .when(f.step === 2, (el) => el.child(this.button("f-back", "Back", t, (cx) => { f.step = 1; cx.notify(); })))
-      .when(f.step === 1, (el) => el.child(this.button("f-next", "Next", t, (cx) => { f.error = null; f.step = 2; this.preview(cx); cx.notify(); })))
       .child(this.button("f-save", "Save", t, (cx) => this.save(cx), { solid: true })));
   }
 }
+
+// The selected space profile (space-folders' shared state): null when none.
+const activeProfile = () => shared("space-folders.profile") || null;
+const profileName = (id) => (shared("space-folders")?.[""]?.profiles ?? []).find((p) => p.id === id)?.name ?? id.charAt(0).toUpperCase() + id.slice(1);
 
 // The row the panel builds adds display fields; the store keeps only the task.
 function stripRow(r) {

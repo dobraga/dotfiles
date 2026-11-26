@@ -17,6 +17,7 @@ const within = (a, b) => a === b || a.startsWith(b.endsWith("/") ? b : `${b}/`);
 /** True when a run of a task in `folder` should be shown or toasted for the active profile. Unknown folders are never hidden. */
 export function taskVisible(folder, spaces, sf, active) {
   if (!active || !folder) return true;
+  if (folder.startsWith("@")) return folder === `@${active}`; // a task saved for a whole space profile
   const near = (spaces ?? []).filter((s) => !s.machine && s.folder && (within(folder, s.folder) || within(s.folder, folder)));
   if (!near.length) return true;
   return near.some((s) => profileOf(s, sf) === active);
