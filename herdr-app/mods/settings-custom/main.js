@@ -1185,6 +1185,29 @@ export default class SettingsCustom extends View {
       );
   }
 
+  // Read live by space-folders; the file seeds it after a restart.
+  sidebarStylePicker(t) {
+    const cur = shared("space-folders.settings")?.style ?? "tree";
+    const pick = (style, cx) => {
+      const next = { ...(shared("space-folders.settings") ?? {}), style };
+      setShared("space-folders.settings", next);
+      cx.notify();
+      cx.spawn(async () => {
+        try {
+          await exec("mkdir", ["-p", `${appHome()}/data/space-folders`]);
+          const file = `${appHome()}/data/space-folders/settings.json`;
+          await writeTextFile(file, JSON.stringify(next, null, 2) + "\n", await readTextFile(file));
+        } catch (e) {
+          notify({ title: "Failed to save sidebar style", body: String(e?.message ?? e), level: "error" });
+        }
+      });
+    };
+    return h_flex().gap(6).children([["tree", "Tree"], ["compact", "Compact"]].map(([v, l]) => div()
+      .id(`st-sidebar-${v}`).px(10).py(5).rounded(7).cursor_pointer().text_size(12.5).border_1()
+      .border_color(cur === v ? t.accent : t.border).bg(cur === v ? t.selected : t.raised).text_color(cur === v ? t.foreground : t.muted)
+      .hover((x) => x.bg(t.hover)).on_click((_e, cx) => pick(v, cx)).child(l)));
+  }
+
   look(t, cx) {
     const s = settings();
     const p = this.person;
@@ -1230,6 +1253,10 @@ export default class SettingsCustom extends View {
       .child(this.themePicker(t, false))
       .child(div().pt(10).pb(6).text_size(12.5).font_medium().text_color(t.muted).child("Light"))
       .child(this.themePicker(t, true))
+      .child(div().h(18))
+      .child(this.heading(t, "Sidebar"))
+      .child(this.row(t, "Spaces list style", "Tree: a header per worktree, a split tab one pane per line. Compact: one line per tab, a split tab's panes as icons, a worktree's branch on the right.",
+        this.sidebarStylePicker(t)))
       .child(div().h(18))
       .child(this.heading(t, "Size and fonts"))
       .child(

@@ -12,9 +12,14 @@
 // machine's name or the folder one of its spaces works in.
 
 import { groupTabs, tabKey, worktreesFirst } from "./groups.js";
+import { iconFor, iconPath } from "./icon-for.js"; // copy of files-tabs' (as tabs-folders keeps one)
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, ScrollHandle } from "gpui-base";
-import { spaces, agents, machines, panes, run, openOverlay, closeOverlay, props, exec, hc, theme, shared, setShared, watchFolder, window, layout, pickFolder, home, appHome, checking, nextCommand } from "herdr";
+import { spaces, agents, machines, panes, run, openOverlay, closeOverlay, props, exec, hc, theme, shared, setShared, watchFolder, window, layout, pickFolder, home, appHome, checking, nextCommand, readTextFile } from "herdr";
+
+// Sidebar style from Settings → Look: "tree" (a header per worktree, split tabs one pane per line)
+// or "compact" (one line per tab, a split tab's panes as icons, a worktree's branch on the right).
+const sidebarStyle = () => shared("space-folders.settings")?.style ?? "tree";
 
 function normalizeRemoteSlug(url) {
   const s = (url ?? "").trim();
@@ -335,6 +340,11 @@ export default class Spaces extends View {
     if (shared("space-folders.profile") === undefined) {
       const savedProf = localStorage.getItem("space-folders.profile") || null;
       setShared("space-folders.profile", savedProf);
+    }
+    if (shared("space-folders.settings") === undefined) {
+      cx.spawn(async () => {
+        try { setShared("space-folders.settings", JSON.parse((await readTextFile(`${appHome()}/data/space-folders/settings.json`)) || "{}")); } catch {}
+      });
     }
     this.overProfile = null;
     this.overFolder = null;
@@ -815,6 +825,8 @@ export default class Spaces extends View {
       if (!r.virtual) seen.push({ id: r.w.id, shown: !away, folder: r.folder });
       if (away) return [];
       if (bare && !collapsed && r.emptied) return []; // every tab of this space is under a worktree
+      // Compact: no worktree header; its tabs sit with the checkout's, its branch on the right of each.
+      if (compact && !collapsed && (bare || r.tree)) return r.emptied ? [] : [{ compact: r }];
       // A checkout's own terminals go straight under the folder, without the space's own row: only worktrees get a header.
       if (bare && !collapsed && (r.items ?? r.w.tabs ?? []).length) {
         const els = this.tabRows(r, t, true);
@@ -830,6 +842,7 @@ export default class Spaces extends View {
       if (r.w.active) this.activeEl = el;
       return [el, ...this.tabRows(r, t)];
     };
+    const compact = sidebarStyle() === "compact";
     const f = folders(machine), { list, spaceProfiles } = f, ps = panes(), prof = activeProfile();
     let parent = null, looseProf = null;
     const placed = rows.map((r) => {
@@ -849,12 +862,32 @@ export default class Spaces extends View {
         return [
           ...(hidden || profHidden ? [] : [this.folderHead(f, n, machine, counted, t, collapsed, nested)]),
           // Worktrees first, each with its header; then the checkout's own tabs with no header of theirs.
-          ...worktreesFirst(inside).flatMap((r) => draw(r, away, !r.tree)),
+          // Compact keeps the order: the checkout's own tabs, then its worktrees'.
+          ...this.joinCompact((compact && !collapsed ? inside : worktreesFirst(inside)).flatMap((r) => draw(r, away, !r.tree)), t),
           ...visitors.flatMap((g) => this.machineSection(g.m, g.rows, t, collapsed, { nested: true, hidden: away, seen })),
         ];
       }),
-      ...placed.filter((r) => !r.folder).flatMap((r) => draw(r, hidden || (Boolean(prof) && r.spaceProfile !== prof))),
+      ...this.joinCompact(placed.filter((r) => !r.folder).flatMap((r) => draw(r, hidden || (Boolean(prof) && r.spaceProfile !== prof))), t),
     ];
+  }
+
+  // Runs of compact placeholders ({ compact: row }) become one tree of lines: ├─ on all, └─ on the last.
+  joinCompact(items, t) {
+    const out = [];
+    let run_ = [];
+    const flush = () => {
+      if (!run_.length) return;
+      const els = this.compactRows(run_.map((r) => ({ r, branch: r.tree ? (r.g?.branch ?? r.w.name) : null })), t);
+      if (run_.some((r) => r.w.active) && els.length) this.activeEl = els[0];
+      out.push(...els);
+      run_ = [];
+    };
+    for (const x of items) {
+      if (x && x.compact) run_.push(x.compact);
+      else { flush(); out.push(x); }
+    }
+    flush();
+    return out;
   }
 
   folderHead(f, n, machine, inside, t, collapsed, nested = false) {
@@ -1257,6 +1290,79 @@ export default class Spaces extends View {
         .rounded(6)
         .when(current, (el) => el.bg(t.raised))
         .children(tabPs.map((pane, k) => line(pane, k)));
+    });
+  }
+
+  // Compact style: agent, chat and file tabs share one line as icons; each plain shell gets its own
+  // line. Icons only (the label is the tooltip), click one to go to it; `branch` (a worktree's) on the right.
+  // `groups`: [{ r, branch }] for one folder (the checkout, then its worktrees), drawn as one tree.
+  compactRows(groups, t) {
+    const nested = groups[0]?.r.nested, w = groups[0]?.r.w;
+    const ps = this.panes ?? [];
+    const leadOf = (tab) => {
+      // As in tabRows: terminal panes first (a chat tab's mod pane is only the UI of its agent's terminal).
+      const all = ps.filter((p) => p.tab === tab.id);
+      const terms = all.filter((p) => p.terminal);
+      const pool = terms.length ? terms : all;
+      return pool.find((p) => p.program?.agent) ?? pool.find((p) => p.focused) ?? pool[0];
+    };
+    const isShell = (lead) => Boolean(lead?.terminal) && !lead.program?.agent && !lead.mod;
+    const lines = groups.flatMap(({ r, branch }) => {
+      const entries = (r.items ?? (r.w.tabs ?? []).map((tab) => ({ w: r.w, tab }))).map((x) => ({ ...x, lead: leadOf(x.tab) }));
+      const others = entries.filter((e) => !isShell(e.lead));
+      return [...(others.length ? [others] : []), ...entries.filter((e) => isShell(e.lead)).map((e) => [e])].map((l) => Object.assign(l, { branch }));
+    });
+    const icon = (pane, bright) => {
+      const prog = pane?.program;
+      if (pane?.mod === "file-view") {
+        // The file's Material icon, as in the Files tab and the tab bar (Settings → Files → Material file icons).
+        // Same rule as the tab bar (tabs-folders): a diff tab gets the Changes icon.
+        const slot = Object.values(shared("file-view.slots") ?? {}).find((s) => s?.tabId === pane.tab);
+        if (slot?.kind === "file" && slot.path && shared("files-tabs.settings")?.materialIcons !== false) return image(iconPath(iconFor(slot.path.split("/").pop(), false, false))).size(13).flex_none();
+        return svg(slot?.kind === "diff" ? "mods/changes/changes.svg" : "mods/files/file.svg").size(12).flex_none().text_color(bright ? t.foreground : t.muted);
+      }
+      if (prog?.icon) return prog.tint ? svg(prog.icon).size(12).flex_none().text_color(bright ? t.foreground : t.muted) : image(prog.icon).size(12).flex_none();
+      if (pane?.terminal) return svg("mods/workspace-chrome/terminal.svg").size(12).flex_none().text_color(bright ? t.foreground : t.muted);
+      return div().size(6).rounded(3).bg(t.dim);
+    };
+    const select = ({ w: host, tab }) => {
+      if (!host.active) run("space.select", { id: host.id });
+      if (!tab.active) run("tab.select", { id: tab.id });
+    };
+    return lines.map((line, n) => {
+      const current = line.some((e) => e.w.active && e.tab.active);
+      const blocked = line.some((e) => e.tab.status === "blocked");
+      const icons = line.map((e) => {
+        const on = e.w.active && e.tab.active;
+        const working = e.tab.status === "working" || ps.some((p) => p.tab === e.tab.id && p.status === "working");
+        return div().id(`space-ctab-${e.tab.id}`).relative().flex_none().p(3).rounded(4)
+          .when(on, (el) => el.bg(t.selected))
+          .when(!on, (el) => el.hover((s) => s.bg(t.hover)))
+          .tooltip(tabLabel(e.tab, e.lead))
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .on_click((_e, cx) => { cx.stop_propagation(); select(e); })
+          .child(icon(e.lead, on))
+          .when(working, (el) => el.child(div().absolute().right(-3).bottom(-3).child(svg("mods/workspace-chrome/spinner.svg").size(10).flex_none().text_color(t.working).spin(900))))
+          .when(e.tab.status === "done", (el) => el.child(div().absolute().right(-1).bottom(-1).size(7).rounded(4).bg(t.done).border(1).border_color(current ? t.raised : t.chrome)));
+      });
+      return h_flex()
+        .id(`space-cline-${w.id}-${n}`)
+        .h(24)
+        .flex_none()
+        .pl(indent(null, nested))
+        .pr(8)
+        .gap(5)
+        .items_center()
+        .rounded(6)
+        .text_size(11.5)
+        .text_color(t.muted)
+        .when(current, (el) => el.bg(t.raised))
+        .child(div().flex_none().text_color(t.dim).child(n === lines.length - 1 ? "└─" : "├─"))
+        .child(h_flex().flex_1().min_w(0).gap(2).items_center().children(icons))
+        .when(Boolean(line.branch), (el) => el.child(h_flex().flex_none().max_w(110).gap(4).items_center().text_color(t.dim)
+          .child(svg("mods/workspace-chrome/branch.svg").size(11).flex_none())
+          .child(div().min_w(0).truncate().child(line.branch))))
+        .when(blocked, (el) => el.child(div().size(14).flex_none().rounded(4).bg(t.blocked + "26").text_size(10.5).font_bold().text_color(t.blocked).flex().items_center().justify_center().child("!")));
     });
   }
 
