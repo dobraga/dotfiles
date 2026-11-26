@@ -19,7 +19,7 @@ install_herdr_tasks() {
     mkdir -p "$(dirname "$mods_dir")"
     git clone https://github.com/dobraga/herdr-mods.git "$mods_dir" || { echo "herdr-tasks: could not clone herdr-mods, skipping" >&2; return 0; }
   fi
-  "$mods_dir/install.sh" tasks || echo "herdr-tasks: install failed, skipping" >&2
+  "$mods_dir/install.sh" dg-tasks || echo "herdr-tasks: install failed, skipping" >&2
   return 0
 }
 install_herdr_tasks
