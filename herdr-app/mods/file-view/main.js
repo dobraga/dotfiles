@@ -2151,6 +2151,18 @@ export default class FileView extends View {
                 .child(this.saving ? "Saving…" : "Save"),
             ),
           )
+          .when(mode === "file" && !showingOpenWith && !this.mediaMode && this.code && !this.fileSearchOpen, (el) =>
+            el.child(
+              h_flex()
+                .gap(2)
+                .p(2)
+                .rounded(6)
+                .bg(t.background)
+                .border(1)
+                .border_color(t.border)
+                .child(chip("fv-find-open", "Find", false, (_e, cx) => this.openFileSearch(cx))),
+            ),
+          )
           .when(slot.kind === "diff" || mode === "diff", (el) =>
             el.child(
               h_flex()
