@@ -145,7 +145,7 @@ export async function readStats({ mac, exec, readTextFile, herdr: wantHerdr = tr
     disk = parseDf(df);
     net = nd ? parseProcNetDev(nd) : null;
   }
-  const herdr = !wantHerdr ? null : parseHerdrTree(await sh(exec, "ps", mac ? ["-Aeo", "pid,ppid,rss,comm,args"] : ["-eo", "pid,ppid,rss,comm,args"]));
+  const herdr = !wantHerdr ? null : parseHerdrTree(await sh(exec, "ps", mac ? ["-Aeo", "pid,ppid,rss,command"] : ["-eo", "pid,ppid,rss,args"]));
   const dt = prev?.net && net ? (now - prev.at) / 1000 : 0;
   const down = dt > 0 ? Math.max(0, (net.rx - prev.net.rx) / dt) : 0;
   const up = dt > 0 ? Math.max(0, (net.tx - prev.net.tx) / dt) : 0;
@@ -221,10 +221,13 @@ export function parseLoad(text) {
 export function parseHerdrTree(text) {
   const rows = [];
   for (const l of (text ?? "").split("\n").slice(1)) {
-    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s*(.*)$/.exec(l);
-    if (m) rows.push({ pid: +m[1], ppid: +m[2], kb: +m[3], comm: m[4].split("/").pop(), args: m[5] });
+    // macOS `ps` truncates the comm column to 16 chars, so the executable is derived from the full command (paths may hold spaces: "Herdr Core.app").
+    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/.exec(l);
+    if (!m) continue;
+    const exe = /^(.*?\.app\/Contents\/MacOS\/[^ ]+)/.exec(m[4])?.[1] ?? m[4].split(" ")[0];
+    rows.push({ pid: +m[1], ppid: +m[2], kb: +m[3], comm: exe.split("/").pop(), args: m[4] });
   }
-  const isHerdr = (r) => /^herdr-(app|core)$/.test(r.comm);
+  const isHerdr = (r) => /^(herdr-(app|core)|Herdr)$/.test(r.comm);
   const kids = new Map();
   for (const r of rows) kids.set(r.ppid, [...(kids.get(r.ppid) ?? []), r]);
   const byPid = new Map(rows.map((r) => [r.pid, r]));
