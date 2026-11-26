@@ -42,3 +42,7 @@ Everything above is build/`herdr-app check` validation only; the gallery listing
 ## Update: mods moved
 herdr-mods is now the source of truth (`~/src/herdr-mods`; tests, tools/crop.py moved there; `publish/export.sh` removed).
 Dotfiles `install_dotfiles.sh` clones dobraga/herdr-mods and links its mods. **Until the repo is pushed, a fresh machine can't clone it.**
+
+## Update: herdr-tasks moved
+`tools/herdr-tasks` now lives in herdr-mods (`tools/tasks`, installed by herdr-mods `install.sh`). The login service was reinstalled from there
+(`herdr-tasks service status`: active). dotfiles `install_packages.sh` clones herdr-mods and runs `install.sh tasks`; `install_dotfiles.sh` runs `install.sh --no-tasks`.

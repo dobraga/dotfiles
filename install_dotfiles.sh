@@ -248,9 +248,8 @@ if [ -d "${HERDR_SRC}" ]; then
     mkdir -p "$(dirname "${HERDR_MODS_DIR}")"
     git clone "${HERDR_MODS_REPO}" "${HERDR_MODS_DIR}" || echo "  [!] herdr-mods clone failed; mods not linked"
   fi
-  for mod in "${HERDR_MODS_DIR}/mods/"*/; do
-    [ -f "${mod}mod.json" ] && link_herdr "${mod%/}" "${HERDR_HOME}/mods/$(basename "${mod%/}")"
-  done
+  # Links every mod; herdr-tasks (the Tasks scheduler) is installed by install_packages.sh
+  [ -x "${HERDR_MODS_DIR}/install.sh" ] && "${HERDR_MODS_DIR}/install.sh" --no-tasks
   if [ -f "${HERDR_SRC}/data/herdr-chat/keys.json" ]; then
     link_herdr "${HERDR_SRC}/data/herdr-chat/keys.json" "${HERDR_HOME}/data/herdr-chat/keys.json"
   fi

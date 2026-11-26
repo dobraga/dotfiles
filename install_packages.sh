@@ -11,15 +11,15 @@ sudo apt install -y kitty
 # Install Herdr (config is linked by install_dotfiles.sh)
 curl -fsSL https://releases.herdr.dev/app/install.sh | sh
 
-# Install herdr-tasks, the scheduler behind the Tasks panel (tools/herdr-tasks, TypeScript on bun).
-# Links the CLI into ~/.local/bin and installs its login service (systemd user unit / launchd agent); skipped without bun.
+# Install herdr-tasks, the scheduler behind the Tasks panel. It lives in the herdr-mods repo (tools/herdr-tasks, TypeScript on bun):
+# its install.sh links the CLI into ~/.local/bin and installs the login service (systemd user unit / launchd agent); skipped without bun.
 install_herdr_tasks() {
-  local root
-  root="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/tools/herdr-tasks"
-  command -v bun >/dev/null 2>&1 || { echo "herdr-tasks: bun not found, skipping" >&2; return 0; }
-  mkdir -p "$HOME/.local/bin" "$HOME/.local/state/herdr/tasks"
-  ln -sf "$root/bin/herdr-tasks" "$HOME/.local/bin/herdr-tasks"
-  HERDR_TASKS_BIN="$root/bin/herdr-tasks" "$root/bin/herdr-tasks" service install || echo "herdr-tasks: service install failed, skipping" >&2
+  local mods_dir="$HOME/src/herdr-mods"
+  if [ ! -d "$mods_dir/.git" ]; then
+    mkdir -p "$(dirname "$mods_dir")"
+    git clone https://github.com/dobraga/herdr-mods.git "$mods_dir" || { echo "herdr-tasks: could not clone herdr-mods, skipping" >&2; return 0; }
+  fi
+  "$mods_dir/install.sh" tasks || echo "herdr-tasks: install failed, skipping" >&2
   return 0
 }
 install_herdr_tasks
