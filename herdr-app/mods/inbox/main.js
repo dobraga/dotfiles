@@ -50,7 +50,7 @@ export default class Inbox extends View {
       await Promise.all([this.loadRuns(), this.scan(cx)]);
       cx.notify();
     });
-    cx.timer.every(1000, (cx) => this.scan(cx)); // cheap: a terminal is only read when its status or seq changed
+    cx.timer.every(400, (cx) => this.scan(cx)); // cheap: a terminal is only read when its status or seq changed
     cx.timer.every(15000, async (cx) => { await this.loadFiles(); cx.notify(); });
     cx.timer.every(30000, async (cx) => { await this.loadRuns(); cx.notify(); });
     cx.timer.every(60000, (cx) => cx.notify());
@@ -164,20 +164,36 @@ export default class Inbox extends View {
     return r.code === 0 ? r.stdout : "";
   }
 
+  cardBase(a) {
+    return { profile: profileOf({ id: a.space }, shared("space-folders")), address: a.address, title: `${a.space_name} · ${a.tab_name}`, space: a.space_name, agent: a.app ?? "agent", spaceId: a.space, state: "open", at: Date.now() };
+  }
+
+  // The card of the dialog on an agent's screen. The scan and the fast path after an answer both come here.
+  putDialog(a, d) {
+    const id = dialogId(d);
+    const key = `ask-${a.address}-${id}`;
+    const card = { ...this.cardBase(a), key, dialog: id, mode: "dialog", nav: /antigravity|agy/i.test(a.app ?? "") ? "arrows" : "number",
+      kind: d.multi || d.step ? "QUESTIONS" : d.kind, question: d.question, context: d.context, options: d.options, multi: d.multi,
+      step: d.step, tabs: d.tabs, set: Boolean(d.multi || d.step?.total > 1), checkbox: d.checkbox,
+      picks: d.options.filter((o) => o.checked).map((o) => o.n) };
+    for (const [k, c] of this.cards) if (c.address === a.address && c.state === "open" && k !== key) { this.cards.delete(k); this.release(k); }
+    const prev = this.cards.get(key);
+    if (prev?.state === "sending") return;
+    // The same dialog read again keeps when it appeared (a dismissal made since still hides it) and boxes ticked on the card.
+    this.cards.set(key, prev ? { ...card, at: prev.at, picks: prev.touched ? prev.picks : card.picks, touched: prev.touched } : card);
+  }
+
   async inspect(a) {
     const screen = await this.readScreen(a.address);
     if (!screen) return;
-    const base = { profile: profileOf({ id: a.space }, shared("space-folders")), address: a.address, title: `${a.space_name} · ${a.tab_name}`, space: a.space_name, agent: a.app ?? "agent", spaceId: a.space, state: "open", at: Date.now() };
-    // A card read again (same key) keeps the time it first appeared: a dismissal made since then still hides it.
-    const firstSeen = new Map();
-    for (const [k, c] of this.cards) if (c.address === a.address && c.state === "open") { firstSeen.set(k, c.at); this.cards.delete(k); this.release(k); }
     if (a.status === "blocked") {
       const d = parseDialog(screen);
-      if (!d) return;
-      const key = `ask-${a.address}-${dialogId(d)}`;
-      this.cards.set(key, { ...base, at: firstSeen.get(key) ?? base.at, key, dialog: dialogId(d), mode: "dialog", nav: /antigravity|agy/i.test(a.app ?? "") ? "arrows" : "number", kind: d.multi ? "QUESTIONS" : d.kind, question: d.question, context: d.context, options: d.options, multi: d.multi });
+      if (d) this.putDialog(a, d);
+      else for (const [k, c] of this.cards) if (c.address === a.address && c.state === "open") { this.cards.delete(k); this.release(k); }
       return;
     }
+    const base = this.cardBase(a);
+    for (const [k, c] of this.cards) if (c.address === a.address && c.state === "open") { this.cards.delete(k); this.release(k); }
     const stopped = parseStopped(screen);
     if (stopped) {
       const key = `ask-${a.address}-stop-${hash(stopped.error)}`;
@@ -253,20 +269,26 @@ export default class Inbox extends View {
       if (plan.keys) await this.must(await hc(["keys", card.address, ...plan.keys]));
       if (plan.then) { await this.sleep(500); await this.must(await hc(["send", "--force", card.address, plan.then.send])); }
       if (plan.send) await this.must(await hc(["send", card.address, plan.send]));
-      const ok = await this.delivered(card, plan);
-      if (!ok) { card.state = "failed"; card.error = "Not delivered: the agent did not react."; cx.notify(); return; }
+      // Back/Next on the first/last question changes nothing: the card simply comes back, no error.
+      const res = await this.delivered(card, plan, answer.nav ? 1500 : 8000);
+      if (!res && answer.nav) { card.state = "open"; cx.notify(); return; }
+      if (!res) { card.state = "failed"; card.error = "Not delivered: the agent did not react."; cx.notify(); return; }
+      this.cards.delete(card.key);
+      this.release(card.key);
+      // The read that saw the next dialog makes its card now, without waiting for the scan.
+      if (res.next) this.putDialog(res.next.a, res.next.d);
     } catch (e) {
       card.state = "failed";
       card.error = String(e?.message ?? e).slice(0, 200);
       cx.notify();
       return;
     }
-    this.cards.delete(card.key);
-    this.release(card.key);
-    // A set of questions (Antigravity's "Question 1/4") keeps the agent blocked with the same status and seq: forget the
-    // signature so the next scan reads the screen again and makes the card for the next question.
+    // A set of questions keeps the agent blocked with the same status and seq: forget the signature so the next scan
+    // reads the screen again too (it fixes a card made from a half-drawn screen).
     this.sig.delete(card.address);
-    const text = answer.text ?? card.options.find((o) => o.n === answer.option)?.label ?? String(answer.option);
+    if (answer.nav) { cx.notify(); return; } // a move is not an answer
+    const text = answer.text ?? (answer.checked ? card.options.filter((o) => answer.checked.includes(o.n)).map((o) => o.label).join(", ") : null)
+      ?? card.options.find((o) => o.n === answer.option)?.label ?? String(answer.option);
     const entry = { at: Date.now(), agent: card.agent, space: card.space, question: card.question, answer: text };
     this.state.answered = [...this.state.answered, entry].slice(-100);
     this.saveState();
@@ -276,24 +298,27 @@ export default class Inbox extends View {
 
   async must(r) { if (r.code !== 0) throw new Error((r.stderr || r.stdout || "terminal command failed").trim()); }
 
-  // Delivered when the agent reacts: a dialog is left, or a message starts a turn. Codex-style drops are retried once:
-  // press Enter when the text sits in the input box, else send it again.
-  async delivered(card, plan) {
+  // Delivered when the agent reacts: a dialog is left, another dialog shows (the next question of a set), or a message
+  // starts a turn. Returns false, or `{ next }` with the dialog now on screen (null if none). Checked every ~120 ms so
+  // the next card follows the click closely. Codex-style drops are retried once: press Enter when the text sits in the
+  // input box, else send it again.
+  async delivered(card, plan, ms = 8000) {
+    const keysOnly = plan.keys && !plan.then && !plan.send;
     const reacted = async (ms) => {
-      for (let waited = 0; waited < ms; waited += 700) {
-        await this.sleep(700);
+      for (let waited = 0; waited < ms; waited += 120) {
+        await this.sleep(120);
         const a = agents().find((x) => x.address === card.address);
-        if (!a) return true; // closed: nothing left to answer
-        if (plan.keys && !plan.then && !plan.send) {
-          if (a.status !== "blocked") return true;
-          // Still blocked is also a reaction when the dialog on screen is another one (the next question of a set).
-          if (dialogId(parseDialog(await this.readScreen(card.address))) !== card.dialog) return true;
-        }
-        else if (a.status === "working") return true;
+        if (!a) return { next: null }; // closed: nothing left to answer
+        if (keysOnly) {
+          if (a.status !== "blocked") return { next: null };
+          const d = parseDialog(await this.readScreen(card.address));
+          if (dialogId(d) !== card.dialog) return { next: d ? { a, d } : null };
+        } else if (a.status === "working") return { next: null };
       }
       return false;
     };
-    if (await reacted(8000)) return true;
+    const first = await reacted(ms);
+    if (first) return first;
     const text = plan.send ?? plan.then?.send;
     if (!text) return false;
     const screen = await this.readScreen(card.address);
@@ -414,13 +439,22 @@ export default class Inbox extends View {
       col.child(h_flex().gap(8).items_center()
         .child(div().flex_1().min_w(0).truncate().font_medium().child(i.title))
         .child(div().flex_none().text_size(11).text_color(t.dim).child(since(c.at))));
+      // Where this question sits in its set: Antigravity's "2/4", or Claude Code's tabs with ✔ on the answered ones.
+      if (c.step || c.tabs?.length) col.child(h_flex().gap(8).flex_wrap().text_size(11).text_color(t.dim)
+        .when(Boolean(c.step), (el) => el.child(div().child(`${c.step.n}/${c.step.total}`)))
+        .children((c.tabs ?? []).map((tb) => div().text_color(tb.done ? t.ansi2 : t.dim).child(`${tb.done ? "✔" : "○"} ${tb.label}`))));
       col.child(div().text_size(12).text_color(t.foreground).child(c.question));
       if (c.context) col.child(div().text_size(11).text_color(t.dim).child(c.context));
       if (c.error) col.child(div().text_size(11.5).text_color(t.ansi1).child(c.error));
       // While an answer is on its way every control of the card is off; nothing is added, so nothing moves.
       const busy = c.state === "sending";
       const cbtn = (id, label, fn, primary = false) => btn(id, label, fn, primary, false, busy);
-      if (c.mode === "dialog") {
+      if (c.mode === "dialog" && c.checkbox) {
+        // Multi-select: ticking is local (instant, nothing sent); Confirm sends the boxes that differ, then moves on.
+        col.child(v_flex().mt(2).gap(4).children(c.options.map((o) => cbtn(`${c.key}-o${o.n}`, `${c.picks.includes(o.n) ? "☑" : "☐"}  ${o.label}${o.recommended ? "  ★" : ""}`,
+          (x) => { c.touched = true; c.picks = c.picks.includes(o.n) ? c.picks.filter((n) => n !== o.n) : [...c.picks, o.n]; x.notify(); }))));
+        col.child(h_flex().mt(2).child(cbtn(`${c.key}-confirm`, `Confirm (${c.picks.length})`, (x) => this.answer(c, { checked: c.picks }, x), true)));
+      } else if (c.mode === "dialog") {
         col.child(v_flex().mt(2).gap(4).children(c.options.map((o) => cbtn(`${c.key}-o${o.n}`, `${o.n}. ${o.label}${o.recommended ? "  ★" : ""}`, (x) => this.answer(c, { option: o.n }, x), o.recommended))));
       } else if (c.mode === "text") {
         c.questions.forEach((q, n) => {
@@ -447,6 +481,9 @@ export default class Inbox extends View {
           .child(cbtn(`${c.key}-send`, c.mode === "text" && c.questions.length > 1 ? `Send answers (${c.drafts.filter(Boolean).length}/${c.questions.length})` : "Send", sendText)));
       }
       col.child(h_flex().mt(2).gap(6).flex_wrap()
+        .when(Boolean(c.set), (el) => el
+          .child(cbtn(`${c.key}-back`, "‹ Back", (x) => this.answer(c, { nav: "back" }, x)))
+          .child(cbtn(`${c.key}-next`, "Next ›", (x) => this.answer(c, { nav: "next" }, x))))
         .when(c.mode === "stopped" && !c.loggedOut, (el) => el.child(cbtn(`${c.key}-continue`, "Continue", (x) => this.answer(c, { text: "continue" }, x), true)))
         .when(Boolean(c.error), (el) => el.child(cbtn(`${c.key}-retry`, "Retry", (x) => this.answer(c, c.lastAnswer, x), true)))
         .child(cbtn(`${c.key}-term`, "Open terminal", () => run("agent.focus", { terminal: c.address })))

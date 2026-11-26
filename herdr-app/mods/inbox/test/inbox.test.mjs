@@ -283,6 +283,28 @@ test("the next question of a set is another dialog, so answering one is seen as 
   assert.equal(dialogId(null), null);
 });
 
+test("a multi-select reads its boxes, drops the boxed own rows, and a toggle is not a new dialog", () => {
+  const fx = (f) => readFileSync(new URL(`./${f}`, import.meta.url), "utf8");
+  const d = parseDialog(fx("fixture-multiselect.txt"));
+  assert.equal(d.checkbox, true);
+  assert.deepEqual(d.options.map((o) => [o.n, o.label, o.checked]), [[1, "Café", true], [2, "Chá", false], [3, "Água", false]]);
+  assert.deepEqual(d.tabs, [{ label: "Bebidas", done: true }, { label: "Única", done: false }]);
+  assert.equal(d.question, "Quais bebidas você toma no dia? (marque várias, no terminal)");
+  assert.equal(dialogId(d), dialogId(parseDialog(fx("fixture-multiselect-empty.txt")))); // [ ] → [✔] is the same dialog
+  const card = { mode: "dialog", nav: "number", options: d.options };
+  assert.deepEqual(answerPlan(card, { checked: [1, 3] }), { keys: ["3", "right"] }); // Café is already ticked
+  assert.deepEqual(answerPlan(card, { checked: [2] }), { keys: ["1", "2", "right"] });
+  assert.deepEqual(answerPlan(card, { nav: "back" }), { keys: ["left"] });
+  assert.deepEqual(answerPlan(card, { nav: "next" }), { keys: ["right"] });
+});
+
+test("Antigravity's set gives its step", () => {
+  const screen = readFileSync(new URL("./fixture-agy-question.txt", import.meta.url), "utf8").replace("Question 1/1:", "Question 2/4:");
+  assert.deepEqual(parseDialog(screen).step, { n: 2, total: 4 });
+  assert.equal(parseDialog(CHOICE).step, null);
+  assert.equal(parseDialog(CHOICE).checkbox, false);
+});
+
 test("a dismissed ask hides only that card, not the same question asked again later", () => {
   const card = (at) => ({ key: "ask-t1-abc", address: "t1", kind: "DECISION", title: "s · 1", question: "Q?", at, options: [] });
   const state = { ...emptyState(), dismissed: { "ask-t1-abc": 200, "pr-x": 1 } };

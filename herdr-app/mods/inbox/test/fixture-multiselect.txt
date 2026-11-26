@@ -1,0 +1,17 @@
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☒ Bebidas  ☐ Única  ✔ Submit  →
+
+Quais bebidas você toma no dia? (marque várias, no terminal)
+
+❯ 1. [✔] Café
+         Com ou sem açúcar
+  2. [ ] Chá
+         Qualquer tipo
+  3. [ ] Água
+         Pura
+  4. [ ] Type something
+     Next
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel

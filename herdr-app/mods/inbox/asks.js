@@ -62,10 +62,15 @@ export function parseDialog(screen) {
   }
   // The last step of the several-questions dialog lists the questions with their answers ("● Q" / "→ A") above
   // Submit/Cancel: the question is whether to submit, and those pairs are the context.
+  // Where the dialog is in a set: Antigravity prints "Question 2/4", Claude Code a tab bar (☒/✔ = answered).
+  const stepM = ctx.map((l) => /^Question (\d+)\/(\d+)/i.exec(l)).find(Boolean);
+  const step = stepM ? { n: Number(stepM[1]), total: Number(stepM[2]) } : null;
+  const bar = lines.slice(0, start).reverse().find((l) => /←.*[☐☒✔].*→|[☐☒✔]\s.*[☐☒✔]\s/.test(l));
+  const tabs = bar ? [...bar.matchAll(/([☐☒✔])\s+(.+?)(?=\s+[☐☒✔]\s|\s*→|\s*$)/g)].map((m) => ({ label: m[2].trim(), done: m[1] !== "☐" })).filter((t) => !/^submit$/i.test(t.label)) : null;
   const review = ctx.findIndex((l) => /^Review your answers/i.test(l));
   if (review >= 0) {
     const pairs = ctx.slice(review + 1).filter((l) => /^[●→]/.test(l));
-    return { kind: "DECISION", question: "Submit your answers?", context: pairs.join("\n"), multi: true, options: cleanOptions(opts) };
+    return { kind: "DECISION", question: "Submit your answers?", context: pairs.join("\n"), multi: true, step, tabs, options: cleanOptions(opts) };
   }
   ctx.splice(0, Math.max(0, ctx.length - 6));
   const question = (ctx.filter((l) => /\?$|^Do you|^Allow|^Would you/i.test(l)).pop() ?? ctx[ctx.length - 1] ?? "Waiting for your choice").replace(/^Question \d+\/\d+:\s*/i, "");
@@ -75,14 +80,21 @@ export function parseDialog(screen) {
   const yesNo = real.some((o) => /^yes\b/i.test(o.label)) && real.some((o) => /^no\b/i.test(o.label));
   return {
     kind: yesNo || /permission|allow|proceed|approve/i.test(`${question} ${above}`) ? "APPROVAL" : "DECISION",
-    question, context: ctx.filter((l) => l !== question).slice(-3).join("\n"), multi, options: real,
+    question, context: ctx.filter((l) => l !== question).slice(-3).join("\n"), multi, step, tabs, options: real,
+    checkbox: real.some((o) => o.checked != null),
   };
 }
 
-// Claude Code adds its own "Type something." / "Chat about this" rows: they are not choices of the agent.
+// A multi-select option carries a box: "1. [ ] Café", "1. [✔] Café". `checked` is null for a plain option.
+const BOX = /^\[([ ✔✓xX])\]\s*/;
+
+// Claude Code adds its own "Type something." / "Chat about this" rows (boxed too in a multi-select): not the agent's choices.
 function cleanOptions(opts) {
-  const own = (o) => /^(type something|chat about this|other|write-in)\.*$/i.test(o.label.trim());
-  return opts.filter((o) => !own(o)).map((o) => ({ n: o.n, current: o.current, label: o.label.replace(/\s*\(Recommended\)\s*/i, "").trim(), recommended: /\(Recommended\)/i.test(o.label), desc: o.desc ?? "" }));
+  const own = (label) => /^(type something|chat about this|other|write-in)\.*$/i.test(label);
+  return opts.map((o) => {
+    const box = BOX.exec(o.label);
+    return { ...o, label: o.label.replace(BOX, "").trim(), checked: box ? box[1] !== " " : null };
+  }).filter((o) => !own(o.label)).map((o) => ({ n: o.n, current: o.current, checked: o.checked, label: o.label.replace(/\s*\(Recommended\)\s*/i, "").trim(), recommended: /\(Recommended\)/i.test(o.label), desc: o.desc ?? "" }));
 }
 
 /** Identity of a dialog: the same question and options give the same id, the next question of a set gives another. */
@@ -145,6 +157,13 @@ export function parseClassifier(answer) {
 /** What to send to the terminal for an answer: a key press for a dialog option, or a message. Never both. */
 export function answerPlan(card, answer) {
   if (card.mode === "dialog") {
+    // Moving inside a set of questions: both agents take the arrows (Claude Code's tabs, Antigravity's Back/Next).
+    if (answer.nav) return { keys: [answer.nav === "back" ? "left" : "right"] };
+    // A multi-select: a number key toggles that box, so press only the ones that differ from the screen, then go on.
+    if (answer.checked) {
+      const want = new Set(answer.checked);
+      return { keys: [...card.options.filter((o) => want.has(o.n) !== Boolean(o.checked)).map((o) => String(o.n)), "right"] };
+    }
     if (answer.option != null) {
       // Antigravity's dialog is moved with the arrows and confirmed with Enter; Claude Code takes the option's number.
       if (card.nav === "arrows") {
