@@ -246,10 +246,7 @@ if [ -d "${HERDR_SRC}" ]; then
   if [ -f "${HERDR_SRC}/data/herdr-chat/keys.json" ]; then
     link_herdr "${HERDR_SRC}/data/herdr-chat/keys.json" "${HERDR_HOME}/data/herdr-chat/keys.json"
   fi
-  # Single Tasks config (commands, prompts, sets, schedules); jobs/ next to it is generated.
-  if [ -f "${HERDR_SRC}/data/tasks/tasks.json" ]; then
-    link_herdr "${HERDR_SRC}/data/tasks/tasks.json" "${HERDR_HOME}/data/tasks/tasks.json"
-  fi
+  # data/tasks/tasks.json (commands, schedules) stays local to each machine: not versioned, not linked.
   # Per-mod settings written by the settings screens (Tasks, Inbox, Files...): data/<mod>/settings.json. Runtime state
   # (state.json, runs, decisions, jobs/) is not versioned.
   for settings in "${HERDR_SRC}/data/"*/settings.json; do

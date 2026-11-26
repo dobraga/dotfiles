@@ -8,3 +8,4 @@ jsconfig.json
 *.pyc
 *.bak
 skills/.trash/
+herdr-app/data/tasks/tasks.json
