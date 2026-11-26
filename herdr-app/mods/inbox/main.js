@@ -241,14 +241,20 @@ export default class Inbox extends View {
     } finally { exec("rm", ["-f", file]).catch(() => {}); }
   }
 
+  // One toast when an agent starts asking, not one per question: the next card of a set (or a Back/Next move) comes
+  // while the agent already had a card, so it is quiet. A gap of a few seconds without a card starts a new request.
   announce() {
     const cur = new Set([...this.cards.keys()]);
-    if (this.notified === null) { this.notified = cur; return; }
-    if (this.settings.notify === "off") { this.notified = cur; return; }
-    const profile = this.activeProfile();
-    for (const [k, c] of this.cards) {
-      if (!this.notified.has(k) && inProfile(c, profile)) notify({ title: `${c.kind}: ${c.title}`, body: c.question.slice(0, 160), level: c.kind === "STOPPED" ? "warning" : "info" });
+    const now = Date.now();
+    this.asking ??= new Map(); // address -> last time it had a card
+    const wasAsking = (addr) => now - (this.asking.get(addr) ?? 0) < 5000;
+    if (this.notified !== null && this.settings.notify !== "off") {
+      const profile = this.activeProfile();
+      for (const [k, c] of this.cards) {
+        if (!this.notified.has(k) && !wasAsking(c.address) && inProfile(c, profile)) notify({ title: `${c.kind}: ${c.title}`, body: c.question.slice(0, 160), level: c.kind === "STOPPED" ? "warning" : "info" });
+      }
     }
+    for (const c of this.cards.values()) this.asking.set(c.address, now);
     this.notified = cur;
   }
 
