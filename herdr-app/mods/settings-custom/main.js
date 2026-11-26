@@ -57,7 +57,7 @@ const APPEARANCES = [
 const DEFAULT_FONT = "JetBrains Mono";
 const DEFAULT_UI_FONT = "Geist";
 
-const USAGE_DEFAULTS = { style: "ring", warn: 60, critical: 90, showReset: false, showPace: true, colorMode: "threshold", showPercent: true, ctxWarn: 60, ctxCritical: 90, showComputer: true, showBranch: true, showAgents: true, showPrs: true, showSystem: true, showCpu: true, showMem: true, showHerdr: true, showDisk: true, showGpu: true, showNet: true, showUsage: true, showMedia: true, showProcs: true, showSpark: true, sysInterval: 3 };
+const USAGE_DEFAULTS = { style: "ring", warn: 60, critical: 90, showReset: false, showPace: true, colorMode: "threshold", showPercent: true, ctxWarn: 60, ctxCritical: 90, showComputer: true, showBranch: true, showAgents: true, showPrs: true, showSystem: true, showCpu: true, showMem: true, showHerdr: true, showDisk: true, showGpu: true, showNet: true, showUsage: true, showMedia: true, showProcs: true, showSpark: true, sysInterval: 3, diskInterval: 10, diskTop: 3 };
 const BAR_ITEMS = ["showComputer", "showBranch", "showAgents", "showPrs", "showSystem", "showCpu", "showMem", "showHerdr", "showDisk", "showGpu", "showNet", "showUsage", "showMedia", "showProcs", "showSpark"];
 
 export default class SettingsCustom extends View {
@@ -176,6 +176,8 @@ export default class SettingsCustom extends View {
       if (p?.showPercent === false) next.showPercent = false;
       for (const k of BAR_ITEMS) if (p?.[k] === false) next[k] = false;
       if ([2, 3, 5, 10].includes(Number(p?.sysInterval))) next.sysInterval = Number(p.sysInterval);
+      if ([5, 10, 30, 60].includes(Number(p?.diskInterval))) next.diskInterval = Number(p.diskInterval);
+      if ([3, 5, 10].includes(Number(p?.diskTop))) next.diskTop = Number(p.diskTop);
       if (Number.isFinite(Number(p?.ctxWarn))) next.ctxWarn = Number(p.ctxWarn);
       if (Number.isFinite(Number(p?.ctxCritical))) next.ctxCritical = Number(p.ctxCritical);
     } catch {}
@@ -221,6 +223,8 @@ export default class SettingsCustom extends View {
       h_flex().w_full().gap(24).children(cells.slice(i * 2, i * 2 + 2).map((c) => div().flex_1().min_w(0).child(c)))));
     const sub = (text) => div().pt(18).pb(2).text_size(12.5).font_semibold().text_color(t.muted).child(text);
     const intervals = h_flex().gap(6).children([2, 3, 5, 10].map((n) => pill(`st-sys-int-${n}`, st.sysInterval === n, `${n}s`, (cx) => this.updateUsageSettings({ sysInterval: n }, cx))));
+    const diskIntervals = h_flex().gap(6).children([5, 10, 30, 60].map((n) => pill(`st-disk-int-${n}`, st.diskInterval === n, `${n}m`, (cx) => this.updateUsageSettings({ diskInterval: n }, cx))));
+    const diskTops = h_flex().gap(6).children([3, 5, 10].map((n) => pill(`st-disk-top-${n}`, st.diskTop === n, String(n), (cx) => this.updateUsageSettings({ diskTop: n }, cx))));
     return v_flex()
       .w_full()
       .child(this.heading(t, "Status bar"))
@@ -257,6 +261,8 @@ export default class SettingsCustom extends View {
         this.row(t, "Refresh every", "How often the bar samples the system while the popup is closed (the popup samples faster while open).", intervals),
         tg("st-sys-procs", "showProcs", "Top processes in popup", "List the top 5 processes by CPU and memory. Runs ps only while the popup is open."),
         tg("st-sys-spark", "showSpark", "Sparklines in popup", "Short history graphs for CPU and network."),
+        this.row(t, "Folders listed", "How many of the biggest folders the Disk card shows.", diskTops),
+        this.row(t, "Folder scan every", "How often the Disk card re-measures the biggest folders in your home (slow du, about 40s). Runs only while the popup is open, independent of the refresh above.", diskIntervals),
       ))
       .when(Boolean(this.usageError), (el) => el.child(div().pt(12).text_size(12.5).text_color(t.ansi1).child(this.usageError)))
       .child(div().pt(12).text_size(12).text_color(t.dim).child(`Settings file: ${this.usageSettingsFile()} · applied on the next usage refresh`));

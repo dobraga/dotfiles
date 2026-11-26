@@ -268,3 +268,27 @@ export async function readDetail({ mac, exec, readTextFile }) {
   }
   return { at: Date.now(), procs: topProcs(parsePs(ps)), mem, swap, disk: parseDfBytes(df), cores: Number(cores) || null, load: parseLoad(up) };
 }
+
+/** `du -kx -d1` output -> [{ path, kb }] sorted by size, without the scanned root itself. */
+export function parseDu(text, root) {
+  const out = [];
+  for (const l of (text ?? "").split("\n")) {
+    const m = /^(\d+)\s+(.+?)\s*$/.exec(l);
+    if (m && m[2] !== root) out.push({ path: m[2], kb: +m[1] });
+  }
+  return out.sort((a, b) => b.kb - a.kb);
+}
+
+/** Biggest folders under $HOME, with ~/Library (usually the biggest, not actionable as one line) split into its own children. Slow (tens of seconds): call rarely. */
+export async function readDiskTop({ exec }, limit = 10) {
+  const run = (dir) => sh(exec, "sh", ["-c", `du -kx -d1 "${dir}" 2>/dev/null; true`], 300000);
+  const [home, lib] = await Promise.all([run("$HOME"), run("$HOME/Library")]);
+  const root = (await sh(exec, "sh", ["-c", 'printf %s "$HOME"'], 2000)) ?? "";
+  if (!home || !root) return null;
+  const libPath = `${root}/Library`;
+  const items = [...parseDu(home, root).filter((r) => r.path !== libPath || !lib), ...parseDu(lib, libPath)]
+    .sort((a, b) => b.kb - a.kb)
+    .slice(0, limit)
+    .map((r) => ({ name: r.path.startsWith(root) ? `~${r.path.slice(root.length)}` : r.path, bytes: r.kb * 1024 }));
+  return { at: Date.now(), items };
+}

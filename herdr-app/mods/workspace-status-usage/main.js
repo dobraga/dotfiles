@@ -28,7 +28,7 @@ import { cfg, applySettings, usageColor } from "./usage-settings.js";
 import { mediaCard } from "./media-card.js";
 import { readPlayers, pickActive, signature, sendCommand, pillLabel } from "./media.js";
 import { resolveFocusedAgent } from "./agent-focus.js";
-import { readStats, readDetail, pushHist, fmtRate, pad2 } from "./sysstats.js";
+import { readStats, readDetail, readDiskTop, pushHist, fmtRate, pad2 } from "./sysstats.js";
 import { sysCard } from "./sys-card.js";
 
 function findNode(node, id) {
@@ -507,9 +507,27 @@ export default class WorkspaceStatusUsage extends View {
     for (const k of ["open", "pinned", "cardHovered"]) setShared(`sys.${k}`, false);
   }
 
+  // Folder sizes need a slow `du`: run it only while the popup is open, at most once per cfg.diskInterval minutes, and keep the last result meanwhile.
+  scanDisk(cx) {
+    if (this.diskBusy || checking() || Date.now() - (this.diskAt ?? 0) < cfg.diskInterval * 60000) return;
+    this.diskBusy = true;
+    this.diskAt = Date.now();
+    setShared("sys.diskScanning", true);
+    cx.spawn(async () => {
+      try {
+        const top = await readDiskTop({ exec });
+        if (top) setShared("sys.diskTop", top);
+      } catch {} finally {
+        this.diskBusy = false;
+        setShared("sys.diskScanning", false);
+      }
+    });
+  }
+
   pollSys(cx) {
     if (!cfg.showSystem || this.sysBusy || checking()) return;
     const open = Boolean(shared("sys.open"));
+    if (open && cfg.showDisk && cfg.showProcs) this.scanDisk(cx);
     if (Date.now() - (this.sysPrev?.at ?? 0) < (open ? 1400 : cfg.sysInterval * 1000 - 100)) return;
     this.sysBusy = true;
     cx.spawn(async () => {
@@ -568,6 +586,8 @@ export default class WorkspaceStatusUsage extends View {
             s,
             hist: shared("sys.hist"),
             detail: shared("sys.detail"),
+            diskTop: shared("sys.diskTop"),
+            diskScanning: Boolean(shared("sys.diskScanning")),
             pinned: Boolean(shared("sys.pinned")),
             onHover: (hovered, cx) => {
               setShared("sys.cardHovered", hovered);

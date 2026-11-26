@@ -49,7 +49,7 @@ function formatAge(ts) {
 }
 
 // Pure element builder for the system card; rendered as the content of an anchored Popup.
-export function sysCard({ t, s, hist, detail, pinned, onHover, onMove, onDismiss }) {
+export function sysCard({ t, s, hist, detail, diskTop, diskScanning, pinned, onHover, onMove, onDismiss }) {
   const stop = (_e, cx) => cx.stop_propagation();
   const memPct = s.mem;
   const cards = [];
@@ -84,7 +84,11 @@ export function sysCard({ t, s, hist, detail, pinned, onHover, onMove, onDismiss
     body.child(section(t)
       .child(head("disk", "Disk", detail?.disk ? `${fmtBytes(detail.disk.used)} / ${fmtBytes(detail.disk.total)}` : `${s.disk ?? "–"}%`, t, s.disk == null ? t.dim : pctColor(s.disk, t)))
       .child(bar(s.disk, t))
-      .when(Boolean(detail?.disk), (el) => el.child(div().text_size(10.5).text_color(t.dim).child(`${fmtBytes(detail.disk.total - detail.disk.used)} free`))));
+      .when(Boolean(detail?.disk), (el) => el.child(div().text_size(10.5).text_color(t.dim).child(`${fmtBytes(detail.disk.total - detail.disk.used)} free`)))
+      .when(cfg.showProcs && Boolean(diskTop?.items?.length), (el) => el.child(v_flex().gap(2).children(diskTop.items.slice(0, cfg.diskTop).map((d, i) => h_flex().id(`dk-${i}`).gap(6).text_size(11)
+        .child(div().flex_1().truncate().text_color(t.muted).child(d.name))
+        .child(div().text_color(t.dim).child(fmtBytes(d.bytes)))))))
+      .when(cfg.showProcs && Boolean(diskScanning) && !diskTop, (el) => el.child(div().text_size(10.5).text_color(t.dim).child("Scanning folders…"))));
   }
   if (cfg.showGpu && s.gpu) {
     const g = s.gpu;
