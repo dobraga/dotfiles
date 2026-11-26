@@ -104,7 +104,7 @@ async function sh(exec, cmd, args, timeout = 4000) {
 }
 
 /** Reads one snapshot. `prev` is the previous snapshot's raw counters (null on first call). */
-export async function readStats({ mac, exec, readTextFile }, prev) {
+export async function readStats({ mac, exec, readTextFile, herdr: wantHerdr = true }, prev) {
   const now = Date.now();
   let cpuRaw = null;
   let cpu = null;
@@ -145,10 +145,11 @@ export async function readStats({ mac, exec, readTextFile }, prev) {
     disk = parseDf(df);
     net = nd ? parseProcNetDev(nd) : null;
   }
+  const herdr = !wantHerdr ? null : parseHerdrTree(await sh(exec, "ps", mac ? ["-Aeo", "pid,ppid,rss,comm,args"] : ["-eo", "pid,ppid,rss,comm,args"]));
   const dt = prev?.net && net ? (now - prev.at) / 1000 : 0;
   const down = dt > 0 ? Math.max(0, (net.rx - prev.net.rx) / dt) : 0;
   const up = dt > 0 ? Math.max(0, (net.tx - prev.net.tx) / dt) : 0;
-  return { at: now, cpuRaw, net: net ?? prev?.net ?? null, cpu, mem, disk, down, up, gpu, gpuMissing };
+  return { at: now, cpuRaw, net: net ?? prev?.net ?? null, cpu, mem, disk, down, up, gpu, gpuMissing, herdr };
 }
 
 // ---- history (sparklines) ----
@@ -214,6 +215,35 @@ export function parseMeminfoBytes(text) {
 export function parseLoad(text) {
   const m = /load averages?:\s*([\d.]+)[, ]+([\d.]+)[, ]+([\d.]+)/.exec(text ?? "");
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+
+/** `ps -eo pid,ppid,rss,comm,args` -> memory of Herdr (herdr-app/herdr-core) and everything it runs, by kind. */
+export function parseHerdrTree(text) {
+  const rows = [];
+  for (const l of (text ?? "").split("\n").slice(1)) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s*(.*)$/.exec(l);
+    if (m) rows.push({ pid: +m[1], ppid: +m[2], kb: +m[3], comm: m[4].split("/").pop(), args: m[5] });
+  }
+  const isHerdr = (r) => /^herdr-(app|core)$/.test(r.comm);
+  const kids = new Map();
+  for (const r of rows) kids.set(r.ppid, [...(kids.get(r.ppid) ?? []), r]);
+  const byPid = new Map(rows.map((r) => [r.pid, r]));
+  const roots = rows.filter((r) => isHerdr(r) && !isHerdr(byPid.get(r.ppid) ?? {}));
+  const kinds = { claude: { label: "Claude sessions", n: 0, kb: 0 }, agent: { label: "Other agents", n: 0, kb: 0 }, chat: { label: "Chat hosts", n: 0, kb: 0 }, herdr: { label: "Herdr app", n: 0, kb: 0 }, shell: { label: "Shells", n: 0, kb: 0 }, other: { label: "Other", n: 0, kb: 0 } };
+  // An agent's whole subtree (its bun/node helpers) counts under it.
+  const kindOf = (r) => /^\d+\.\d+\.\d+$/.test(r.comm) || r.comm === "claude" ? "claude"
+    : /^(agy|codex|pi|gemini|opencode)$/.test(r.comm) ? "agent"
+    : /herdr-chat\/host/.test(r.args) ? "chat" : isHerdr(r) ? "herdr" : /^-?(zsh|bash|fish|sh)$/.test(r.comm) ? "shell" : "other";
+  const walk = (r, inherited) => {
+    const k = inherited ?? kindOf(r);
+    const own = inherited ?? (k === "claude" || k === "agent" ? k : null);
+    kinds[k].kb += r.kb;
+    if (!inherited) kinds[k].n += 1;
+    for (const c of kids.get(r.pid) ?? []) walk(c, own);
+  };
+  roots.forEach((r) => walk(r, null));
+  const total = Object.values(kinds).reduce((a, k) => a + k.kb, 0) * 1024;
+  return roots.length ? { total, kinds: Object.values(kinds).filter((k) => k.kb > 0).map((k) => ({ ...k, bytes: k.kb * 1024 })).sort((a, b) => b.bytes - a.bytes) } : null;
 }
 
 export async function readDetail({ mac, exec, readTextFile }) {

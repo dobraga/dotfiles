@@ -8,8 +8,8 @@ const pctColor = (v, t) => (v >= cfg.critical ? t.ansi1 : v >= cfg.warn ? t.bloc
 
 function bar(pct, t) {
   const v = Math.max(0, Math.min(100, Math.round(pct ?? 0)));
-  return div().h(5).w(310).rounded(3).bg(t.raised).overflow_hidden()
-    .child(div().h_full().w(Math.round((310 * v) / 100)).bg(pctColor(v, t)).rounded(3));
+  return div().h(5).w_full().rounded(3).bg(t.raised).overflow_hidden()
+    .child(div().h_full().w(Math.round((260 * v) / 100)).bg(pctColor(v, t)).rounded(3));
 }
 
 // Area graph, newest on the right. `max` fixes the scale (100 for CPU/GPU); omit to autoscale (network).
@@ -18,7 +18,7 @@ function spark(values, t, color, max) {
   const top = max ?? Math.max(1, ...values);
   const H = 28;
   const pad = Array(Math.max(0, HIST_LEN - values.length)).fill(null);
-  return h_flex().h(H).w(310).items_end().overflow_hidden()
+  return h_flex().h(H).w_full().items_end().overflow_hidden()
     .children([...pad, ...values].map((v, i) => {
       const px = v == null ? 0 : Math.max(2, Math.round((H * Math.min(v, top)) / top));
       return v_flex().id(`sp-${i}`).flex_1().h(px).min_w(0)
@@ -52,7 +52,8 @@ function formatAge(ts) {
 export function sysCard({ t, s, hist, detail, pinned, onHover, onMove, onDismiss }) {
   const stop = (_e, cx) => cx.stop_propagation();
   const memPct = s.mem;
-  const body = v_flex().p(12).gap(12);
+  const cards = [];
+  const body = { child: (c) => cards.push(c) };
   if (cfg.showCpu) {
     body.child(section(t)
       .child(head("cpu", "CPU", s.cpu == null ? "–" : `${pad2(s.cpu)}%`, t, s.cpu == null ? t.dim : pctColor(s.cpu, t)))
@@ -67,6 +68,17 @@ export function sysCard({ t, s, hist, detail, pinned, onHover, onMove, onDismiss
       .child(cfg.showSpark ? spark(hist?.mem ?? [], t, memPct == null ? t.dim : pctColor(memPct, t), 100) : bar(memPct, t))
       .when(Boolean(detail?.swap?.total), (el) => el.child(div().text_size(10.5).text_color(t.dim).child(`Swap ${fmtBytes(detail.swap.used)} / ${fmtBytes(detail.swap.total)}`)))
       .when(cfg.showProcs && Boolean(detail?.procs), (el) => el.child(procs(detail.procs.mem, "mem", t))));
+  }
+  if (cfg.showHerdr && s.herdr) {
+    const h = s.herdr;
+    const ofRam = detail?.mem?.total ? ` · ${Math.round((h.total / detail.mem.total) * 100)}% of RAM` : "";
+    body.child(section(t).id("sys-herdr")
+      .tooltip(h.kinds.map((k) => `${k.label} (${k.n}): ${fmtBytes(k.bytes)}`).join("\n"))
+      .child(head("herdr", "Herdr", fmtBytes(h.total), t))
+      .child(v_flex().gap(2).children(h.kinds.slice(0, 4).map((k, i) => h_flex().id(`hk-${i}`).gap(6).text_size(11)
+        .child(div().flex_1().truncate().text_color(t.muted).child(`${k.label} · ${k.n}`))
+        .child(div().text_color(t.dim).child(fmtBytes(k.bytes))))))
+      .when(Boolean(ofRam), (el) => el.child(div().text_size(10.5).text_color(t.dim).child(`Herdr and everything it runs${ofRam}`))));
   }
   if (cfg.showDisk) {
     body.child(section(t)
@@ -89,7 +101,7 @@ export function sysCard({ t, s, hist, detail, pinned, onHover, onMove, onDismiss
   }
 
   return v_flex().id("sys-card-hit").pb(12).on_hover(onHover).on_mouse_move(onMove).child(
-    v_flex().id("sys-card").w(356).rounded(10).bg(t.popover).border_1().border_color(t.border).shadow_lg()
+    v_flex().id("sys-card").w(Math.min(cards.length, 2) * 282 + 12 * (Math.min(cards.length, 2) + 1) + 2).rounded(10).bg(t.popover).border_1().border_color(t.border).shadow_lg()
       .text_color(t.foreground).text_size(12)
       .child(h_flex().h(36).px(12).gap(8).items_center().border_b(1).border_color(t.border)
         .child(div().flex_1().font_semibold().text_size(12.5).child("System"))
@@ -97,7 +109,9 @@ export function sysCard({ t, s, hist, detail, pinned, onHover, onMove, onDismiss
         .child(div().id("sys-close").p(4).rounded(5).cursor_pointer().text_color(t.dim)
           .hover((x) => x.bg(t.hover).text_color(t.foreground))
           .on_mouse_down("left", stop).on_click(onDismiss).child(svg("mods/pane/close.svg").size(12))))
-      .child(body)
+      // Two sections per line, each column the same width.
+      .child(v_flex().p(12).gap(12).children(Array.from({ length: Math.ceil(cards.length / 2) }, (_, i) =>
+        h_flex().gap(12).items_start().children(cards.slice(i * 2, i * 2 + 2).map((c) => div().w(282).flex_none().child(c))))))
       .child(h_flex().px(12).pb(10).items_center().text_size(10.5).text_color(t.dim)
         .child(div().flex_1().child(`Updated ${formatAge(s.at)}`))
         .child("Click to pin")),

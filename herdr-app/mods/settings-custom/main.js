@@ -57,8 +57,8 @@ const APPEARANCES = [
 const DEFAULT_FONT = "JetBrains Mono";
 const DEFAULT_UI_FONT = "Geist";
 
-const USAGE_DEFAULTS = { style: "ring", warn: 60, critical: 90, showReset: false, showPace: true, colorMode: "threshold", showPercent: true, ctxWarn: 60, ctxCritical: 90, showComputer: true, showBranch: true, showAgents: true, showPrs: true, showSystem: true, showCpu: true, showMem: true, showDisk: true, showGpu: true, showNet: true, showUsage: true, showMedia: true, showProcs: true, showSpark: true, sysInterval: 3 };
-const BAR_ITEMS = ["showComputer", "showBranch", "showAgents", "showPrs", "showSystem", "showCpu", "showMem", "showDisk", "showGpu", "showNet", "showUsage", "showMedia", "showProcs", "showSpark"];
+const USAGE_DEFAULTS = { style: "ring", warn: 60, critical: 90, showReset: false, showPace: true, colorMode: "threshold", showPercent: true, ctxWarn: 60, ctxCritical: 90, showComputer: true, showBranch: true, showAgents: true, showPrs: true, showSystem: true, showCpu: true, showMem: true, showHerdr: true, showDisk: true, showGpu: true, showNet: true, showUsage: true, showMedia: true, showProcs: true, showSpark: true, sysInterval: 3 };
+const BAR_ITEMS = ["showComputer", "showBranch", "showAgents", "showPrs", "showSystem", "showCpu", "showMem", "showHerdr", "showDisk", "showGpu", "showNet", "showUsage", "showMedia", "showProcs", "showSpark"];
 
 export default class SettingsCustom extends View {
   init(_props, cx) {
@@ -216,6 +216,9 @@ export default class SettingsCustom extends View {
     const set = (patch) => (_e, cx) => this.updateUsageSettings(patch, cx);
     const tg = (id, key, title, about) => this.row(t, title, about, this.toggle(t, id, st[key], set({ [key]: !st[key] })));
     const group = (on, ...rows) => v_flex().w_full().opacity(on ? 1 : 0.45).children(rows);
+    // Two toggles per line: short metric switches read better as a grid than a long list.
+    const grid2 = (...cells) => v_flex().w_full().children(Array.from({ length: Math.ceil(cells.length / 2) }, (_, i) =>
+      h_flex().w_full().gap(24).children(cells.slice(i * 2, i * 2 + 2).map((c) => div().flex_1().min_w(0).child(c)))));
     const sub = (text) => div().pt(18).pb(2).text_size(12.5).font_semibold().text_color(t.muted).child(text);
     const intervals = h_flex().gap(6).children([2, 3, 5, 10].map((n) => pill(`st-sys-int-${n}`, st.sysInterval === n, `${n}s`, (cx) => this.updateUsageSettings({ sysInterval: n }, cx))));
     return v_flex()
@@ -243,11 +246,14 @@ export default class SettingsCustom extends View {
       ))
       .child(sub("System monitor"))
       .child(group(st.showSystem,
-        tg("st-sys-cpu", "showCpu", "CPU", "CPU usage %."),
-        tg("st-sys-mem", "showMem", "Memory", "Memory in use %."),
-        tg("st-sys-disk", "showDisk", "Disk", "Root disk used %."),
-        tg("st-sys-gpu", "showGpu", "GPU", "NVIDIA GPU usage % and VRAM (needs nvidia-smi; hidden otherwise)."),
-        tg("st-sys-net", "showNet", "Network", "Download / upload bytes per second."),
+        grid2(
+          tg("st-sys-cpu", "showCpu", "CPU", "CPU usage %."),
+          tg("st-sys-mem", "showMem", "Memory", "Memory in use %."),
+          tg("st-sys-herdr", "showHerdr", "Herdr", "Memory used by Herdr and what it runs, in GB."),
+          tg("st-sys-disk", "showDisk", "Disk", "Root disk used %."),
+          tg("st-sys-gpu", "showGpu", "GPU", "NVIDIA usage % and VRAM (needs nvidia-smi)."),
+          tg("st-sys-net", "showNet", "Network", "Download / upload per second."),
+        ),
         this.row(t, "Refresh every", "How often the bar samples the system while the popup is closed (the popup samples faster while open).", intervals),
         tg("st-sys-procs", "showProcs", "Top processes in popup", "List the top 5 processes by CPU and memory. Runs ps only while the popup is open."),
         tg("st-sys-spark", "showSpark", "Sparklines in popup", "Short history graphs for CPU and network."),

@@ -514,7 +514,7 @@ export default class WorkspaceStatusUsage extends View {
     this.sysBusy = true;
     cx.spawn(async () => {
       try {
-        const env = { mac: window()?.platform === "macos", exec, readTextFile };
+        const env = { mac: window()?.platform === "macos", exec, readTextFile, herdr: cfg.showHerdr };
         const [s, detail] = await Promise.all([readStats(env, this.sysPrev), open && cfg.showProcs ? readDetail(env) : null]);
         this.sysPrev = s;
         this.sysHist = pushHist(this.sysHist, s);
@@ -554,6 +554,8 @@ export default class WorkspaceStatusUsage extends View {
       })
       .when(cfg.showCpu, (el) => el.child(pct("cpu", s.cpu)))
       .when(cfg.showMem, (el) => el.child(pct("memory", s.mem)))
+      .when(cfg.showHerdr && Boolean(s.herdr), (el) => el.child(h_flex().gap(5).items_center().child(icon("herdr"))
+        .child(div().w(34).flex_none().text_right().child(`${(s.herdr.total / 2 ** 30).toFixed(1)}G`))))
       .when(cfg.showDisk, (el) => el.child(pct("disk", s.disk)))
       .when(cfg.showGpu && Boolean(s.gpu), (el) => el.child(pct("gpu", s.gpu.util)))
       .when(cfg.showNet, (el) => el.child(h_flex().gap(5).items_center().child(icon("net")).child(div().w(34).flex_none().text_right().child(fmtRate(s.down))).child("/").child(div().w(34).flex_none().text_right().child(fmtRate(s.up)))));
@@ -1011,7 +1013,7 @@ export default class WorkspaceStatusUsage extends View {
             ),
           ),
       ))
-      .when(cfg.showSystem && Boolean(sys) && (cfg.showCpu || cfg.showMem || cfg.showDisk || cfg.showGpu || cfg.showNet), (el) => el.child(this.sysPill(sys, t)))
+      .when(cfg.showSystem && Boolean(sys) && (cfg.showCpu || cfg.showMem || cfg.showHerdr || cfg.showDisk || cfg.showGpu || cfg.showNet), (el) => el.child(this.sysPill(sys, t)))
       .child(div().flex_1())
       .when(cfg.showMedia && Boolean(media), (el) => el.child(this.mediaPill(media, t)))
       .child(div().id("palette").text_color(t.dim).cursor_pointer().on_click(() => run("app.palette")).child(this.hint()));
