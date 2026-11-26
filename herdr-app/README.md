@@ -7,7 +7,7 @@ My [Herdr](https://herdr.dev) setup: the `main-folders` layout, custom and forke
 | Path | What it is |
 |------|-----------|
 | `layouts/main-folders.json` | The layout: sidebar (brand, spaces, tabs, agents, usage) plus the workspace area and its side panels |
-| `mods/` | Custom mods and forks of the shipped mods (list below) |
+| mods | Live in their own repo, [dobraga/herdr-mods](https://github.com/dobraga/herdr-mods) (cloned to `~/src/herdr-mods` by `install_dotfiles.sh`); list below |
 | `keys.json` | Keybindings (`alt-1..9` spaces, `ctrl-1..9` tabs, `alt-h/j/k/l` panes, zoom) |
 | `settings.json` | App settings (font, zoom, appearance) |
 | `data/<mod>/settings.json` | Per-mod settings (Files, Inbox, Tasks, Usage) |
@@ -57,7 +57,8 @@ Each item below is independent. Install the ones you want. `SRC` and `DST` are t
 Mods are linked one folder at a time. Link only the ones you want:
 
 ```sh
-ln -sfn "$SRC/mods/<name>" "$DST/mods/<name>"
+git clone https://github.com/dobraga/herdr-mods.git ~/src/herdr-mods   # once
+ln -sfn ~/src/herdr-mods/mods/<name> "$DST/mods/<name>"
 ```
 
 | Mod | What it gives you | Also needs |
@@ -140,7 +141,7 @@ If the app doesn't pick up the mods, quit and reopen it.
 ## Check that it worked
 
 ```sh
-ls -l ~/.config/herdr-app/mods | head        # entries should be symlinks into ~/src/dotfiles/herdr-app/mods
+ls -l ~/.config/herdr-app/mods | head        # entries should be symlinks into ~/src/herdr-mods/mods
 ls -l ~/.config/herdr-app/layouts            # main-folders.json -> ~/src/dotfiles/herdr-app/layouts/
 herdr-app/check-forks.sh                     # run from the repo root; "all forks up to date" is the healthy result
 ```
@@ -153,7 +154,7 @@ Forked mods are copies of mods that ship with Herdr. After a Herdr update, check
 
 ```sh
 herdr-app/check-forks.sh                 # lists forks whose upstream mod changed
-# diff ~/.config/herdr-app/mods/<upstream>/main.js against herdr-app/mods/<fork>/main.js, merge what you want, then:
+# diff ~/.config/herdr-app/mods/<upstream>/main.js against ~/src/herdr-mods/mods/<fork>/main.js, merge what you want, then:
 herdr-app/check-forks.sh --sync <fork>   # or: --sync all
 ```
 
@@ -168,4 +169,4 @@ herdr-app/check-forks.sh --sync <fork>   # or: --sync all
 | Icons show as boxes | Set your terminal font to FiraCode Nerd Font |
 | Want the original back | Restore from `~/.config/herdr-app/.backups/` |
 
-Mods are plain JavaScript (`mods/<name>/main.js` plus `mod.json`). Edit them in this repo.
+Mods are plain JavaScript (`mods/<name>/main.js` plus `mod.json`). Edit them in `~/src/herdr-mods` (tests: `bun test tests/`; previews: `tools/crop.py`).

@@ -15,7 +15,7 @@ if args[:1] == ["--sync"]:
     print("synced:", ", ".join(names)); sys.exit(0)
 stale = [(n, f["upstream"]) for n, f in forks.items() if inst.get(f["upstream"], {}).get("main.js") != f["upstream_main_js"]]
 for n, u in stale:
-    print(f"herdr fork '{n}' is out of date: shipped mod '{u}' changed. Diff ~/.config/herdr-app/mods/{u}/main.js against herdr-app/mods/{n}/main.js, merge, then: herdr-app/check-forks.sh --sync {n}")
+    print(f"herdr fork '{n}' is out of date: shipped mod '{u}' changed. Diff ~/.config/herdr-app/mods/{u}/main.js against ~/src/herdr-mods/mods/{n}/main.js, merge, then: herdr-app/check-forks.sh --sync {n}")
 print("all forks up to date" if not stale else "") if not stale else None
 sys.exit(1 if stale else 0)
 PY
