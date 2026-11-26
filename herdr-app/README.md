@@ -13,7 +13,6 @@ My [Herdr](https://herdr.dev) setup: the `main-folders` layout, custom and forke
 | `data/<mod>/settings.json` | Per-mod settings (Files, Inbox, Tasks, Usage) |
 | `data/tasks/tasks.json` | Tasks panel config: commands, prompts, sets, schedules |
 | `data/herdr-chat/keys.json` | Keys for herdr-chat |
-| `forks.json`, `check-forks.sh` | Tracks which shipped mod each fork was cloned from |
 
 ### Mods
 
@@ -143,20 +142,14 @@ If the app doesn't pick up the mods, quit and reopen it.
 ```sh
 ls -l ~/.config/herdr-app/mods | head        # entries should be symlinks into ~/src/herdr-mods/mods
 ls -l ~/.config/herdr-app/layouts            # main-folders.json -> ~/src/dotfiles/herdr-app/layouts/
-herdr-app/check-forks.sh                     # run from the repo root; "all forks up to date" is the healthy result
+~/src/herdr-mods/tools/check-forks.sh        # "all forks up to date" is the healthy result
 ```
 
 Inside the app you should see the folder-style spaces and tabs, the usage card in the sidebar, and the Files, Changes, PRs, Loadout, Tasks and Inbox panels.
 
 ## Keeping forks in sync
 
-Forked mods are copies of mods that ship with Herdr. After a Herdr update, check for drift:
-
-```sh
-herdr-app/check-forks.sh                 # lists forks whose upstream mod changed
-# diff ~/.config/herdr-app/mods/<upstream>/main.js against ~/src/herdr-mods/mods/<fork>/main.js, merge what you want, then:
-herdr-app/check-forks.sh --sync <fork>   # or: --sync all
-```
+Forks and their checker live in [herdr-mods](https://github.com/dobraga/herdr-mods#keeping-forks-in-sync): `tools/check-forks.sh`.
 
 ## Troubleshooting
 
