@@ -1202,7 +1202,7 @@ export default class FileView extends View {
               delete slots[this.slotId];
               setShared("file-view.slots", slots);
             }
-            run("tab.close", { id: this.tabId });
+            run("tab.close", { id: this.tabId, confirmed: true });
             return;
           }
           this.openWithNotice = `Opened with ${appLabel}`;

@@ -271,7 +271,7 @@ export default class TabsFolders extends View {
       const was = this.lastActiveBySpace.get(sp.id);
       if (cur) this.lastActiveBySpace.set(sp.id, cur);
       if (shared("files-tabs.settings")?.closePreview === false || !was || !cur || was === cur || !sp.tabs?.some((tb) => tb.id === was)) continue;
-      if (Object.values(shared("file-view.slots") ?? {}).some((sl) => sl?.tabId === was && sl.preview)) run("tab.close", { id: was });
+      if (Object.values(shared("file-view.slots") ?? {}).some((sl) => sl?.tabId === was && sl.preview)) run("tab.close", { id: was, confirmed: true });
     }
     const active = shown.findIndex((e) => e.space.active && e.tab.active);
     const selected = shown[active]?.tab?.id;
@@ -372,7 +372,10 @@ export default class TabsFolders extends View {
         .child(iconBox)
         .child(div().max_w(Number(shared("files-tabs.settings")?.tabMaxWidth) || 170).truncate().child(c.zoomed ? `${name} Z` : name))
         .when(isPreview, el => el.child(div().px(4).rounded(3).bg(t.hover).text_size(9.5).text_color(t.dim).child("preview")))
-        .when(isActive, el => el.child(div().id(`close-${c.id}`).text_color(t.dim).on_mouse_down("left", stop).on_click((_e, cx) => { cx.stop_propagation(); run("tab.close", { id: c.id }); }).child(svg("mods/pane/close.svg").size(12))));
+        // Every tab has its ✕, so switching tabs doesn't change their widths.
+        .child(div().id(`close-${c.id}`).size(12).flex_none().rounded(3).text_color(t.dim).hover(s => s.text_color(t.foreground))
+          .on_mouse_down("left", stop).on_click((_e, cx) => { cx.stop_propagation(); run("tab.close", { id: c.id, confirmed: true }); })
+          .child(svg("mods/pane/close.svg").size(12)));
     };
     const root = layout(), sidebar = find(root, "sidebar"), w = window();
     // Old saved rails and a dragged-narrow sidebar can be smaller than the window buttons.

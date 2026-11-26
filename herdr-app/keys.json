@@ -51,7 +51,7 @@
     "ctrl-,": "mod.open:settings-custom",
     "ctrl-shift-o": "pane.split:right",
     "ctrl-shift-e": "pane.split:down",
-    "ctrl-shift-w": "tab.close",
+    "ctrl-shift-w": {"command": "tab.close", "args": {"confirmed": true}},
     "ctrl-shift-x": "pane.close",
     "ctrl-shift-z": "pane.zoom",
     "ctrl-shift-l": "layout.switch",
