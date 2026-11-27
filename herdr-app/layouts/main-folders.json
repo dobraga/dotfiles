@@ -207,7 +207,7 @@
             "px": 28
           },
           "content": {
-            "mod": "dg-workspace-status"
+            "mod": "dg-status-bar"
           }
         }
       ]

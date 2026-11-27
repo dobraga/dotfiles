@@ -15,8 +15,8 @@ My [Herdr](https://herdr.dev) setup: the `main-folders` layout, custom and forke
 
 ### Mods
 
-- **Forks of shipped mods:** `dg-spaces` (spaces), `dg-tabs` (tabs), `dg-files`, `dg-changes`, `dg-workspace-status`, `dg-workspace-chrome`, `dg-new-menu`, `dg-agents`
-- **Mine:** `dg-prs` (pull requests), `dg-tasks`, `dg-inbox`, `dg-loadout`, `dg-file-view`, `dg-file-picker`, `media-card`, `dg-settings`, `dg-desktop-toast`
+- **Forks of shipped mods:** `dg-spaces` (spaces), `dg-tabs` (tabs), `dg-files`, `dg-changes`, `dg-status-bar`, `dg-workspace-chrome`, `dg-new-menu`, `dg-agents`
+- **Mine:** `dg-prs` (pull requests), `dg-tasks`, `dg-inbox`, `dg-loadout`, `dg-file-view`, `dg-file-picker`, `dg-new-tab`, `dg-settings`, `dg-desktop-toast`
 
 ## Requirements
 
@@ -67,8 +67,8 @@ ln -sfn ~/src/herdr-mods/mods/<name> "$DST/mods/<name>"
 | `dg-prs` | Pull request panel | `gh` (logged in with `gh auth login`), `git` |
 | `dg-tasks` | Tasks panel | `herdr-tasks` scheduler (below) |
 | `dg-inbox`, `dg-loadout` | Inbox, and a read-only list of skills and MCP servers | Nothing |
-| `dg-workspace-status` | Sidebar usage card | Claude Code, Codex or Antigravity (`agy`) CLIs for their usage |
-| `media-card`, `dg-desktop-toast`, `dg-settings` | Media card, desktop notifications, custom Settings screen | Nothing |
+| `dg-status-bar` | Status bar: usage, media card, system card | Claude Code, Codex or Antigravity (`agy`) CLIs for their usage |
+| `dg-new-tab`, `dg-desktop-toast`, `dg-settings` | Ctrl+T new-tab launcher, desktop notifications, custom Settings screen | Nothing |
 
 The layout loads mods by name, so a panel whose mod isn't linked will be empty.
 
