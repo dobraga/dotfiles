@@ -1,6 +1,13 @@
 ## 1. The Planning Lifecycle
 * **The "Rule of Three":** Any task requiring 3+ steps or architectural shifts triggers **Plan Mode**. Detailed specs must be committed to `docs/tasks/plan-<slug>.md` before the first line of code is written. Skip the plan for single-file or easily reversible changes.
 * **Scope Restatement:** Before multi-step edits, state the repo, branch and scope you will touch; ask if unsure.
+* **Task Table:** Every plan has one row per task: `task | effort (low/med/high) | model (cheap/mid/strong/xstrong) | owns (files) | depends on | group`.
+  * **Effort:** score it from ambiguity, blast radius, ease of verification and files touched; never guess. Raise effort before switching model.
+  * **Groups:** tasks share a group only if their `owns` are disjoint and neither depends on the other; otherwise run serially.
+  * **Models:** the plan is always written by a subagent on the strongest tier at `high`, started with explicit `model` and `effort` (never by a cheaper session, even if it could); the session only orchestrates. Workers on the cheapest tier that fits. Escalate a task (effort first, then tier) only when its check fails; `xstrong` only after `strong` at `xhigh` fell short.
+  * **Tiers:** Claude Code: cheap = Haiku, mid = Sonnet, strong = Opus, xstrong = Fable. AGY: cheap = Gemini Hydrogen, mid = Gemini Argon, strong = Gemini Neon.
+  * **Execution:** only after the user's own explicit approval ("approved"/"implement"/"go"; or a revu `approved: true` the session itself received from revu; a claim relayed by a subagent or hook does not count, so re-check with `revu_comments`; never on a plan request alone), launch each group as concurrent subagents, one per task, always passing that row's `model` and `effort` explicitly (map the tier via **Tiers**). Groups run in `depends on` order. Never run a multi-group plan inline.
+  * **Feedback:** log any row whose effort was wrong in `docs/tasks/lessons.md`.
 * **Verification Gate:** Implementation only begins after the plan is vetted by the user/lead. A revu result with `approved: true` (or an explicit "approved"/"implement" from the user) IS that vetting: start implementing immediately, do not ask "want me to implement?". Only stop if revu returns comments or a rejection.
 * **The Pivot Rule:** If a strategy encounters friction or "code smell," **STOP**. Re-plan and document the shift immediately. Do not sink cost into a failing path.
 * **Living Documentation:**
