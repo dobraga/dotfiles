@@ -67,7 +67,7 @@ ln -sfn ~/src/herdr-mods/mods/<name> "$DST/mods/<name>"
 | `dg-prs` | Pull request panel | `gh` (logged in with `gh auth login`), `git` |
 | `dg-tasks` | Tasks panel | `herdr-tasks` scheduler (below) |
 | `dg-inbox`, `dg-loadout` | Inbox, and a read-only list of skills and MCP servers | Nothing |
-| `dg-status-bar` | Status bar: usage, media card, system card | Claude Code, Codex or Antigravity (`agy`) CLIs for their usage |
+| `dg-status-bar` | Status bar: usage, media card, system card (CPU, memory, disk, network, battery) | Claude Code, Codex or Antigravity (`agy`) CLIs for their usage |
 | `dg-new-tab`, `dg-desktop-toast`, `dg-settings` | Ctrl+T new-tab launcher, desktop notifications, custom Settings screen | Nothing |
 
 The layout loads mods by name, so a panel whose mod isn't linked will be empty.
