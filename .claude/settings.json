@@ -28,7 +28,9 @@
       "Bash(gh api:*)",
       "Bash(python -c:*)",
       "Bash(python3 -c:*)",
-      "mcp__plugin_claude-mem_mcp-search__search"
+      "mcp__plugin_claude-mem_mcp-search__search",
+      "Agent",
+      "Bash(bun test:*)"
     ],
     "deny": [
       "Read(./**/.env)"
@@ -38,6 +40,16 @@
     ],
     "defaultMode": "auto",
     "blockReadsOutsideWorkingDirectories": false
+  },
+  "autoMode": {
+    "allow": [
+      "$defaults",
+      "Launching a subagent that implements one task of an already approved docs/tasks/plan-*.md is authorized: it may edit only the files that task owns, run the project's tests (e.g. bun test), and must not commit or push."
+    ],
+    "environment": [
+      "$defaults",
+      "The user runs a plan-then-execute workflow: a planner subagent writes docs/tasks/plan-<slug>.md, the user approves it in revu, then one subagent per task executes it."
+    ]
   },
   "hooks": {
     "PreToolUse": [

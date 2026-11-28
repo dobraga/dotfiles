@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-f=$(jq -r '.tool_input.file_path // empty')
+in=$(cat)
+# subagents (e.g. the plan writer) must not open revu: the orchestrating session reviews the plan itself
+[ -n "$(printf '%s' "$in" | jq -r '.agent_id // empty')" ] && exit 0
+f=$(printf '%s' "$in" | jq -r '.tool_input.file_path // empty')
 case "$f" in
   */docs/tasks/plan-*.md) ;;
   *) exit 0 ;;
